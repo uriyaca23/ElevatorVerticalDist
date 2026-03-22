@@ -1,0 +1,50 @@
+{
+  "advio-07": [
+    {
+      "start_time": 17.00,
+      "end_time": 26.00,
+      "direction": "up",
+      "height_diff": 5.60
+    },
+    {
+      "start_time": 36.50,
+      "end_time": 41.50,
+      "direction": "up",
+      "height_diff": 4.53
+    },
+    {
+      "start_time": 50.50,
+      "end_time": 57.50,
+      "direction": "up",
+      "height_diff": 4.52
+    },
+    {
+      "start_time": 66.00,
+      "end_time": 73.50,
+      "direction": "up",
+      "height_diff": 4.52
+    },
+    {
+      "start_time": 81.50,
+      "end_time": 86.50,
+      "direction": "up",
+      "height_diff": 4.46
+    }
+  ],
+  "advio-14": [
+    {
+      "start_time": 18.50,
+      "end_time": 35.50,
+      "direction": "up",
+      "height_diff": 7.52
+    }
+  ],
+  "advio-18": [
+    {
+      "start_time": 73.51,
+      "end_time": 83.01,
+      "direction": "up",
+      "height_diff": 7.81
+    }
+  ]
+}

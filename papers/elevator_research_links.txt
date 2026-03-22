@@ -1,0 +1,17 @@
+Research on Elevator Height Estimation using Accelerometers
+
+1. Introduction and Principle:
+Estimating vertical distance using an accelerometer involves numerical double integration (acceleration -> velocity -> position). Gravity bias must be removed.
+
+2. Challenges:
+- Drift: Even tiny sensor noise or bias estimation errors accumulate exponentially during double integration.
+- Noise: External vibrations and sensor inaccuracies.
+
+3. Advanced Alternatives:
+- ZUPT (Zero Velocity Update): Detecting when the elevator has stopped to reset velocity to zero and correct the previous integrated velocity drift backward.
+- Kalman Filtering: Fusing state transitions to maintain constraints (like $v=0$ when $a \approx 0$).
+
+Extracted from search sources:
+- AIP: https://aip.scitation.org/
+- ResearchGate: Estimating vertical distance traveled by an elevator...
+- MakersPortal: Python implementation of numerical integration for sensors.
