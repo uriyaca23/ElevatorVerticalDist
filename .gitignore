@@ -1,9 +1,14 @@
 ADVIO/
 ADVIO_repo/
+datasets/
+tmp/
 __pycache__/
 .pytest_cache/
 venv/
 .env
 example/
 metadata/ci_plots/
+docs/figures_v4/
+docs/figures/
+docs/four_comparisons*
 ~$*.docx

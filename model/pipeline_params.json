@@ -1,0 +1,37 @@
+{
+  "fs": 100,
+  "conformal_interval": 3.619083308855723,
+  "conformal_residuals": [
+    1.84046,
+    0.321774,
+    0.458935,
+    0.386572,
+    2.265011,
+    0.244404,
+    1.718174,
+    1.244333,
+    1.535788,
+    0.804145,
+    1.006898,
+    0.693273,
+    0.181985,
+    0.623919,
+    0.027419,
+    0.060772,
+    3.598036,
+    1.051371,
+    3.997933
+  ],
+  "params": {
+    "var_window_sec": 1.5,
+    "var_thresh": 1.5,
+    "min_ride_sec": 4.0,
+    "min_displacement_m": 1.0,
+    "gap_sec": 2.0,
+    "pre_window_sec": 5.0,
+    "post_window_sec": 5.0,
+    "max_implausible_m": 100.0,
+    "mag_cross_ratio": 1.8,
+    "signed_mag_max_m": 15.0
+  }
+}
