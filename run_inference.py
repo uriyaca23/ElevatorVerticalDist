@@ -25,8 +25,17 @@ from pipeline import ElevatorHeightPipeline
 
 
 def load_accelerometer_csv(path, fs=100):
-    """Load accelerometer data from CSV file."""
+    """Load accelerometer data from CSV file.
+    
+    Handles standard CSV with headers, headerless 4-column CSV (time_ms, x, y, z),
+    and various column name conventions.
+    """
     df = pd.read_csv(path)
+    
+    # Detect headerless CSV: if all column names look numeric, re-read with names
+    all_numeric = all(_is_numeric(str(c)) for c in df.columns)
+    if all_numeric and len(df.columns) == 4:
+        df = pd.read_csv(path, names=["time_ms", "x", "y", "z"])
     
     # Flexible column name matching
     col_map = {}
@@ -38,8 +47,9 @@ def load_accelerometer_csv(path, fs=100):
             col_map['acc_y'] = col
         elif cl in ('acc_z', 'accelerometerz', 'az', 'z'):
             col_map['acc_z'] = col
-        elif cl in ('time', 'time_sec', 'timestamp', 't'):
+        elif cl in ('time', 'time_sec', 'timestamp', 't', 'time_ms'):
             col_map['time'] = col
+            col_map['time_key'] = cl
     
     if 'acc_x' not in col_map or 'acc_y' not in col_map or 'acc_z' not in col_map:
         raise ValueError(
@@ -52,10 +62,21 @@ def load_accelerometer_csv(path, fs=100):
     
     if 'time' in col_map:
         t = df[col_map['time']].values.astype(float)
+        # Convert ms to sec if needed
+        if col_map.get('time_key') == 'time_ms' or (len(t) > 1 and np.median(np.diff(t)) > 1):
+            t = t / 1000.0
         if len(t) > 1:
             fs = 1.0 / np.median(np.diff(t))
     
     return acc_x, acc_y, acc_z, fs
+
+
+def _is_numeric(s):
+    try:
+        float(s)
+        return True
+    except (ValueError, TypeError):
+        return False
 
 
 def main():
@@ -70,6 +91,10 @@ def main():
                         help="Sampling frequency in Hz (default: 100)")
     parser.add_argument("--model-dir", default="model/",
                         help="Directory containing pipeline parameters")
+    parser.add_argument("--segments", "-s", default=None,
+                        help="Path to JSON file with pre-computed segments "
+                             "(list of {start_time, end_time}). "
+                             "Skips detection, runs quality+estimation only.")
     parser.add_argument("--accepted-only", action="store_true",
                         help="Output only accepted (non-rejected) rides")
     parser.add_argument("--verbose", "-v", action="store_true",
@@ -91,19 +116,34 @@ def main():
         duration = len(acc_x) / fs
         print(f"  {len(acc_x)} samples, {fs:.0f} Hz, {duration:.1f}s duration")
     
+    # Load user-provided segments if specified
+    segments = None
+    if args.segments:
+        if args.verbose:
+            print(f"Loading segments from {args.segments}...")
+        with open(args.segments, "r") as f:
+            segments = json.load(f)
+        if args.verbose:
+            print(f"  {len(segments)} segments provided (skipping detection)")
+    
     # Process
     if args.verbose:
         print("Running pipeline...")
     
-    if args.accepted_only:
+    if segments:
+        results = pipeline.process_segments(acc_x, acc_y, acc_z, segments, fs=fs)
+        if args.accepted_only:
+            results = [r for r in results if r['accepted']]
+    elif args.accepted_only:
         results = pipeline.process_accepted(acc_x, acc_y, acc_z, fs=fs)
     else:
         results = pipeline.process(acc_x, acc_y, acc_z, fs=fs)
     
     # Clean output (remove non-serializable items)
     output = []
+    skip_keys = {'quality_features', 'pos_curve'}
     for r in results:
-        out = {k: v for k, v in r.items() if k != 'quality_features'}
+        out = {k: v for k, v in r.items() if k not in skip_keys}
         # Add simplified quality features
         if 'quality_features' in r:
             out['quality_features'] = {

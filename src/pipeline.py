@@ -592,6 +592,222 @@ class ElevatorHeightPipeline:
         all_results = self.process(acc_x, acc_y, acc_z, fs=fs)
         return [r for r in all_results if r['accepted']]
 
+    def process_segments(self, acc_x, acc_y, acc_z, segments, fs=None):
+        """
+        Process user-provided elevator segments (skip detection).
+
+        Runs Stage 2 (quality filter) + Stage 3 (height estimation) on each
+        user-provided segment. The detection stage is bypassed entirely.
+
+        Args:
+            acc_x, acc_y, acc_z: 1D numpy arrays of the full recording (m/s²)
+            segments: list of dicts with keys:
+                - 'start_time': float (seconds into the recording)
+                - 'end_time': float (seconds into the recording)
+            fs: Sampling frequency in Hz (default: self.fs)
+
+        Returns:
+            List of dicts, same format as process():
+            {
+                'start_time', 'end_time', 'height_estimate',
+                'confidence_interval_90', 'method', 'accepted',
+                'reject_reason', 'quality_features', 'quality_score'
+            }
+        """
+        fs = fs or self.fs
+        acc_x = np.asarray(acc_x, dtype=float)
+        acc_y = np.asarray(acc_y, dtype=float)
+        acc_z = np.asarray(acc_z, dtype=float)
+
+        n = len(acc_x)
+        t = np.arange(n) / fs
+
+        pre_win = int(fs * self.params['pre_window_sec'])
+        post_win = int(fs * self.params['post_window_sec'])
+
+        results = []
+        for seg in segments:
+            si = int(round(seg['start_time'] * fs))
+            ei = int(round(seg['end_time'] * fs))
+            si = max(0, min(si, n - 1))
+            ei = max(si + 1, min(ei, n))
+
+            ride_ax = acc_x[si:ei]
+            ride_ay = acc_y[si:ei]
+            ride_az = acc_z[si:ei]
+            ride_t = t[si:ei]
+
+            # Context windows
+            pre_s = max(0, si - pre_win)
+            post_e = min(n, ei + post_win)
+            pre_ax = acc_x[pre_s:si]
+            pre_ay = acc_y[pre_s:si]
+            pre_az = acc_z[pre_s:si]
+            post_ax = acc_x[ei:post_e]
+            post_ay = acc_y[ei:post_e]
+            post_az = acc_z[ei:post_e]
+
+            # Stage 2: Quality assessment
+            qa = assess_segment_quality(
+                ride_ax, ride_ay, ride_az,
+                pre_ax, pre_ay, pre_az,
+                post_ax, post_ay, post_az,
+                fs=fs
+            )
+
+            # Stage 3: Height estimation
+            est = estimate_height_robust(
+                ride_t, ride_ax, ride_ay, ride_az,
+                pre_ax, pre_ay, pre_az,
+                post_ax, post_ay, post_az,
+                fs=fs
+            )
+
+            # Post-estimation consistency checks
+            h_mag = est['all_estimates'].get('magnitude')
+            h_gp = est['all_estimates'].get('gravity_proj')
+            method = est['method']
+
+            if abs(est['height']) > self.params['max_implausible_m']:
+                qa['accept'] = False
+                qa['reject_reason'] = f'Estimate implausible: {est["height"]:.1f}m'
+
+            if qa['accept'] and h_mag is not None and h_gp is not None:
+                if abs(h_mag) > 1.0:
+                    ratio = abs(h_gp) / abs(h_mag)
+                    threshold = self.params['mag_cross_ratio']
+                    if ratio > threshold:
+                        qa['accept'] = False
+                        qa['reject_reason'] = f'Projection/magnitude disagree: ratio={ratio:.1f}'
+
+            if (qa['accept'] and method == 'signed_mag' and
+                    abs(est['height']) > self.params['signed_mag_max_m']):
+                qa['accept'] = False
+                qa['reject_reason'] = f'Signed-mag unreliable for large estimate ({est["height"]:.1f}m)'
+
+            results.append({
+                'start_time': float(seg['start_time']),
+                'end_time': float(seg['end_time']),
+                'height_estimate': float(est['height']),
+                'confidence_interval_90': self.conformal_interval,
+                'method': method,
+                'accepted': qa['accept'],
+                'reject_reason': qa.get('reject_reason', ''),
+                'quality_features': qa.get('features', {}),
+                'quality_score': qa.get('quality_score', 0),
+                'pos_curve': est.get('pos', np.zeros(ei - si)),
+                'all_estimates': est.get('all_estimates', {}),
+            })
+
+        return results
+
+    def process_segments_plot(self, acc_x, acc_y, acc_z, segments, fs=None,
+                              save_path=None, show=False, title=None):
+        """
+        Process user-provided segments and generate a visualization figure.
+
+        Args:
+            acc_x, acc_y, acc_z: 1D numpy arrays (m/s²)
+            segments: list of dicts with 'start_time' and 'end_time'
+            fs: Sampling frequency (Hz)
+            save_path: Path to save figure (PNG)
+            show: If True, call plt.show()
+            title: Optional figure title
+
+        Returns:
+            (results, fig): Tuple of (list of result dicts, matplotlib Figure)
+        """
+        import matplotlib
+        if save_path and not show:
+            matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        from matplotlib.lines import Line2D
+
+        fs = fs or self.fs
+        acc_x = np.asarray(acc_x, dtype=float)
+        acc_y = np.asarray(acc_y, dtype=float)
+        acc_z = np.asarray(acc_z, dtype=float)
+
+        results = self.process_segments(acc_x, acc_y, acc_z, segments, fs=fs)
+        n = len(acc_x)
+        t = np.arange(n) / fs
+        mag = np.sqrt(acc_x**2 + acc_y**2 + acc_z**2)
+
+        fig, axes = plt.subplots(2, 1, figsize=(16, 8),
+                                 gridspec_kw={'height_ratios': [2, 1.2]})
+
+        # --- Top panel: Accelerometer magnitude + user segments ---
+        axes[0].plot(t, mag, linewidth=0.2, color='#7f8c8d', alpha=0.7)
+        axes[0].axhline(9.81, color='red', linewidth=0.5, alpha=0.2)
+        axes[0].set_ylabel('|a| (m/s²)')
+        axes[0].set_xlabel('Time (s)')
+        axes[0].set_ylim(
+            max(0, np.percentile(mag, 0.5) - 2),
+            np.percentile(mag, 99.5) + 2
+        )
+
+        for i, r in enumerate(results):
+            color = '#27ae60' if r['accepted'] else '#e74c3c'
+            axes[0].axvspan(r['start_time'], r['end_time'],
+                            alpha=0.2, color=color, zorder=2)
+            mid_t = (r['start_time'] + r['end_time']) / 2
+            axes[0].text(mid_t, axes[0].get_ylim()[1] * 0.95,
+                         str(i + 1), ha='center', fontsize=7,
+                         fontweight='bold', color=color)
+
+        axes[0].set_title(title or 'User-Provided Elevator Segments', fontsize=13)
+        axes[0].legend(handles=[
+            Line2D([0], [0], color='#27ae60', lw=8, alpha=0.3, label='Accepted'),
+            Line2D([0], [0], color='#e74c3c', lw=8, alpha=0.3, label='Rejected'),
+        ], fontsize=9, loc='upper right')
+
+        # --- Bottom panel: Height estimates bar chart ---
+        if results:
+            ride_labels = []
+            heights = []
+            colors = []
+            for i, r in enumerate(results):
+                ride_labels.append(f"R{i+1}\n{r['start_time']:.0f}–{r['end_time']:.0f}s")
+                heights.append(r['height_estimate'])
+                colors.append('#27ae60' if r['accepted'] else '#e74c3c')
+
+            x_pos = range(len(ride_labels))
+            bars = axes[1].bar(x_pos, heights, color=colors,
+                               edgecolor='white', width=0.7, alpha=0.85)
+
+            ci = self.conformal_interval
+            if ci:
+                for i, r in enumerate(results):
+                    if r['accepted']:
+                        axes[1].errorbar(i, r['height_estimate'], yerr=ci,
+                                         color='#2c3e50', capsize=4,
+                                         capthick=1.5, linewidth=1.5, zorder=5)
+
+            for i, (h, bar) in enumerate(zip(heights, bars)):
+                va = 'bottom' if h >= 0 else 'top'
+                offset = 0.3 if h >= 0 else -0.3
+                axes[1].text(i, h + offset, f'{h:+.1f}m',
+                             ha='center', va=va, fontsize=8, fontweight='bold')
+
+            axes[1].set_xticks(x_pos)
+            axes[1].set_xticklabels(ride_labels, fontsize=7)
+            axes[1].set_ylabel('Height Difference (m)')
+            axes[1].axhline(0, color='gray', linewidth=0.5)
+
+            ci_label = f'  (whiskers = ±{ci:.1f}m 90% CI)' if ci else ''
+            axes[1].set_title(f'Height Estimates per Segment{ci_label}', fontsize=11)
+        else:
+            axes[1].text(0.5, 0.5, 'No segments provided',
+                         transform=axes[1].transAxes, ha='center', fontsize=14)
+
+        fig.tight_layout()
+        if save_path:
+            fig.savefig(save_path, bbox_inches='tight', dpi=150)
+        if show:
+            plt.show()
+
+        return results, fig
+
     def process_plot(self, acc_x, acc_y, acc_z, fs=None,
                      save_path=None, show=False, title=None):
         """
