@@ -1,7 +1,6 @@
 import numpy as np
-import pytest
 import sys
-import os
+
 
 # Ensure modules can be imported
 sys.path.append(r"c:\Users\uriya\PycharmProjects\ElevatorVerticalDist")
