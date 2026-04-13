@@ -1,0 +1,23 @@
+{
+  "pressure_filter": {
+    "velocity_threshold": 0.15,
+    "smooth_window_sec": 3.0,
+    "min_duration_sec": 3.0,
+    "min_height_diff_m": 2.0,
+    "merge_gap_sec": 6.0,
+    "pad_sec": 1.0
+  },
+  "acc_only": {
+    "fs_hz": 100.0,
+    "window_sec": 4.0,
+    "overlap": 0.5,
+    "band_elev_hz": [0.05, 0.5],
+    "band_walk_hz": [1.2, 2.8],
+    "enter_threshold": 0.7,
+    "exit_threshold": 0.3,
+    "min_duration_sec": 3.0,
+    "merge_gap_sec": 6.0,
+    "pad_sec": 1.0,
+    "alpha": 0.1
+  }
+}
