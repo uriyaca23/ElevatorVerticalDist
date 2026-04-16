@@ -427,4 +427,187 @@ floor; dragging the right edge of the first span and adding a new
 \todo{drop an actual edit-example screenshot at
 \texttt{docs/latex/figures/gt\_editor\_edit\_example.png}.}
 
+\section{Segmentation \& Detection}
+\label{sec:segmentation-detection}
+
+This section covers how a continuous accelerometer (and, when
+available, barometer) stream is sliced into elevator-ride segments. We
+begin with the underlying physics of an elevator ride --- a four-
+parameter motion model that every detector in this work eventually
+reduces to --- and then describe the concrete detectors built on top.
+
+\subsection{Background: Elevator Kinematics}
+\label{sec:elevator-kinematics}
+
+Before describing any detector we lay down the physics of an elevator
+ride, because the same four parameters reappear in every algorithm we
+use later. Modern passenger elevators are commanded by a
+\emph{jerk-limited motion profile} so that passengers experience a
+smooth, bounded change of acceleration (see, e.g., the ride-comfort
+specifications summarised in ISO~18738 and the manufacturer
+literature aggregated in \texttt{papers/elevator\_research\_links.txt}).
+The drive obeys, in order, the constraints
+\begin{equation}
+  \big|\dddot{h}(t)\big| \le j_{\max}, \qquad
+  \big|\ddot{h}(t)\big| \le a_{\max}, \qquad
+  \big|\dot{h}(t)\big|  \le v_{\max},
+  \label{eq:elevator-bounds}
+\end{equation}
+where $h(t)$ is the cabin altitude, $\dot{h}=v$ the vertical velocity,
+$\ddot{h}=a$ the acceleration measured by the phone (after gravity
+removal), and $\dddot{h}=j$ the jerk. Typical commercial values are
+$j_{\max}\!\approx\!1.0\,\text{--}\,1.6$~m/s$^3$,
+$a_{\max}\!\approx\!0.8\,\text{--}\,1.5$~m/s$^2$, and
+$v_{\max}\!\approx\!1.0\,\text{--}\,2.5$~m/s for low- and mid-rise
+buildings (CIBSE Guide~D, 2020).
+
+\paragraph{The seven-segment S-curve.} Saturating each constraint in
+turn yields the canonical S-curve velocity profile (Figure
+\ref{fig:elevator-kinematics}). The ride decomposes into up to seven
+phases:
+\[
+\underbrace{j=+j_{\max}}_{\text{1: jerk up}}\;\;
+\underbrace{j=0}_{\text{2: cruise }a_{\max}}\;\;
+\underbrace{j=-j_{\max}}_{\text{3: jerk down}}\;\;
+\underbrace{a=0}_{\text{4: cruise }v_{\max}}\;\;
+\underbrace{j=-j_{\max}}_{\text{5: jerk down}}\;\;
+\underbrace{j=0}_{\text{6: cruise }-a_{\max}}\;\;
+\underbrace{j=+j_{\max}}_{\text{7: jerk up}}.
+\]
+Phase~4 collapses to zero length on short hops where the cabin never
+reaches $v_{\max}$, in which case the profile is ``triangular'' in
+acceleration; longer rides are ``trapezoidal''. The constituent
+durations follow from \eqref{eq:elevator-bounds}:
+\begin{equation}
+  T_j = \frac{a_{\max}}{j_{\max}}, \qquad
+  T_a = \max\!\left(0,\; \frac{v_{\max}}{a_{\max}} - T_j\right), \qquad
+  T_v = \max\!\left(0,\; \frac{H}{v_{\max}} - T_j - T_a\right),
+  \label{eq:elevator-durations}
+\end{equation}
+where $H$ is the floor-to-floor height. The total ride length is
+$T_{\text{ride}} = 4 T_j + 2 T_a + T_v$.
+
+\paragraph{What the phone measures.} The phone's gravity-projected
+linear acceleration $a(t)$ traces \emph{exactly} the bracketed
+acceleration in \eqref{eq:elevator-bounds}, modulo sensor noise and
+projection error. Three model facts are worth highlighting because the
+detector exploits them:
+
+\begin{itemize}
+  \item During the four jerk phases ($T_j$ each), $a(t)$ is linear in
+    time with slope $\pm j_{\max}$. In the velocity domain this
+    integrates to a quadratic --- the parabolic ``ramp shoulders'' the
+    user can see in Figures \ref{fig:elevator-kinematics} and
+    \ref{fig:elevator-allrides}.
+  \item The signed area under the first acceleration lobe equals the
+    peak velocity reached:
+    \begin{equation}
+      v_{\text{peak}} \;=\; \int_{0}^{2T_j+T_a}\! a(t)\,dt
+      \;=\; a_{\max}\,(T_j + T_a)
+      \;=\; \min\!\left(v_{\max},\; \sqrt{a_{\max} H}\,\right)
+      \quad\text{for short rides.}
+      \label{eq:elevator-vpeak}
+    \end{equation}
+    The second (deceleration) lobe has equal magnitude and opposite
+    sign, so $\int_{0}^{T_{\text{ride}}}\! a(t)\,dt = 0$. This is the
+    fundamental reason ZUPT works: the cabin starts and ends at rest,
+    so any non-zero terminal velocity in the integrated signal is
+    drift, not motion.
+  \item The temporal gap between the centroids of the two acceleration
+    lobes is the cruise time $T_v + 2T_a + 2T_j \approx H/v_{\max}$
+    when $v_{\max}$ is reached. \textbf{Hence the inter-pulse spacing
+    is a direct, scale-free measurement of the floor-to-floor height
+    $H$.}
+\end{itemize}
+
+\paragraph{The four-parameter ride model.} Combining
+\eqref{eq:elevator-bounds}--\eqref{eq:elevator-vpeak}, every ride is
+parameterised by the tuple
+\begin{equation}
+  \boxed{\theta_{\text{ride}} \;=\; \big(j_{\max},\; a_{\max},\; v_{\max},\; H\big)}\;,
+  \label{eq:elevator-params}
+\end{equation}
+with $j_{\max}, a_{\max}, v_{\max}$ being properties of the elevator
+machine (constant within a building) and $H$ being the only ride-
+specific quantity. Once $\theta_{\text{ride}}$ is fixed, the ideal
+acceleration template is fully determined:
+\begin{equation}
+  a_\theta(t) =
+  \begin{cases}
+    +j_{\max}\, t, & 0 \le t < T_j, \\
+    +a_{\max}, & T_j \le t < T_j + T_a, \\
+    +a_{\max} - j_{\max}(t - T_j - T_a), & T_j + T_a \le t < 2T_j + T_a, \\
+    0, & 2T_j + T_a \le t < 2T_j + T_a + T_v, \\
+    \text{(mirror of phases 1--3, with opposite sign)}, & \text{otherwise.}
+  \end{cases}
+  \label{eq:elevator-template}
+\end{equation}
+Velocity $v_\theta(t) = \int_0^t a_\theta(\tau)\,d\tau$ and
+displacement $h_\theta(t) = \int_0^t v_\theta(\tau)\,d\tau$ are then
+piecewise cubic and quartic respectively. Equation
+\eqref{eq:elevator-template} is the synthetic template used by the
+DTW-based detector (Algorithm~2 in \texttt{papers/algorithm2\_dtw.md})
+and by the matched-filter pulse detector in
+\texttt{template\_match/scripts/acc\_pulse\_detect.py}.
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{elevator_kinematics_up_example.png}
+    \caption{Ride going \emph{up}: positive accel lobe first, negative
+      lobe at landing. The shaded interval is the GT label.}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{elevator_kinematics_down_example.png}
+    \caption{Ride going \emph{down}: lobes are mirrored. The vertical
+      velocity panel makes the trapezoidal $v(t)$ profile clear.}
+  \end{subfigure}
+  \caption{Two single-ride zooms drawn from
+    \texttt{eyalyakir\_milleniumHotel\_SamsungSM-S911B\_15-04-2026\_exp3}.
+    Top of each subfigure: gravity-removed $|a|$. Bottom: the smoothed
+    vertical velocity $v_z$ recovered by integration. The two
+    parabolic lobes in $|a|$ are the jerk-limited acceleration and
+    deceleration phases of \eqref{eq:elevator-template}; the area
+    under each lobe equals $v_{\text{peak}}$ via
+    \eqref{eq:elevator-vpeak}, and the gap between lobe centroids
+    measures the cruise time $T_v$, which is proportional to the
+    inter-floor height $H$.}
+  \label{fig:elevator-kinematics}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{elevator_kinematics_all_rides.png}
+  \caption{All twelve GT rides from the same experiment, on a common
+    layout. The repeating two-lobe ``$+a$ then $-a$'' structure
+    predicted by \eqref{eq:elevator-template} is unmistakable across
+    rides of varying duration. Wider lobe spacing corresponds to
+    larger $H$ (more floors traversed), while the lobe \emph{height}
+    saturates at the building's $a_{\max}$ regardless of $H$.}
+  \label{fig:elevator-allrides}
+\end{figure}
+
+\paragraph{Implications for detection.} The four-parameter model
+\eqref{eq:elevator-params} gives every detector built on top concrete
+physical knobs:
+\begin{itemize}
+  \item State-machine detectors (Algorithm~1 in
+    \texttt{papers/algorithm1\_state\_machine.md}) threshold on
+    $a_{\max}$ to find lobe entries and on a pulse-duration floor of
+    $\sim T_j$.
+  \item DTW-based template matching (Algorithm~2 in
+    \texttt{papers/algorithm2\_dtw.md}) generates one template per
+    plausible $\theta_{\text{ride}}$ and warps it.
+  \item Velocity-integral / ZUPT detectors (Algorithm~3 in
+    \texttt{papers/algorithm3\_integral\_zupt.md}) check the integral
+    identity $\int a\,dt = 0$ and the lower bound
+    $\int|v|\,dt \gtrsim H_{\min}$.
+\end{itemize}
+The barometer-based GT detector described in
+\S\ref{sec:barometer-algorithm} uses none of this --- it works in
+altitude space directly --- but the kinematic decomposition above is
+what makes its output a sensible reference signal for the
+accelerometer-based algorithms that follow.
+
 \end{document}
