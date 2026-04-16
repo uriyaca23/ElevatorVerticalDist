@@ -1,24 +1,57 @@
 """Constants shared by the loader submodules.
 
-File layout and filenames used by both the legacy `rawData/` flow and the
-newer `structuredData/` pipeline live here so the other modules stay lean.
+Project layout:
+
+    src/data/
+    ├── rawData/                        (raw sensor logs, grouped per experiment)
+    │   └── <exp_name>/
+    │       ├── sensorLog_*.txt
+    │       ├── metadata.txt
+    │       └── forBarometer/           (optional: secondary device for barometer)
+    ├── structuredData/                 (processed, CSV-based artifacts)
+    │   ├── metadata.csv                (index of all experiments)
+    │   └── data/<exp_name>/
+    │       ├── <SENSOR>.csv            (one per sensor present in the raw log)
+    │       ├── gt.csv                  (ground-truth intervals)
+    │       ├── metadata.csv            (single row, same schema as the index)
+    │       ├── baramoshka.csv          (floor → height map, populated later)
+    │       └── forBarometer_alignment.png  (diagnostic plot if applicable)
+    └── (achive)/                       (legacy experimenter folders, left as-is)
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+
 # Parent is `src/data/` (this file lives at `src/data/loader/constants.py`).
-DATA_ROOT = Path(__file__).resolve().parents[1] / "rawData"
-STRUCTURED_ROOT = Path(__file__).resolve().parents[1] / "structuredData"
+_DATA_DIR = Path(__file__).resolve().parents[1]
 
-# Filenames produced / consumed by the pipeline loader.
-PIPELINE_CACHE_FILENAME = "pipeline_data.pkl"
-FOR_BAROMETER_SUBDIR = "forBarometer"
-FOR_BAROMETER_PLOT_FILENAME = "forBarometer_alignment.png"
+# Raw sensor logs (1 folder per experiment, sensorLog_*.txt + metadata.txt).
+RAW_DATA_ROOT = _DATA_DIR / "rawData"
+
+# Processed CSV artifacts.
+STRUCTURED_ROOT = _DATA_DIR / "structuredData"
+STRUCTURED_DATA_DIR = STRUCTURED_ROOT / "data"
+STRUCTURED_INDEX_CSV = STRUCTURED_ROOT / "metadata.csv"
+
+# Legacy rawData path (renamed by the user). Kept pointing to something sane so
+# `load_experimenter('eyal')` etc. don't crash outright; callers will still get
+# FileNotFoundError if that directory doesn't exist.
+DATA_ROOT = _DATA_DIR / "(achive)"
+
+# Per-experiment filenames (raw side).
 METADATA_FILENAME = "metadata.txt"
+FOR_BAROMETER_SUBDIR = "forBarometer"
 
-# Filenames produced by the legacy GT flow.
+# Per-experiment filenames (structured side).
+GT_CSV = "gt.csv"
+METADATA_CSV = "metadata.csv"
+BAROMOSHKA_CSV = "baramoshka.csv"
+FOR_BAROMETER_PLOT_FILENAME = "forBarometer_alignment.png"
+
+# Legacy filenames produced by `loadDataWithGT` — kept so legacy code still
+# knows where to write, even though the new flow doesn't use them.
 GT_FILENAME = "data_with_gt.xlsx"
 GT_PLOT_FILENAME = "gt_plot.png"
 
@@ -34,3 +67,11 @@ SENSOR_COLUMNS: dict[str, list[str]] = {
     "PRS":    ["pressure"],
     "GPS":    ["lat", "lon", "alt"],
 }
+
+# CSV schemas.
+METADATA_COLUMNS = [
+    "exp_name", "experimenter", "phone", "location",
+    "description", "date", "time",
+]
+BAROMOSHKA_COLUMNS = ["floor", "height"]
+GT_COLUMNS = ["start_ms", "end_ms", "type", "description"]
