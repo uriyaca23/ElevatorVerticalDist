@@ -28,7 +28,6 @@ import numpy as np
 import pandas as pd
 from scipy.signal import butter, sosfiltfilt
 
-from .._calibration import IVAP, load_edge_conformal
 
 VELOCITY_LPF_HZ = 0.3  # cut walking band; keep elevator ride dynamics
 
@@ -334,26 +333,14 @@ def detect_elevator_segments_from_acc(
     if not raw_segments:
         return pd.DataFrame(columns=OUTPUT_COLUMNS)
 
-    try:
-        ivap = IVAP.load(config.ivap_path)
-    except Exception:
-        ivap = None
-    try:
-        _alpha, start_q, end_q = load_edge_conformal(config.edge_conformal_path)
-    except Exception:
-        start_q = end_q = float(config.pad_sec)
-
+    pad = float(config.pad_sec)
     rows = []
-    for t_start, t_end, s_seg in raw_segments:
-        if ivap is not None:
-            _p, p_lo, p_hi = ivap.predict(s_seg)
-        else:
-            p_lo, p_hi = 0.0, 1.0
+    for t_start, t_end, _s_seg in raw_segments:
         rows.append({
-            "start_ci": (float(t_start - start_q), float(t_start + start_q)),
-            "end_ci": (float(t_end - end_q), float(t_end + end_q)),
+            "start_ci": (float(t_start - pad), float(t_start + pad)),
+            "end_ci": (float(t_end - pad), float(t_end + pad)),
             "duration": float(t_end - t_start),
             "type": "unknown",
-            "probability_ci": (float(p_lo), float(p_hi)),
+            "probability_ci": (0.0, 1.0),
         })
     return pd.DataFrame(rows, columns=OUTPUT_COLUMNS)

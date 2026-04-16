@@ -14,8 +14,7 @@ import importlib
 import numpy as np
 import pandas as pd
 
-from .._calibration import IVAP, load_edge_conformal
-from ..accelerometer_only.acc_segmentation import (
+from ..acc_segmentation import (
     _compute_a_vert, compute_velocity, lowpass,
 )
 from .templates import Templates, load_templates
@@ -141,6 +140,8 @@ def detect_elevator_segments_from_template_match(
     data: pd.DataFrame,
     config: TemplateMatchConfig,
 ) -> pd.DataFrame:
+    if config.templates_path is None:
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
     try:
         templates = load_templates(config.templates_path)
     except FileNotFoundError:
@@ -161,32 +162,16 @@ def detect_elevator_segments_from_template_match(
     if not pairs:
         return pd.DataFrame(columns=OUTPUT_COLUMNS)
 
-    try:
-        ivap = IVAP.load(config.ivap_path)
-    except Exception:
-        ivap = None
-    try:
-        _alpha, start_q, end_q = load_edge_conformal(config.edge_conformal_path)
-    except Exception:
-        start_q = end_q = float(config.pad_sec)
-
+    pad = float(config.pad_sec)
     rows = []
     for si, ei in pairs:
         t_s = float(t[si])
         t_e = float(t[ei])
-        s_seg = 0.5 * (float(scores["start_score"][si]) + float(scores["end_score"][ei]))
-        if ivap is not None:
-            try:
-                _p, p_lo, p_hi = ivap.predict(s_seg)
-            except Exception:
-                p_lo, p_hi = 0.0, 1.0
-        else:
-            p_lo, p_hi = 0.0, 1.0
         rows.append({
-            "start_ci": (t_s - start_q, t_s + start_q),
-            "end_ci": (t_e - end_q, t_e + end_q),
+            "start_ci": (t_s - pad, t_s + pad),
+            "end_ci": (t_e - pad, t_e + pad),
             "duration": t_e - t_s,
             "type": "ride",
-            "probability_ci": (float(p_lo), float(p_hi)),
+            "probability_ci": (0.0, 1.0),
         })
     return pd.DataFrame(rows, columns=OUTPUT_COLUMNS)

@@ -1,6 +1,6 @@
 from .barometer_only import detect_elevator_segments_from_height
 from .accelerometer_only import detect_elevator_segments_from_acc
-from .template_match import (
+from .accelerometer_only.template_match import (
     Templates, fit_templates, save_templates, load_templates,
     detect_elevator_segments_from_template_match, compute_match_scores,
 )
