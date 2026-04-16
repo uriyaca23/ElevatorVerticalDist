@@ -118,6 +118,26 @@ def getExperimentRawParsed(
     return frames
 
 
+def _coerce_bool(v) -> bool:
+    """Permissive bool coercion. NaN / unrecognised values default to True
+    to match the column's default-on semantics."""
+    if isinstance(v, bool):
+        return v
+    try:
+        if pd.isna(v):
+            return True
+    except (TypeError, ValueError):
+        pass
+    if isinstance(v, (int, float)):
+        return bool(v)
+    s = str(v).strip().lower()
+    if s in ("false", "0", "no", "n", "f"):
+        return False
+    if s in ("true", "1", "yes", "y", "t"):
+        return True
+    return True
+
+
 def _segments_to_full_gt(
     segments: pd.DataFrame, t0_ms: int, t_end_ms: int,
 ) -> pd.DataFrame:
@@ -132,6 +152,7 @@ def _segments_to_full_gt(
             "end_ms":      int(t0_ms + float(e_hi) * 1000),
             "type":        str(row["type"]),
             "description": "",
+            "signalClearRecording": True,
         })
     rides.sort(key=lambda r: r["start_ms"])
 
@@ -149,16 +170,19 @@ def _segments_to_full_gt(
                 continue
         if r["start_ms"] > cursor:
             out.append({"start_ms": cursor, "end_ms": r["start_ms"],
-                        "type": "outside", "description": ""})
+                        "type": "outside", "description": "",
+                        "signalClearRecording": True})
         out.append(r)
         cursor = r["end_ms"]
 
     if cursor < t_end_ms:
         out.append({"start_ms": cursor, "end_ms": t_end_ms,
-                    "type": "outside", "description": ""})
+                    "type": "outside", "description": "",
+                    "signalClearRecording": True})
     if not out:
         out.append({"start_ms": t0_ms, "end_ms": t_end_ms,
-                    "type": "outside", "description": ""})
+                    "type": "outside", "description": "",
+                    "signalClearRecording": True})
 
     return pd.DataFrame(out, columns=GT_COLUMNS)
 
@@ -279,6 +303,10 @@ def _load_structured_triplet(
     if "description" not in gt.columns:
         gt["description"] = ""
     gt["description"] = gt["description"].fillna("").astype(str)
+    # Backfill signalClearRecording (default True) for older gt.csv files.
+    if "signalClearRecording" not in gt.columns:
+        gt["signalClearRecording"] = True
+    gt["signalClearRecording"] = gt["signalClearRecording"].apply(_coerce_bool)
     gt = gt.reindex(columns=GT_COLUMNS)
 
     meta_df = pd.read_csv(out_dir / METADATA_CSV)
@@ -403,7 +431,8 @@ def getExperimentData(
         t_end_ms = int(acc["timestamp_ms"].iloc[-1])
         gt = pd.DataFrame(
             [{"start_ms": t0_ms, "end_ms": t_end_ms,
-              "type": "outside", "description": ""}],
+              "type": "outside", "description": "",
+              "signalClearRecording": True}],
             columns=GT_COLUMNS,
         )
 

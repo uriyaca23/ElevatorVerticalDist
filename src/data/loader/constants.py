@@ -74,4 +74,4 @@ METADATA_COLUMNS = [
     "description", "date", "time",
 ]
 BAROMOSHKA_COLUMNS = ["floor", "height"]
-GT_COLUMNS = ["start_ms", "end_ms", "type", "description"]
+GT_COLUMNS = ["start_ms", "end_ms", "type", "description", "signalClearRecording"]

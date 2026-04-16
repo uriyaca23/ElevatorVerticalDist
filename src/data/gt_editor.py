@@ -42,6 +42,7 @@ from src.data.loader import (
     saveExperimentData,
 )
 from src.data.loader.alignment import _smoothed_velocity
+from src.data.loader.pipeline import _coerce_bool
 
 
 VALID_TYPES = ["outside", "up", "down"]
@@ -214,7 +215,7 @@ class GtEditor(tk.Tk):
         tree_frame = ttk.Frame(right)
         tree_frame.pack(fill=tk.BOTH, expand=True)
         self.tree = ttk.Treeview(
-            tree_frame, columns=("idx", "start_s", "dur_s", "type", "desc"),
+            tree_frame, columns=("idx", "start_s", "dur_s", "type", "clear", "desc"),
             show="headings", selectmode="browse",
         )
         for col, text, w, anchor in [
@@ -222,6 +223,7 @@ class GtEditor(tk.Tk):
             ("start_s", "start (s)", 80,  tk.E),
             ("dur_s",   "dur (s)",   70,  tk.E),
             ("type",    "type",      80,  tk.CENTER),
+            ("clear",   "clear?",    55,  tk.CENTER),
             ("desc",    "note",      180, tk.W),
         ]:
             self.tree.heading(col, text=text)
@@ -263,8 +265,13 @@ class GtEditor(tk.Tk):
         ttk.Entry(edit, textvariable=self.desc_var, width=28)\
             .grid(row=3, column=1, padx=4, pady=2, sticky=tk.EW)
 
+        self.clear_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(edit, text="signal clear recording",
+                        variable=self.clear_var)\
+            .grid(row=4, column=0, columnspan=2, padx=4, pady=2, sticky=tk.W)
+
         ttk.Button(edit, text="Apply", command=self._on_apply)\
-            .grid(row=4, column=0, columnspan=2, pady=4, sticky=tk.EW)
+            .grid(row=5, column=0, columnspan=2, pady=4, sticky=tk.EW)
 
         # Actions
         actions = ttk.Frame(right)
@@ -627,18 +634,21 @@ class GtEditor(tk.Tk):
             self.tree.delete(item)
         if self.pipeline is None:
             return
-        # Ensure the description column exists (older gt.csv may lack it).
+        # Ensure schema columns exist (older gt.csv may lack newer ones).
         if "description" not in self.pipeline.gt.columns:
             self.pipeline.gt["description"] = ""
+        if "signalClearRecording" not in self.pipeline.gt.columns:
+            self.pipeline.gt["signalClearRecording"] = True
         for i, row in self.pipeline.gt.iterrows():
             s_s = (int(row["start_ms"]) - self._t0_ms) / 1000.0
             e_s = (int(row["end_ms"]) - self._t0_ms) / 1000.0
             dur = e_s - s_s
             typ = str(row["type"])
             note = _cell_str(row.get("description", ""))
+            clear = "✓" if _coerce_bool(row.get("signalClearRecording", True)) else "✗"
             self.tree.insert(
                 "", tk.END, iid=str(i),
-                values=(i, f"{s_s:.1f}", f"{dur:.1f}", typ, note),
+                values=(i, f"{s_s:.1f}", f"{dur:.1f}", typ, clear, note),
                 tags=(typ,),
             )
 
@@ -654,6 +664,7 @@ class GtEditor(tk.Tk):
         self.end_var.set(str(int(row["end_ms"])))
         self.type_var.set(str(row["type"]))
         self.desc_var.set(_cell_str(row.get("description", "")))
+        self.clear_var.set(_coerce_bool(row.get("signalClearRecording", True)))
         self._highlight_on_plot(row["start_ms"], row["end_ms"])
 
     # ---------- Edit actions ----------
@@ -677,10 +688,12 @@ class GtEditor(tk.Tk):
             messagebox.showerror("Invalid", "end must be > start.")
             return
         note = self.desc_var.get().strip()
+        clear = bool(self.clear_var.get())
         self.pipeline.gt.loc[idx, "start_ms"] = start
         self.pipeline.gt.loc[idx, "end_ms"] = end
         self.pipeline.gt.loc[idx, "type"] = typ
         self.pipeline.gt.loc[idx, "description"] = note
+        self.pipeline.gt.loc[idx, "signalClearRecording"] = clear
         self._mark_dirty(f"Updated interval {idx}")
         self._refresh_plot(preserve_xlim=True)
         self._refresh_tree()
@@ -704,8 +717,10 @@ class GtEditor(tk.Tk):
 
         new_row = pd.DataFrame(
             [{"start_ms": new_start, "end_ms": new_end,
-              "type": "outside", "description": ""}],
-            columns=["start_ms", "end_ms", "type", "description"],
+              "type": "outside", "description": "",
+              "signalClearRecording": True}],
+            columns=["start_ms", "end_ms", "type", "description",
+                     "signalClearRecording"],
         )
         self.pipeline.gt = pd.concat([self.pipeline.gt, new_row], ignore_index=True)
         self._mark_dirty("Added interval")
@@ -749,15 +764,20 @@ class GtEditor(tk.Tk):
                     fixed.append({
                         "start_ms": prev_end, "end_ms": cur_start,
                         "type": "outside", "description": "",
+                        "signalClearRecording": True,
                     })
             fixed.append({
                 "start_ms":    int(gt.loc[i, "start_ms"]),
                 "end_ms":      int(gt.loc[i, "end_ms"]),
                 "type":        str(gt.loc[i, "type"]),
                 "description": _cell_str(gt.loc[i].get("description", "")),
+                "signalClearRecording": _coerce_bool(
+                    gt.loc[i].get("signalClearRecording", True)
+                ),
             })
         self.pipeline.gt = pd.DataFrame(
-            fixed, columns=["start_ms", "end_ms", "type", "description"],
+            fixed, columns=["start_ms", "end_ms", "type", "description",
+                            "signalClearRecording"],
         )
         self._mark_dirty(f"Auto-fixed → {len(self.pipeline.gt)} intervals")
         self._refresh_plot(preserve_xlim=True)

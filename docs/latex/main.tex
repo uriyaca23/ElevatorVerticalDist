@@ -5,8 +5,17 @@
 \usepackage{lmodern}
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{graphicx}
+\usepackage{float}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage{xcolor}
 \usepackage{hyperref}
 \usepackage[margin=1in]{geometry}
+
+% Lightweight TODO macro so placeholders are easy to spot.
+\newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+
+\graphicspath{{figures/}}
 
 \title{Elevator Vertical Distance Estimation}
 \author{Eyal Yakir \and Oria}
@@ -22,5 +31,400 @@
 
 \section{Introduction}
 % TODO
+
+\section{Data Collection}
+\label{sec:data-collection}
+
+This section documents, end to end, how the dataset underlying this work was
+gathered, how it is turned into a usable ground truth, and the engineering
+problems we had to solve along the way. It is written so that a developer who
+has never touched the repository can reproduce the pipeline from scratch by
+reading this section alongside \texttt{src/data/README.md}.
+
+\subsection{Experimental Design}
+\label{sec:experimental-design}
+
+We ran a controlled field campaign across \textbf{eight different buildings}
+in central Israel, each with a different elevator, cabin geometry, motor
+characteristic, and floor-to-floor height. The goal of the campaign was to
+obtain many statistically-independent elevator rides covering a realistic
+distribution of buildings (low-rise residential, mid-rise office, hotel,
+university) so that any algorithm trained or evaluated on this data is not
+just fitted to a single elevator. The buildings sampled in this campaign
+are listed in Table~\ref{tab:buildings}; Figure~\ref{fig:building-heights}
+summarises their height distribution.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{l l l}
+\toprule
+\textbf{Building (internal name)} & \textbf{Type} & \textbf{Location} \\
+\midrule
+\texttt{milleniumHotel}          & Hotel       & Tel Aviv \\
+\texttt{acroBuilding}            & Office      & Tel Aviv \\
+\texttt{beitMansour1}            & Residential & Ra'anana \\
+\texttt{beitYitzchakiRaanana}    & Residential & Ra'anana \\
+\texttt{BarIlan2Herzelia}        & Residential & Herzeliya \\
+\texttt{Haari3}                  & Residential & \todo{location} \\
+\texttt{\todo{building\_7}}      & \todo{type} & \todo{location} \\
+\texttt{\todo{building\_8}}      & \todo{type} & \todo{location} \\
+\bottomrule
+\end{tabular}
+\caption{The eight buildings used in the field campaign. Internal names match
+the \texttt{location} field in \texttt{rawData/} experiment folders.}
+\label{tab:buildings}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\linewidth]{building_heights.png}
+\caption{Height distribution across the eight sampled buildings. Each bar
+shows the highest floor reached in a ride sequence for that building.}
+\label{fig:building-heights}
+\end{figure}
+
+\paragraph{Phones.}
+In every ride we simultaneously recorded data from \textbf{four phones}.
+Using four devices per ride serves two purposes. First, it gives us
+heterogeneous sensor hardware on a single, perfectly synchronised physical
+event, which lets us study cross-device variance (different MEMS
+accelerometers, different sampling jitter, different barometer quality)
+without confounding it with different rides. Second, it guarantees that at
+least one of the four devices carries a \textbf{barometric pressure sensor}
+that we can use as a ground-truth source, even when one of the target
+phones under evaluation does not have one. Typical device mix across the
+campaign:
+
+\begin{itemize}
+  \item \texttt{SamsungSM-S911B} --- Galaxy S23 (has barometer).
+  \item \texttt{GooglePixel10} / \texttt{GooglePixel} --- Pixel family (has barometer).
+  \item \texttt{Xiaomi22101320I} --- Redmi Note 12 family (no barometer).
+  \item \texttt{SamsungSM-A235F} --- Galaxy A23 (no barometer).
+  \item \texttt{GalaxyZFlip6} --- foldable (has barometer).
+\end{itemize}
+
+The experimenters (\texttt{eyalyakir}, \texttt{UriyaCohenEliya},
+\texttt{RoyTurgeman}) carried the devices together in a single hand or bag
+so that all four phones experience nearly identical motion, vibration, and
+acoustic environment during a ride.
+
+\paragraph{Folder and file naming.}
+Every recording is stored under
+\texttt{src/data/rawData/<experimenter>\_<location>\_<phone>\_<date>\_exp<N>/}
+to make the origin of every sample unambiguous from the path alone. This
+convention is documented in \texttt{src/data/README.md} and is enforced only
+by convention --- the loader (\S\ref{sec:loader}) does not parse it, but
+every analysis notebook groups by it.
+
+\subsection{Logging: The Barometer}
+\label{sec:logging-app}
+
+On every phone, a sensor-logging Android application subscribes to every
+inertial and environmental sensor the device exposes and dumps every
+sample, verbatim, to a tab-separated text file
+\texttt{sensorLog\_<ISO-timestamp>.txt}. One row per sample, no header,
+format:
+\begin{center}
+  \texttt{<timestamp\_ms>\textbackslash t<SENSOR>\textbackslash t<v$_1$>\textbackslash t<v$_2$>...}
+\end{center}
+The sensors we rely on are summarised in Table~\ref{tab:sensor-schema}.
+
+The most important channel for ground truth is the \textbf{barometer
+(\texttt{PRS})}. The pressure sensor is sampled in parallel with the
+other sensors and is the sole signal the elevator detector
+(\S\ref{sec:elevator-detection}) acts on. Because not every device in the
+fleet has a barometer, we attach a secondary device (typically a Pixel or
+S23) that \emph{does} have one to every ride whose primary phone is
+pressure-less; its recording lives in a \texttt{forBarometer/} sub-folder
+under the primary experiment's directory. This secondary-device trick is
+central to the time-alignment problem discussed in \S\ref{sec:time-sync}.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{l l l}
+\toprule
+\textbf{Tag} & \textbf{Sensor} & \textbf{Columns} \\
+\midrule
+\texttt{ACC}     & Linear accelerometer (SI-compensated) & \texttt{x, y, z} \\
+\texttt{GYR}     & Gyroscope                             & \texttt{x, y, z} \\
+\texttt{MAG}     & Magnetometer                          & \texttt{x, y, z} \\
+\texttt{RAWGYR}  & Uncalibrated gyroscope                & \texttt{x, y, z, bias\_x, bias\_y, bias\_z} \\
+\texttt{RAWMAG}  & Uncalibrated magnetometer             & \texttt{x, y, z, bias\_x, bias\_y, bias\_z} \\
+\texttt{ORI}     & Rotation-vector quaternion            & \texttt{w, x, y, z} \\
+\texttt{PRS}     & Barometer                             & \texttt{pressure} (hPa) \\
+\texttt{GPS}     & GPS fix                               & \texttt{lat, lon, alt} \\
+\bottomrule
+\end{tabular}
+\caption{Per-sensor column schema emitted by the logger. Any row whose
+column count does not match its sensor tag is dropped silently by the
+parser (\texttt{src/data/loader/parsing.py}).}
+\label{tab:sensor-schema}
+\end{table}
+
+Once the recording is over, the raw dump is committed to
+\texttt{rawData/<exp\_name>/}, together with a hand-filled
+\texttt{metadata.txt} (experimenter, phone, location, description, date,
+time). The loader pipeline (\S\ref{sec:loader}) then materialises a CSV
+per sensor under \texttt{structuredData/data/<exp\_name>/} and derives
+\texttt{gt.csv} --- the ground truth used by every downstream algorithm.
+
+\subsection{Elevator Detection}
+\label{sec:elevator-detection}
+
+Ground truth for this project is a labelling of the timeline into
+\texttt{up}, \texttt{down}, and \texttt{outside} intervals: ``outside''
+means the phone is not on a moving elevator (waiting, walking, idle). The
+labelling is derived algorithmically from the barometer signal and then
+optionally corrected by hand (\S\ref{sec:gt-editor}).
+
+\subsubsection{Barometer-Based Algorithm}
+\label{sec:barometer-algorithm}
+
+The detector lives in
+\texttt{src/algorithms/segmentation\_algorithms/barometer\_only/height\_segmentation.py}
+and runs in six stages. Inputs: a time series $(t_i, p_i)$ of timestamps
+and pressure readings.
+
+\begin{enumerate}
+  \item \textbf{Altitude.} Convert pressure to altitude via the
+    international barometric formula,
+    \[
+      h_i = \frac{T_0}{L}\,\Big[1 - \big(p_i/p_0\big)^{RL/(gM)}\Big],
+    \]
+    implemented in \texttt{src/physics/pressure\_to\_altitude.py}. This
+    removes the weather-dependent DC offset only approximately, but the
+    segmenter depends on \emph{differences} in $h$, so the residual bias
+    cancels.
+
+  \item \textbf{Low-pass smoothing.} Apply a centered rolling-mean filter
+    of width \texttt{height\_lowpass\_sec}~$\cdot f_s$ samples to suppress
+    high-frequency pressure jitter (door slams, HVAC bursts).
+
+  \item \textbf{Vertical velocity.} Estimate $v_z$ by forward differencing
+    the smoothed altitude, $v_{z,i} = (h^{\text{lp}}_{i+1} - h^{\text{lp}}_i)/\Delta t_i$,
+    then box-smooth again over \texttt{smooth\_window\_sec}.
+
+  \item \textbf{Thresholding.} Mark samples where
+    $|v_z| > \texttt{velocity\_threshold}$ (default $\approx 0.15$~m/s)
+    as ``moving''. Extract contiguous runs of \texttt{moving} samples by
+    edge-finding on the binary mask.
+
+  \item \textbf{Merging.} Walk the runs in order and merge consecutive
+    runs of the \emph{same sign} (both \texttt{up} or both \texttt{down})
+    if the gap between them is shorter than \texttt{merge\_gap\_sec}. This
+    collapses spurious velocity dips caused by elevator deceleration mid-ride.
+
+  \item \textbf{Pruning and padding.} Drop any surviving run whose
+    duration is $\le$ \texttt{min\_duration\_sec} or whose total altitude
+    change is $\le$ \texttt{min\_height\_diff\_m}. Expand every surviving
+    run by \texttt{pad\_sec} on both ends so the label comfortably covers
+    the full ride, including the small door-open tail.
+\end{enumerate}
+
+The output is a \texttt{DataFrame} of rows \texttt{(start\_ci, end\_ci,
+duration, type, probability\_ci)} where \texttt{type} $\in$
+\{\texttt{up}, \texttt{down}\}. The pipeline then pads the gaps between
+these rows with \texttt{outside} intervals so that the GT timeline is
+contiguous --- this is what downstream evaluation code expects.
+
+\paragraph{Why this is good enough as ground truth.} A well-calibrated
+consumer barometer on a phone resolves pressure changes equivalent to
+roughly 10~cm of altitude at typical sampling rates, which
+is an order of magnitude below the smallest interesting inter-floor height
+($\sim$3~m). The algorithm is deterministic, so repeated runs
+on the same recording produce identical labels, which in turn makes
+regression testing tractable.
+
+\subsection{The Time-Synchronisation Problem}
+\label{sec:time-sync}
+
+The reason Section~\ref{sec:elevator-detection} alone does not close the
+loop is a low-level Android timing issue that we spent considerable time
+getting right.
+
+\paragraph{The root cause.} Android's
+\texttt{SensorEvent.timestamp} is the time at which the sensor event was
+recorded, but it is expressed relative to the \emph{device boot time}
+(\texttt{SystemClock.elapsedRealtimeNanos}), not to wall-clock. The
+logger writes this timestamp directly into the log file. Consequently, the
+\texttt{timestamp\_ms} column in \texttt{sensorLog\_*.txt} is a
+\emph{device-local uptime} value, not a UTC time. Two phones that were
+booted at different moments will assign different timestamps to the
+\emph{same} physical event, with the offset equal to the difference of
+their boot times --- in our dataset, frequently tens of thousands of
+seconds, sometimes days.
+
+\paragraph{Why this bites us in practice.} Recall
+(\S\ref{sec:logging-app}) that phones without a barometer rely on a
+secondary device's \texttt{PRS} stream for ground truth. To use the
+secondary device's altitude as ground truth for the primary device, we
+must answer: \emph{at primary timestamp $t_p$, what was the altitude?}
+That requires mapping primary time to secondary time, which requires
+knowing the boot-time offset between the two devices. Neither device
+records wall-clock, so the offset must be recovered from the data itself.
+
+\paragraph{First approximation: start-time alignment.} The simplest
+workable estimate is to assume both phones started recording at the same
+wall-clock moment, so the first sample of each log corresponds to the
+same real time. Under that assumption, the offset is
+\[
+  \Delta = t^{(\text{prim})}_0 - t^{(\text{sec})}_0,
+\]
+and we shift every secondary timestamp by $\Delta$ before using it. This
+is implemented in
+\texttt{src/data/loader/alignment.py::\_compute\_start\_offset} and is
+sufficient when the experimenter hits ``start'' on both phones in quick
+succession.
+
+\paragraph{Why start-time alignment is not enough.} In practice the user
+latency between the two taps is one to several seconds and is variable
+between rides. That multi-second bias shifts the ground truth by enough
+to invalidate per-sample evaluation (an elevator moves at $\sim 1.5$~m/s;
+a 2~s timing error translates to $\sim 3$~m of altitude
+error, more than an entire floor). We therefore refine the offset using
+the \textbf{accelerometer signal}, which is recorded by both phones and
+must be approximately identical for two devices in the same hand.
+
+\paragraph{Refinement by cross-sensor correlation.} The routine used in
+the lab is: (i) compute the magnitude $|a|(t)$ on both phones, (ii)
+resample both to a common grid after applying the first-pass start-time
+offset, (iii) run a normalised cross-correlation of the two $|a|$ traces
+over a bounded lag window ($\pm 10$~s was enough in every
+experiment we observed), and (iv) pick the lag that maximises the
+correlation as the residual offset to fold back into $\Delta$. If ACC is
+missing on either device, we fall back to gyroscope magnitude or
+heuristic event matching on step-count spikes. The diagnostic overlay
+(Figure~\ref{fig:forBarometer-alignment}) is produced automatically for
+every experiment with a \texttt{forBarometer/} companion and is the first
+thing to inspect when an alignment looks suspicious.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{forBarometer_alignment_example.png}
+\caption{Diagnostic plot produced by
+\texttt{loader/alignment.py::\_plot\_forBarometer\_alignment}. \textbf{Top:}
+primary $|a|$ (blue) and time-shifted secondary $|a|$ (orange) overlaid,
+with the secondary's altitude on the right y-axis (green). Signature
+features such as the impulse at door-close should line up after
+alignment. \textbf{Bottom:} the same accelerometer overlay with the
+barometer-derived smoothed vertical velocity in black and the detected
+ride intervals shaded (green $=$ up, red $=$ down). The reported offset
+is the value added to the secondary's timestamps.}
+\label{fig:forBarometer-alignment}
+\end{figure}
+
+\paragraph{Practical hand-offs.} The offset is computed once per
+experiment, logged, and baked into the secondary's \texttt{PRS} frame
+before it is swapped into the primary's sensor dictionary
+(\texttt{\_merge\_secondary\_prs} in \texttt{alignment.py}). Everything
+downstream --- the segmenter, the GT derivation, evaluation metrics ---
+therefore sees \emph{a single phone} with a valid barometer, which
+removes a whole class of timing bugs from the rest of the stack.
+
+\subsection{The Loader Pipeline}
+\label{sec:loader}
+
+\texttt{src/data/loader/} exposes a narrow public API
+(\texttt{getExperimentData}, \texttt{saveExperimentData},
+\texttt{list\_experiments}) that hides all of the above. On first access
+it parses the raw \texttt{sensorLog\_*.txt}, merges any
+\texttt{forBarometer/} secondary, runs the detector
+(\S\ref{sec:barometer-algorithm}), pads the timeline with
+\texttt{outside} intervals, and writes per-sensor CSVs plus
+\texttt{gt.csv} to \texttt{structuredData/data/<exp\_name>/}. On every
+subsequent call it reads those CSVs directly. To force a rebuild after
+code changes, pass \texttt{use\_cache=False}. The CSV schemas are
+documented in \texttt{src/data/README.md} and frozen in
+\texttt{loader/constants.py}.
+
+\subsection{The Ground-Truth Editor}
+\label{sec:gt-editor}
+
+No matter how careful the detector in \S\ref{sec:barometer-algorithm} is,
+it will occasionally miss the start of a ride, split a single ride into
+two, or classify an HVAC-induced pressure ripple as movement. Rather than
+chase every edge case in the algorithm, we decided early on that the
+ground truth must be \emph{auditable and editable} by a human. Every
+\texttt{gt.csv} in the dataset has therefore passed through the GT editor
+at least once.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{gt_editor_screenshot.png}
+\caption{The GT editor. Left pane: stacked matplotlib panels (altitude,
+vertical velocity, $|a|$, $|\omega|$, $|m|$) with ground-truth intervals
+drawn as coloured spans (green $=$ up, red $=$ down, grey $=$ outside).
+Right pane: a \texttt{Treeview} of all intervals with the edit form
+below it.}
+\label{fig:gt-editor-main}
+\end{figure}
+\todo{drop the actual screenshot at
+\texttt{docs/latex/figures/gt\_editor\_screenshot.png}.}
+
+\paragraph{Launching.} The editor is a Tkinter application:
+\begin{verbatim}
+venv/bin/python -m src.data.gt_editor [exp_folder_name]
+\end{verbatim}
+Called without arguments, it lists all experiments found under
+\texttt{rawData/} in a dropdown and lets the user pick one.
+
+\paragraph{Visualisation.} The left pane renders all five standard motion
+signals on a shared time axis. Ground-truth intervals are overlaid on
+every panel simultaneously so a user can sanity-check a label against
+multiple modalities at once (e.g.\ a true elevator ride must be
+accompanied by a clear altitude step \emph{and} a flat-ish accelerometer
+magnitude).
+
+\paragraph{Editing.} The interaction model is designed to keep the mouse
+near the signal rather than in a form. Concretely:
+
+\begin{itemize}
+  \item \textbf{Click} anywhere inside a coloured span to select that
+    interval in the right-hand tree.
+  \item \textbf{Drag an edge} (within a few pixels of the start or end
+    of a span) to resize it live; the cursor morphs into a horizontal
+    arrow while inside the hit-tolerance zone.
+  \item Type precise millisecond bounds in the \textbf{edit form}, change
+    the \texttt{type} (\texttt{up} / \texttt{down} / \texttt{outside})
+    or the free-text \texttt{note}, and hit \textbf{Apply}.
+  \item \textbf{$+$~Add} inserts a new 10-second \texttt{outside}
+    interval right after the current selection.
+  \item \textbf{$\times$~Delete} removes the current interval.
+  \item \textbf{Auto-fix} closes gaps between adjacent intervals with
+    \texttt{outside} filler so the timeline stays contiguous; it refuses
+    to merge if two intervals actually overlap, to avoid silently
+    destroying user edits.
+\end{itemize}
+
+\paragraph{Navigation.} Keyboard shortcuts mirror the matplotlib toolbar:
+\texttt{+}~/~\texttt{=} zoom in, \texttt{-} zoom out, \texttt{0} fit to
+full range; \texttt{Shift+$\leftarrow$} / \texttt{Shift+$\rightarrow$}
+pan by 25\% of the visible width; mouse-wheel over the plot zooms around
+the cursor. All of this is indispensable on long recordings where a
+single ride is only a few percent of the timeline.
+
+\paragraph{Saving.} \texttt{Ctrl+S} (or the \textbf{Save} button) calls
+\texttt{saveExperimentData}, which rewrites every per-sensor CSV,
+\texttt{gt.csv}, and \texttt{metadata.csv} under
+\texttt{structuredData/data/<name>/}, then rebuilds the top-level
+\texttt{metadata.csv} index. The floor-height lookup
+(\texttt{baramoshka.csv}) is intentionally \emph{not} touched on save.
+The status bar at the bottom tracks unsaved-changes state; closing the
+window with pending edits prompts before quitting.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{gt_editor_edit_example.png}
+\caption{Fixing an auto-detection mistake in the GT editor. Here the
+barometer algorithm merged two adjacent rides into one because the
+cabin paused for less than \texttt{merge\_gap\_sec} at an intermediate
+floor; dragging the right edge of the first span and adding a new
+\texttt{down} interval splits the ride into its two true halves.}
+\label{fig:gt-editor-edit}
+\end{figure}
+\todo{drop an actual edit-example screenshot at
+\texttt{docs/latex/figures/gt\_editor\_edit\_example.png}.}
 
 \end{document}

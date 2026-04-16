@@ -68,8 +68,11 @@ names = list_experiments()                         # list[str]
 # Load one. Accepts either a bare name or a full path under rawData/.
 sensors, gt, metadata = getExperimentData(names[0])
 # sensors   — dict[str, pd.DataFrame], keyed by sensor ("ACC", "PRS", ...)
-# gt        — DataFrame [start_ms, end_ms, type, description] covering the
-#             full timeline with 'outside' filler; type ∈ {up, down, outside}
+# gt        — DataFrame [start_ms, end_ms, type, description,
+#             signalClearRecording] covering the full timeline with 'outside'
+#             filler; type ∈ {up, down, outside}; signalClearRecording is a
+#             bool (default True) — flip to False when the interval's signal
+#             is unclear / unreliable
 # metadata  — dict[str, str] with keys: exp_name, experimenter, phone,
 #             location, description, date, time
 
@@ -186,7 +189,7 @@ Defined in `loader/constants.py`.
 | File              | Columns                                                                 |
 |-------------------|-------------------------------------------------------------------------|
 | `<SENSOR>.csv`    | `timestamp_ms` + sensor-specific (e.g. `ACC`: `x, y, z`; `PRS`: `pressure`, `GT_height_m`). All frames get an `exp_name` column stamped on load. |
-| `gt.csv`          | `start_ms, end_ms, type, description`                                   |
+| `gt.csv`          | `start_ms, end_ms, type, description, signalClearRecording` (bool, defaults to `True` — set to `False` to mark intervals where the recording is unclear/unreliable) |
 | `metadata.csv`    | `exp_name, experimenter, phone, location, description, date, time`      |
 | `baramoshka.csv`  | `floor, height`                                                         |
 
