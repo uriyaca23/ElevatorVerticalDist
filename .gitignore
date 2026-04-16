@@ -14,3 +14,4 @@ docs/four_comparisons*
 ~$*.docx
 evaluation_output/
 /run_results
+/venv-old-apple-py39
