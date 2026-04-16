@@ -376,15 +376,15 @@ if __name__ == "__main__":
                      "Test bar: **recall >= 0.9 AND precision >= 0.7** on both experimenters,",
                      "best-match-per-GT IOU >= 0.3. Accelerometer-only input.",
                      "",
-                     "| # | Name | oria R / P | roy R / P |", "|---|---|---|---|"]
+                     "| # | Name | uriya R / P | roy R / P |", "|---|---|---|---|"]
     for fn, slug, name, method_summary, score_label in ITERATIONS:
         per_exp = {}
-        for exp in ("oria", "roy_turgman"):
+        for exp in ("uriya", "roy_turgeman"):
             per_exp[exp] = fn(exp)
         res = IterResult(name=name, slug=slug, description="", method_summary=method_summary,
                          score_label=score_label, score_hysteresis="above", per_exp=per_exp)
         plot_iter(OUT_ROOT / slug, res)
-        o, r = per_exp["oria"], per_exp["roy_turgman"]
+        o, r = per_exp["uriya"], per_exp["roy_turgeman"]
         summary_lines.append(
             f"| {slug.split('_')[0]} | {name} | {o['recall']:.2f} / {o['precision']:.2f} | "
             f"{r['recall']:.2f} / {r['precision']:.2f} |"

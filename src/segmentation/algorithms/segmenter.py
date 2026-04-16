@@ -13,7 +13,7 @@ import pandas as pd
 
 from .barometer_only import detect_elevator_segments_from_height
 from .accelerometer_only import detect_elevator_segments_from_acc
-from .template_match import detect_elevator_segments_from_template_match
+from .accelerometer_only.template_match import detect_elevator_segments_from_template_match
 
 _config_mod = importlib.import_module(__package__ + ".class")
 SEGMENT_ALGORITHM_CONFIG = _config_mod.SEGMENT_ALGORITHM_CONFIG

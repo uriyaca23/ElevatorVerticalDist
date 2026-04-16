@@ -18,7 +18,7 @@ from src.algorithms.segmentation_algorithms.accelerometer_only.acc_segmentation 
 from src.tests.segmentations.main_acc import build_acc_frame, build_height_frame
 
 
-for name in ("oria", "roy_turgman"):
+for name in ("uriya", "roy_turgeman"):
     d = load_experimenter(name)
     t0 = float(d["ACC"]["timestamp_ms"].iloc[0])
     acc = build_acc_frame(d["ACC"], t0)

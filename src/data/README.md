@@ -36,7 +36,7 @@ src/data/
 │   └── legacy.py                   # old Excel-cached flow
 │
 ├── gt_editor.py                    # Tkinter GUI for editing gt.csv
-└── (achive)/                       # legacy experimenter folders, untouched
+└── (archive)/                       # legacy experimenter folders, untouched
 ```
 
 Experiment naming convention (by existing convention, not enforced):
@@ -106,7 +106,7 @@ Other useful entry points:
 
 ### 2. Legacy flow (Excel-cached)
 
-Kept for older scripts under `(achive)/`. Prefer the pipeline flow in new code.
+Kept for older scripts under `(archive)/`. Prefer the pipeline flow in new code.
 
 ```python
 from src.data.loader import loadBasicData, loadDataWithGT, load_experimenter

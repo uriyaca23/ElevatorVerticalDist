@@ -57,7 +57,7 @@ def _dump_debug(name: str, pred: pd.DataFrame, gt: pd.DataFrame, res) -> None:
     (DEBUG_DIR / f"fail_{name}.json").write_text(json.dumps(payload, indent=2, default=float))
 
 
-@pytest.mark.parametrize("experimenter", ["oria", "roy_turgman"])
+@pytest.mark.parametrize("experimenter", ["uriya", "roy_turgeman"])
 def test_acc_recall_precision(experimenter: str) -> None:
     data = load_experimenter(experimenter)
     acc_raw = data["ACC"]

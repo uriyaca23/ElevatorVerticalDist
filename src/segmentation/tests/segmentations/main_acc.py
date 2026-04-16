@@ -280,7 +280,7 @@ def save_run(
         f.write("- `velocity.png` / `intervals.png` — diagnostic plots\n")
 
 
-def main(name: str = "oria", note: str = "") -> None:
+def main(name: str = "uriya", note: str = "") -> None:
     data = load_experimenter(name)
     acc_raw = data["ACC"]
     prs = data.get("PRS")
@@ -361,7 +361,7 @@ def main(name: str = "oria", note: str = "") -> None:
 if __name__ == "__main__":
     from src.data.loader import DATA_ROOT
     args = sys.argv[1:]
-    first = args[0] if args else "oria"
+    first = args[0] if args else "uriya"
     note = " ".join(args[1:]) if len(args) > 1 else ""
     if first == "all":
         names = sorted([p.name for p in Path(DATA_ROOT).iterdir()

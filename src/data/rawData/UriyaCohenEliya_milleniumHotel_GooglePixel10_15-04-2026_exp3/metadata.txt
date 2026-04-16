@@ -1,0 +1,7 @@
+Temperature: 30 degrees Celsius
+Name: Uriya Cohen-Eliya
+Phone: Google Pixel 10
+Date: 15.4.2026
+Location: מלון פרמיה מלניום
+Time: 13:57
+Description: מעלית מהצד שצמודה למלון מחוץ למלון, מעלית חיצונית. ללא מדרגות

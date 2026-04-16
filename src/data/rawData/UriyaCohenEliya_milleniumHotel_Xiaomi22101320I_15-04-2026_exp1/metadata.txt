@@ -3,4 +3,5 @@ Name: Uriya Cohen-Eliya
 Phone: Xiaomi 22101320I
 Date: 15.4.2026
 Location: מלון פרמיה מלניום
+Time: 11:41
 Description: ירידה במעלית, ירידה במדרגות, הליכה לחדר אוכל, אכילה, חזרה, עלייה במעלית

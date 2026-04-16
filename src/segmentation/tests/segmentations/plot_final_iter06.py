@@ -212,5 +212,5 @@ def plot_one(name: str):
 
 if __name__ == "__main__":
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    for n in ("oria", "roy_turgman"):
+    for n in ("uriya", "roy_turgeman"):
         plot_one(n)

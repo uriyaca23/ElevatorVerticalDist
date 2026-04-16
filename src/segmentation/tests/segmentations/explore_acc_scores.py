@@ -84,5 +84,5 @@ def dump(name):
 
 
 if __name__ == "__main__":
-    for n in ("oria", "roy_turgman"):
+    for n in ("uriya", "roy_turgeman"):
         dump(n)

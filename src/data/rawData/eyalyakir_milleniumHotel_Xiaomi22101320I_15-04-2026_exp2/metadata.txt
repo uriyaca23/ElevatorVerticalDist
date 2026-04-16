@@ -3,4 +3,5 @@ Name: Eyal Yakir
 Phone: Xiaomi 22101320I
 Date: 15.4.2026
 Location: מלון פרמיה מלניום
+Time: 13:20
 Description: רק בבניין בלי מדרגות מגוון קומות ואוטיזם במעלית

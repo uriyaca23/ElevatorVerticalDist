@@ -32,9 +32,6 @@ class PressureFilterConfig(BaseModel):
     height_col: str = "height"
 
 
-CALIBRATORS_DIR = Path(__file__).with_name("calibrators")
-
-
 class AccOnlyConfig(BaseModel):
     time_col: str = "time"
     x_col: str = "x"
@@ -53,9 +50,6 @@ class AccOnlyConfig(BaseModel):
     detrend_sec: float = 90.0
     local_var_sec: float = 8.0
     alpha: float = 0.1
-    lr_path: Path = CALIBRATORS_DIR / "lr_weights.json"
-    ivap_path: Path = CALIBRATORS_DIR / "ivap.json"
-    edge_conformal_path: Path = CALIBRATORS_DIR / "edge_conformal.json"
 
 
 class TemplateMatchConfig(BaseModel):
@@ -74,9 +68,7 @@ class TemplateMatchConfig(BaseModel):
     max_pair_gap_sec: float = 90.0
     vel_weight: float = 0.6
     pad_sec: float = 1.5
-    templates_path: Path = CALIBRATORS_DIR / "templates.json"
-    ivap_path: Path = CALIBRATORS_DIR / "ivap.json"
-    edge_conformal_path: Path = CALIBRATORS_DIR / "edge_conformal.json"
+    templates_path: Path | None = None
 
 
 class SEGMENT_ALGORITHM_CONFIG(BaseModel):

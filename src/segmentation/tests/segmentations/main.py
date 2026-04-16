@@ -55,7 +55,7 @@ def build_integrals_frame(acc_frame: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame({"time": t, "a_lin": a_lin, "vel": vel, "pos": pos})
 
 
-def main(name: str = "oria") -> None:
+def main(name: str = "uriya") -> None:
     data = load_experimenter(name)
     acc_raw = data["ACC"]
     prs = data.get("PRS")
@@ -85,4 +85,4 @@ def main(name: str = "oria") -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "roy_turgman")
+    main(sys.argv[1] if len(sys.argv) > 1 else "roy_turgeman")
