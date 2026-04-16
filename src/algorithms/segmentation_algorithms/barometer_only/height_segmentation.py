@@ -17,6 +17,23 @@ _config_mod = importlib.import_module("src.algorithms.segmentation_algorithms.cl
 PressureFilterConfig = _config_mod.PressureFilterConfig
 
 
+def filter_height(
+    data: pd.DataFrame,
+    config: PressureFilterConfig,
+) -> np.ndarray:
+    """Return the low-pass filtered height signal actually used by the
+    segmenter. Exposed so plots can show the same signal that drives the
+    decision boundary."""
+    t = np.asarray(data[config.time_col].to_numpy(), dtype=float)
+    z = np.asarray(data[config.height_col].to_numpy(), dtype=float)
+    if len(t) < 2:
+        return z
+    dt = np.diff(t)
+    fs = 1.0 / np.median(dt[dt > 0]) if np.any(dt > 0) else 1.0
+    lp_win = max(1, int(round(config.height_lowpass_sec * fs)))
+    return pd.Series(z).rolling(window=lp_win, center=True, min_periods=1).mean().to_numpy()
+
+
 def detect_elevator_segments_from_height(
     data: pd.DataFrame,
     config: PressureFilterConfig,
@@ -34,11 +51,13 @@ def detect_elevator_segments_from_height(
         return pd.DataFrame(columns=columns)
 
     dt = np.diff(t)
+    fs = 1.0 / np.median(dt[dt > 0]) if np.any(dt > 0) else 1.0
+    lp_win = max(1, int(round(config.height_lowpass_sec * fs)))
+    z_lp = pd.Series(z).rolling(window=lp_win, center=True, min_periods=1).mean().to_numpy()
     vz = np.zeros_like(t)
-    vz[1:] = np.diff(z) / np.where(dt > 0, dt, np.nan)
+    vz[1:] = np.diff(z_lp) / np.where(dt > 0, dt, np.nan)
     vz = np.nan_to_num(vz, nan=0.0)
 
-    fs = 1.0 / np.median(dt[dt > 0]) if np.any(dt > 0) else 1.0
     win = max(1, int(round(config.smooth_window_sec * fs)))
     kernel = np.ones(win) / win
     vz_smooth = np.convolve(vz, kernel, mode="same")

@@ -13,3 +13,4 @@ docs/figures/
 docs/four_comparisons*
 ~$*.docx
 evaluation_output/
+/run_results

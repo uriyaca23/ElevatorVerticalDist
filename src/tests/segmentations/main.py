@@ -85,4 +85,4 @@ def main(name: str = "oria") -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "oria")
+    main(sys.argv[1] if len(sys.argv) > 1 else "roy_turgman")

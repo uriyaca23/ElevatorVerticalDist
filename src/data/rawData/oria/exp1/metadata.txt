@@ -1,0 +1,6 @@
+Location: 32.166394, 34.842190
+Temperature: 14 degrees Celsius
+Name: Uriya Cohen-Eliya
+Phone: Google Pixel 10
+Address: Bar Ilan 2 Herzelia
+Date: 23.3.2026

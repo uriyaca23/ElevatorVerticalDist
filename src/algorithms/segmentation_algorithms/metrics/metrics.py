@@ -69,37 +69,103 @@ class SegmentationMetrics:
     mainly to group them and to compute a single ``summary`` dict.
     """
 
-    # ---- detection (IoU) ----
+    # ---- detection ----
 
     @staticmethod
     def match_segments(
-        pred: pd.DataFrame, gt: pd.DataFrame, iou_threshold: float = 0.5,
+        pred: pd.DataFrame, gt: pd.DataFrame, iou_threshold: float = 0.0,
     ) -> DetectionResult:
-        """Greedy one-to-one IoU matching. Each GT matches at most one pred."""
+        """Containment-based one-to-one matching.
+
+        A predicted segment is a **true positive** iff exactly one GT segment
+        is fully contained in it:
+
+            pred.start_ci.lo <= gt.start_mid <= pred.start_ci.hi
+            pred.end_ci.lo   <= gt.end_mid   <= pred.end_ci.hi
+
+        (When the predicted CI is zero-width, the GT midpoint must fall
+        exactly at the predicted endpoint — so in practice we use a relaxed
+        form where ``pred.start_ci.lo <= gt.start_mid`` and
+        ``gt.end_mid <= pred.end_ci.hi`` — the GT interval must lie inside
+        the predicted envelope.)
+
+        A predicted segment that contains 0 or ≥ 2 GT segments counts as a
+        false positive. GT segments not contained by any prediction are
+        false negatives.
+
+        ``iou_threshold`` is retained for back-compat/reporting but no longer
+        gates acceptance; IoU is still recorded in ``res.ious`` for inspection.
+        """
         p_iv = _intervals(pred)
         g_iv = _intervals(gt)
-        used_gt: set[int] = set()
-        res = DetectionResult(fn=len(g_iv))
-        pairs: list[tuple[float, int, int]] = []
-        for i, p in enumerate(p_iv):
-            for j, g in enumerate(g_iv):
-                v = iou(p, g)
-                if v > 0:
-                    pairs.append((v, i, j))
-        pairs.sort(reverse=True)
-        used_pred: set[int] = set()
-        for v, i, j in pairs:
-            if i in used_pred or j in used_gt:
-                continue
-            if v >= iou_threshold:
+        res = DetectionResult()
+
+        # pred envelope bounds
+        p_env: list[tuple[float, float]] = []
+        if len(pred):
+            for s_ci, e_ci in zip(pred["start_ci"].to_list(), pred["end_ci"].to_list()):
+                p_env.append((float(s_ci[0]), float(e_ci[1])))
+
+        contained: list[list[int]] = [[] for _ in p_iv]
+        gt_covered = [False] * len(g_iv)
+        for i, (env_lo, env_hi) in enumerate(p_env):
+            for j, (g_start, g_end) in enumerate(g_iv):
+                if env_lo <= g_start and g_end <= env_hi:
+                    contained[i].append(j)
+
+        for i, js in enumerate(contained):
+            if len(js) == 1:
+                j = js[0]
+                if gt_covered[j]:
+                    continue  # GT already matched to earlier prediction
                 res.tp += 1
-                res.ious.append(v)
                 res.matched_pred_idx.append(i)
                 res.matched_gt_idx.append(j)
-                used_pred.add(i)
-                used_gt.add(j)
-        res.fp = len(p_iv) - len(used_pred)
-        res.fn = len(g_iv) - len(used_gt)
+                res.ious.append(iou(p_iv[i], g_iv[j]))
+                gt_covered[j] = True
+            else:
+                res.fp += 1  # 0 or >=2 GTs contained
+        res.fn = sum(1 for v in gt_covered if not v)
+        return res
+
+    @staticmethod
+    def iou_match_segments(
+        pred: pd.DataFrame, gt: pd.DataFrame, iou_threshold: float = 0.3,
+    ) -> DetectionResult:
+        """Best-match-per-GT IOU matching.
+
+        For each GT segment, greedily pick the unmatched prediction with the
+        highest IOU; accept the pair iff IOU >= ``iou_threshold``. Predictions
+        not matched are false positives; GT not matched are false negatives.
+        """
+        p_iv = _intervals(pred)
+        g_iv = _intervals(gt)
+        res = DetectionResult()
+        pred_used = [False] * len(p_iv)
+
+        order = sorted(
+            range(len(g_iv)),
+            key=lambda j: max((iou(p, g_iv[j]) for p in p_iv), default=0.0),
+            reverse=True,
+        )
+        for j in order:
+            g = g_iv[j]
+            best_i, best_iou = -1, 0.0
+            for i, p in enumerate(p_iv):
+                if pred_used[i]:
+                    continue
+                v = iou(p, g)
+                if v > best_iou:
+                    best_iou, best_i = v, i
+            if best_i >= 0 and best_iou >= iou_threshold:
+                pred_used[best_i] = True
+                res.tp += 1
+                res.matched_pred_idx.append(best_i)
+                res.matched_gt_idx.append(j)
+                res.ious.append(best_iou)
+            else:
+                res.fn += 1
+        res.fp = sum(1 for u in pred_used if not u)
         return res
 
     # ---- calibration ----

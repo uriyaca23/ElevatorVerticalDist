@@ -1,0 +1,5 @@
+Temperature: 30 degrees Celsius
+Name: Eyal Yakir
+Phone: Samsung SM-S911B
+Date: 15.4.2026
+Location: מלון פרמיה מלניום
