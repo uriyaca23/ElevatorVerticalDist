@@ -29,7 +29,7 @@ from typing import Iterator
 
 import pandas as pd
 
-from src.algorithms.segmentation_algorithms import (
+from src.segmentation.algorithms import (
     SEGMENT_ALGORITHM_CONFIG, SegmentAlgorithm, Segmenter,
 )
 
@@ -444,6 +444,9 @@ def getExperimentData(
     rebuild_metadata_index()
 
     return data, gt, metadata_row
+
+
+
 
 
 def _inject_exp_name(

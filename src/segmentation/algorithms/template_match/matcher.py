@@ -20,7 +20,7 @@ from ..accelerometer_only.acc_segmentation import (
 )
 from .templates import Templates, load_templates
 
-_config_mod = importlib.import_module("src.algorithms.segmentation_algorithms.class")
+_config_mod = importlib.import_module("src.segmentation.algorithms.class")
 TemplateMatchConfig = _config_mod.TemplateMatchConfig
 
 OUTPUT_COLUMNS = ["start_ci", "end_ci", "duration", "type", "probability_ci"]

@@ -111,7 +111,7 @@ def _plot_forBarometer_alignment(
     # Run the segmenter on the aligned altitude to overlay GT on the velocity.
     segments = pd.DataFrame(columns=["start_ci", "end_ci", "type"])
     try:
-        from src.algorithms.segmentation_algorithms import (
+        from src.segmentation.algorithms import (
             SEGMENT_ALGORITHM_CONFIG, SegmentAlgorithm, Segmenter,
         )
         height_frame = pd.DataFrame({"time": prs_sec, "height": altitude_smooth})

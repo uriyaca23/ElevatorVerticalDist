@@ -29,9 +29,9 @@ def _annotate_prs_with_gt(prs: pd.DataFrame) -> pd.DataFrame:
     """Add a `gt_label` column ('idle' / 'up' / 'down') to the PRS frame using
     the barometer-based segment detector."""
     import importlib
-    config_mod = importlib.import_module("src.algorithms.segmentation_algorithms.class")
+    config_mod = importlib.import_module("src.segmentation.algorithms.class")
     seg_mod = importlib.import_module(
-        "src.algorithms.segmentation_algorithms.barometer_only.height_segmentation"
+        "src.segmentation.algorithms.barometer_only.height_segmentation"
     )
 
     cfg = config_mod.PressureFilterConfig(time_col="time", height_col="height")

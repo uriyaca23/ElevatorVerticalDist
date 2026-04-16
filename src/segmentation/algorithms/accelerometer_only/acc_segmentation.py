@@ -38,10 +38,10 @@ def lowpass(x: np.ndarray, fs: float, cutoff_hz: float = VELOCITY_LPF_HZ) -> np.
     sos = butter(4, cutoff_hz / nyq, btype="low", output="sos")
     return sosfiltfilt(sos, x)
 
-_quality = importlib.import_module("src.algorithms.predection_algorithms.quality_filter")
+_quality = importlib.import_module("src.predection.algorithms.quality_filter")
 estimate_gravity_vector = _quality.estimate_gravity_vector
 
-_config_mod = importlib.import_module("src.algorithms.segmentation_algorithms.class")
+_config_mod = importlib.import_module("src.segmentation.algorithms.class")
 AccOnlyConfig = _config_mod.AccOnlyConfig
 
 

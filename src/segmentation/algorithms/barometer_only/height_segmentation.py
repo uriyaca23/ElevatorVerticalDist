@@ -13,7 +13,7 @@ import pandas as pd
 
 # import via importlib to avoid the "class" reserved-keyword module name
 import importlib
-_config_mod = importlib.import_module("src.algorithms.segmentation_algorithms.class")
+_config_mod = importlib.import_module("src.segmentation.algorithms.class")
 PressureFilterConfig = _config_mod.PressureFilterConfig
 
 
