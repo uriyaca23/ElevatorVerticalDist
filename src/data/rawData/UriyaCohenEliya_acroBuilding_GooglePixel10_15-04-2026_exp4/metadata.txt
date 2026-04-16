@@ -1,0 +1,7 @@
+Temperature: 30 degrees Celsius
+Name: Uriya Cohen-Eliya
+Phone: Google Pixel 10
+Date: 15.4.2026
+Location: בניין אקרו נדלן
+Time: 14:13
+Description: בניין אקרו נדלן מעלית שחייבים לצאת החוצה בכל פעם

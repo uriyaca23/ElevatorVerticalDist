@@ -67,7 +67,7 @@ def run(name: str) -> int:
 
 def main() -> None:
     total = 0
-    for name in ("oria", "roy_turgman"):
+    for name in ("uriya", "roy_turgeman"):
         total += run(name)
     print(f"Total: {total} ride PNGs written under {OUT_ROOT}")
 

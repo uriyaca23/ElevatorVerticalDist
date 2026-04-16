@@ -202,7 +202,7 @@ def render_strategy(name_key: str, desc: str, scorer, rides, t_full, mag_full,
     print(f"  {name_key}: trap_wins={trap_wins}  par_wins={par_wins}  -> {out.name}")
 
 
-def main(name: str = "oria") -> None:
+def main(name: str = "uriya") -> None:
     data = load_experimenter(name)
     t0_ms = float(data["ACC"]["timestamp_ms"].iloc[0])
     acc_frame = build_acc_frame(data["ACC"], t0_ms)
@@ -235,4 +235,4 @@ def main(name: str = "oria") -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "oria")
+    main(sys.argv[1] if len(sys.argv) > 1 else "uriya")

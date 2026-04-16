@@ -3,4 +3,5 @@ Name: Uriya Cohen-Eliya
 Phone: Samsung SM-A235F
 Date: 15.4.2026
 Location: מלון פרמיה מלניום
+Time: 13:21
 Description: רק בבניין בלי מדרגות מגוון קומות ואוטיזם במעלית

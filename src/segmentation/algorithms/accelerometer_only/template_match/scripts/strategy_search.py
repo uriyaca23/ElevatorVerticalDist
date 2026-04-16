@@ -156,7 +156,7 @@ def load_rides():
 
     rides = []
     cfg = SEGMENT_ALGORITHM_CONFIG(algorithm=SegmentAlgorithm.PRESSURE_FILTER)
-    for name in ("oria", "roy_turgman"):
+    for name in ("uriya", "roy_turgeman"):
         data = load_experimenter(name)
         t0_ms = float(data["ACC"]["timestamp_ms"].iloc[0])
         acc_frame = build_acc_frame(data["ACC"], t0_ms)

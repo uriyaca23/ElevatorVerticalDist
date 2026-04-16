@@ -16,7 +16,7 @@ Project layout:
     │       ├── metadata.csv            (single row, same schema as the index)
     │       ├── baramoshka.csv          (floor → height map, populated later)
     │       └── forBarometer_alignment.png  (diagnostic plot if applicable)
-    └── (achive)/                       (legacy experimenter folders, left as-is)
+    └── (archive)/                       (legacy experimenter folders, left as-is)
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ STRUCTURED_INDEX_CSV = STRUCTURED_ROOT / "metadata.csv"
 # Legacy rawData path (renamed by the user). Kept pointing to something sane so
 # `load_experimenter('eyal')` etc. don't crash outright; callers will still get
 # FileNotFoundError if that directory doesn't exist.
-DATA_ROOT = _DATA_DIR / "(achive)"
+DATA_ROOT = _DATA_DIR / "(archive)"
 
 # Per-experiment filenames (raw side).
 METADATA_FILENAME = "metadata.txt"

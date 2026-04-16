@@ -209,7 +209,7 @@ def ride_velocity(acc_frame, t_start: float, t_end: float) -> tuple[np.ndarray, 
     return ts, vel_lpf, fs
 
 
-def main(name: str = "roy_turgman") -> None:
+def main(name: str = "roy_turgeman") -> None:
     data = load_experimenter(name)
     t0_ms = float(data["ACC"]["timestamp_ms"].iloc[0])
     acc_frame = build_acc_frame(data["ACC"], t0_ms)
@@ -378,4 +378,4 @@ def main(name: str = "roy_turgman") -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "roy_turgman")
+    main(sys.argv[1] if len(sys.argv) > 1 else "roy_turgeman")

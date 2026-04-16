@@ -1,17 +1,30 @@
-ADVIO/
-ADVIO_repo/
-datasets/
-tmp/
+# Python
 __pycache__/
+*.pyc
+*.pyo
 .pytest_cache/
 venv/
 .env
-example/
-metadata/ci_plots/
-docs/figures_v4/
-docs/figures/
-docs/four_comparisons*
+
+# OS / IDE
+.DS_Store
+desktop.ini
+Thumbs.db
+
+# Office temp files
 ~$*.docx
-evaluation_output/
-/run_results
-/venv-old-apple-py39
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+
+# Heavy raw media (kept locally, not pushed)
+src/data/rawData/**/*.mp4
+src/data/rawData/**/*.mov
+src/data/rawData/**/*.avi
+src/data/rawData/**/*.wav

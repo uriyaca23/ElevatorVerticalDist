@@ -1,0 +1,6 @@
+Location: 32.0658, 34.8233
+Temperature: 14 degrees Celsius
+Name: Roy Turgeman
+Phone: Samsung Galaxy Z Flip6
+Address: Haari 3 Ramat Gan
+Date: 10.4.2026

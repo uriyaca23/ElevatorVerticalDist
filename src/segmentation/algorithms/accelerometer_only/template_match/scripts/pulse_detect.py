@@ -402,7 +402,7 @@ def main() -> None:
     fig.savefig(OUT_DIR / "pulse_detect_templates.png", dpi=120)
     plt.close(fig)
 
-    for name in ("oria", "roy_turgman"):
+    for name in ("uriya", "roy_turgeman"):
         run(name, trap_templates, par_templates, trap_picks, par_picks)
 
 

@@ -3,4 +3,5 @@ Name: Eyal Yakir
 Phone: Samsung SM-S911B
 Date: 15.4.2026
 Location: מלון פרמיה מלניום
+Time: 13:57
 Description: מעלית מהצד שצמודה למלון מחוץ למלון, מעלית חיצונית. ללא מדרגות
