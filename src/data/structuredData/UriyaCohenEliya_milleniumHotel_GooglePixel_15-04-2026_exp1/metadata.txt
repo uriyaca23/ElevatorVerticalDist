@@ -1,6 +1,6 @@
 Temperature: 30 degrees Celsius
-Name: Eyal Yakir
-Phone: Samsung SM-A235F
+Name: Uriya Cohen-Eliya
+Phone: Google Pixel 10
 Date: 15.4.2026
 Location: מלון פרמיה מלניום
 Description: ירידה במעלית, ירידה במדרגות, הליכה לחדר אוכל, אכילה, חזרה, עלייה במעלית

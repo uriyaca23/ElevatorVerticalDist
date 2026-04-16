@@ -1,0 +1,7 @@
+Temperature: 30 degrees Celsius
+Name: Eyal Yakir
+Phone: Xiaomi 22101320I
+Date: 15.4.2026
+Location: בניין B בית יצחקי רעננה
+Time: 15:06
+Description: בניין B בית יצחקי רעננה. מעלית שדומה לבניין מגורים, ניתן ללחוץ על הרבה כפתורים, יחסית איטית וחלשה

@@ -3,3 +3,4 @@ Name: Eyal Yakir
 Phone: Samsung SM-S911B
 Date: 15.4.2026
 Location: מלון פרמיה מלניום
+Description: רק בבניין בלי מדרגות מגוון קומות ואוטיזם במעלית
