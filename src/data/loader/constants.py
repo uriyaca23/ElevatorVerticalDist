@@ -71,7 +71,12 @@ SENSOR_COLUMNS: dict[str, list[str]] = {
 # CSV schemas.
 METADATA_COLUMNS = [
     "exp_name", "experimenter", "phone", "location",
-    "description", "date", "time",
+    "description", "date", "time", "experiment_type",
 ]
+
+# Allowed values for the metadata `experiment_type` column.
+EXPERIMENT_TYPE_TEST = "test"
+EXPERIMENT_TYPE_TRAIN = "train"
+EXPERIMENT_TYPES = (EXPERIMENT_TYPE_TEST, EXPERIMENT_TYPE_TRAIN)
 BAROMOSHKA_COLUMNS = ["floor", "height"]
 GT_COLUMNS = ["start_ms", "end_ms", "type", "description", "signalClearRecording"]

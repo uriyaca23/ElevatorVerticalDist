@@ -31,6 +31,9 @@ from .constants import (
     BAROMOSHKA_COLUMNS,
     BAROMOSHKA_CSV,
     DATA_ROOT,
+    EXPERIMENT_TYPE_TEST,
+    EXPERIMENT_TYPE_TRAIN,
+    EXPERIMENT_TYPES,
     FOR_BAROMETER_PLOT_FILENAME,
     FOR_BAROMETER_SUBDIR,
     GT_COLUMNS,
@@ -59,6 +62,7 @@ from .parsing import (
 )
 from .pipeline import (
     ExperimentPipeline,
+    classify_experiment_type,
     getExperimentData,
     getExperimentRawParsed,
     list_experiments,
@@ -85,8 +89,12 @@ __all__ = [
     "GT_FILENAME",
     "GT_PLOT_FILENAME",
     "SENSOR_COLUMNS",
+    "EXPERIMENT_TYPE_TEST",
+    "EXPERIMENT_TYPE_TRAIN",
+    "EXPERIMENT_TYPES",
     # Pipeline
     "ExperimentPipeline",
+    "classify_experiment_type",
     "getExperimentRawParsed",
     "getExperimentData",
     "saveExperimentData",

@@ -1,2 +1,2 @@
-exp_name,experimenter,phone,location,description,date,time
-eyalyakir_milleniumHotel_SamsungSM-S911B_15-04-2026_exp2,Eyal Yakir,Samsung SM-S911B,מלון פרמיה מלניום,רק בבניין בלי מדרגות מגוון קומות ואוטיזם במעלית,15.4.2026,13:20
+exp_name,experimenter,phone,location,description,date,time,experiment_type
+eyalyakir_milleniumHotel_SamsungSM-S911B_15-04-2026_exp2,Eyal Yakir,Samsung SM-S911B,מלון פרמיה מלניום,רק בבניין בלי מדרגות מגוון קומות ואוטיזם במעלית,15.4.2026,13:20,train

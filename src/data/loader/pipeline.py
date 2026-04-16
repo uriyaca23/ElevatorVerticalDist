@@ -37,6 +37,9 @@ from .alignment import _merge_secondary_prs
 from .constants import (
     BAROMOSHKA_COLUMNS,
     BAROMOSHKA_CSV,
+    EXPERIMENT_TYPE_TEST,
+    EXPERIMENT_TYPE_TRAIN,
+    EXPERIMENT_TYPES,
     FOR_BAROMETER_PLOT_FILENAME,
     FOR_BAROMETER_SUBDIR,
     GT_COLUMNS,
@@ -71,9 +74,31 @@ def _structured_dir_for(name: str) -> Path:
     return STRUCTURED_DATA_DIR / name
 
 
-def list_experiments(raw_root: Path | str = RAW_DATA_ROOT) -> list[str]:
+def classify_experiment_type(exp_name: str) -> str:
+    """Return `'test'` if the experiment name contains `exp6`, else `'train'`.
+
+    The rule is intentionally simple so `list_experiments` / metadata stays
+    deterministic from folder names alone.
+    """
+    return EXPERIMENT_TYPE_TEST if "exp6" in exp_name else EXPERIMENT_TYPE_TRAIN
+
+
+def list_experiments(
+    raw_root: Path | str = RAW_DATA_ROOT,
+    kind: str = "all",
+) -> list[str]:
     """Return names of experiments under `raw_root` that hold a raw sensor log
-    directly (i.e., `sensorLog_*.txt` or the macOS-copy variant)."""
+    directly (i.e., `sensorLog_*.txt` or the macOS-copy variant).
+
+    Args:
+        raw_root: folder to scan (defaults to ``rawData/``).
+        kind: ``'all'`` (default), ``'train'``, or ``'test'``. When not
+            ``'all'``, each candidate is passed through
+            :func:`classify_experiment_type` and kept only if it matches.
+    """
+    if kind not in ("all", *EXPERIMENT_TYPES):
+        raise ValueError(f"kind must be 'all', 'train', or 'test' (got {kind!r})")
+
     root = Path(raw_root)
     if not root.is_dir():
         return []
@@ -81,8 +106,11 @@ def list_experiments(raw_root: Path | str = RAW_DATA_ROOT) -> list[str]:
     for p in sorted(root.iterdir()):
         if not p.is_dir():
             continue
-        if list(p.glob("sensorLog_*.txt")) or list(p.glob("Copy of sensorLog_*.txt")):
-            out.append(p.name)
+        if not (list(p.glob("sensorLog_*.txt")) or list(p.glob("Copy of sensorLog_*.txt"))):
+            continue
+        if kind != "all" and classify_experiment_type(p.name) != kind:
+            continue
+        out.append(p.name)
     return out
 
 
@@ -235,13 +263,14 @@ def _build_metadata_row(
     """
     iso_date, iso_time = _iso_date_time_from_filename(raw_dir)
     return {
-        "exp_name":     exp_name,
-        "experimenter": raw_meta.get("Name", ""),
-        "phone":        raw_meta.get("Phone", ""),
-        "location":     raw_meta.get("Location", ""),
-        "description":  raw_meta.get("Description", ""),
-        "date":         raw_meta.get("Date", "") or iso_date,
-        "time":         raw_meta.get("Time", "") or iso_time,
+        "exp_name":        exp_name,
+        "experimenter":    raw_meta.get("Name", ""),
+        "phone":           raw_meta.get("Phone", ""),
+        "location":        raw_meta.get("Location", ""),
+        "description":     raw_meta.get("Description", ""),
+        "date":            raw_meta.get("Date", "") or iso_date,
+        "time":            raw_meta.get("Time", "") or iso_time,
+        "experiment_type": classify_experiment_type(exp_name),
     }
 
 
@@ -319,7 +348,12 @@ def _load_structured_triplet(
 
 def rebuild_metadata_index(structured_root: Path | str = STRUCTURED_DATA_DIR) -> pd.DataFrame:
     """Scan all per-experiment `metadata.csv` files and write the top-level
-    index at `structuredData/metadata.csv`."""
+    index at `structuredData/metadata.csv`.
+
+    Per-experiment metadata CSVs that are missing the `experiment_type`
+    column (or have it blank) are backfilled in-place using
+    :func:`classify_experiment_type`.
+    """
     root = Path(structured_root)
     rows: list[dict[str, str]] = []
     if root.is_dir():
@@ -329,10 +363,15 @@ def rebuild_metadata_index(structured_root: Path | str = STRUCTURED_DATA_DIR) ->
                 continue
             try:
                 df = pd.read_csv(mpath)
-                if len(df):
-                    row = {c: ("" if pd.isna(v) else str(v))
-                           for c, v in df.iloc[0].to_dict().items()}
-                    rows.append(row)
+                if not len(df):
+                    continue
+                row = {c: ("" if pd.isna(v) else str(v))
+                       for c, v in df.iloc[0].to_dict().items()}
+                exp_name = row.get("exp_name") or exp_dir.name
+                if not row.get("experiment_type"):
+                    row["experiment_type"] = classify_experiment_type(exp_name)
+                    pd.DataFrame([row], columns=METADATA_COLUMNS).to_csv(mpath, index=False)
+                rows.append(row)
             except Exception as e:
                 print(f"[loader] skipping {mpath}: {type(e).__name__}: {e}")
     index_df = pd.DataFrame(rows, columns=METADATA_COLUMNS)
@@ -479,6 +518,8 @@ def saveExperimentData(
     out_dir = _structured_dir_for(name)
     meta_row = {c: str(metadata.get(c, "")) for c in METADATA_COLUMNS}
     meta_row["exp_name"] = name  # exp_name is canonical
+    if not meta_row.get("experiment_type"):
+        meta_row["experiment_type"] = classify_experiment_type(name)
     _write_csvs(out_dir, sensors, gt, meta_row)
     rebuild_metadata_index()
     return out_dir

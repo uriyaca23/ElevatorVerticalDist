@@ -1,2 +1,2 @@
-exp_name,experimenter,phone,location,description,date,time
-UriyaCohenEliya_beitYitzchakiRaanana_GooglePixel_15-04-2026_exp6,Uriya Cohen-Eliya,Samsung SM-A235F,בניין B בית יצחקי רעננה,"בניין B בית יצחקי רעננה. מעלית שדומה לבניין מגורים, ניתן ללחוץ על הרבה כפתורים, יחסית איטית וחלשה",15.4.2026,15:06
+exp_name,experimenter,phone,location,description,date,time,experiment_type
+UriyaCohenEliya_beitYitzchakiRaanana_GooglePixel_15-04-2026_exp6,Uriya Cohen-Eliya,Samsung SM-A235F,בניין B בית יצחקי רעננה,"בניין B בית יצחקי רעננה. מעלית שדומה לבניין מגורים, ניתן ללחוץ על הרבה כפתורים, יחסית איטית וחלשה",15.4.2026,15:06,test

@@ -1,2 +1,2 @@
-exp_name,experimenter,phone,location,description,date,time
-eyalyakir_milleniumHotel_SamsungSM-A235F_15-04-2026_exp1,Eyal Yakir,Samsung SM-A235F,מלון פרמיה מלניום,"ירידה במעלית, ירידה במדרגות, הליכה לחדר אוכל, אכילה, חזרה, עלייה במעלית",15.4.2026,11:49
+exp_name,experimenter,phone,location,description,date,time,experiment_type
+eyalyakir_milleniumHotel_SamsungSM-A235F_15-04-2026_exp1,Eyal Yakir,Samsung SM-A235F,מלון פרמיה מלניום,"ירידה במעלית, ירידה במדרגות, הליכה לחדר אוכל, אכילה, חזרה, עלייה במעלית",15.4.2026,11:49,train

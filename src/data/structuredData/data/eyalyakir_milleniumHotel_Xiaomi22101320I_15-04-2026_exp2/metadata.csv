@@ -1,2 +1,2 @@
-exp_name,experimenter,phone,location,description,date,time
-eyalyakir_milleniumHotel_Xiaomi22101320I_15-04-2026_exp2,Eyal Yakir,Xiaomi 22101320I,מלון פרמיה מלניום,רק בבניין בלי מדרגות מגוון קומות ואוטיזם במעלית,15.4.2026,13:20
+exp_name,experimenter,phone,location,description,date,time,experiment_type
+eyalyakir_milleniumHotel_Xiaomi22101320I_15-04-2026_exp2,Eyal Yakir,Xiaomi 22101320I,מלון פרמיה מלניום,רק בבניין בלי מדרגות מגוון קומות ואוטיזם במעלית,15.4.2026,13:20,train
