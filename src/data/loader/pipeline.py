@@ -53,6 +53,8 @@ from .constants import (
 )
 from .parsing import (
     _find_sensor_log,
+    _first_boot_ms_in_log,
+    _parse_iso_filename_to_ms,
     _parse_metadata_file,
     _parse_sensor_log,
 )
@@ -118,6 +120,28 @@ def list_experiments(
 # Parsing + GT derivation
 # --------------------------------------------------------------------------
 
+def _wall_clock_offset_ms(primary_log: Path) -> int:
+    """Offset to add to a boot-time `timestamp_ms` to put it on Unix-epoch ms.
+
+    Reference point: the smallest valid sample timestamp in the raw
+    sensorLog (boot ms) maps to the wall-clock start encoded in the
+    sensorLog filename (Unix epoch ms, local-tz interpretation).
+    """
+    return _parse_iso_filename_to_ms(primary_log) - _first_boot_ms_in_log(primary_log)
+
+
+def _shift_timestamps_inplace(
+    frames: dict[str, pd.DataFrame], offset_ms: int,
+) -> None:
+    """Add `offset_ms` to every frame's `timestamp_ms` column (in place)."""
+    if offset_ms == 0:
+        return
+    for df in frames.values():
+        if df is None or df.empty or "timestamp_ms" not in df.columns:
+            continue
+        df["timestamp_ms"] = df["timestamp_ms"].astype("int64") + int(offset_ms)
+
+
 def getExperimentRawParsed(
     exp: Path | str,
     plot_out_path: Path | str | None = None,
@@ -128,6 +152,11 @@ def getExperimentRawParsed(
     primary's PRS frame is swapped with the secondary's PRS (start-time
     aligned onto the primary's uptime timebase). When `plot_out_path` is
     provided, the diagnostic `forBarometer_alignment.png` is written there.
+
+    The returned `timestamp_ms` is wall-clock Unix epoch ms (derived from the
+    sensorLog filename's `YYYYMMDDTHHMMSS` token), not boot uptime.
+    Secondary-barometer alignment runs in boot time first; the wall-clock
+    shift is applied last so both devices end up on the same wall-clock.
     """
     raw_dir = _resolve_raw_dir(exp)
     primary_log = _find_sensor_log(raw_dir)
@@ -142,6 +171,14 @@ def getExperimentRawParsed(
         else:
             plot_path = Path(plot_out_path) if plot_out_path is not None else None
             frames = _merge_secondary_prs(frames, primary_log, secondary_log, plot_path)
+
+    try:
+        offset_ms = _wall_clock_offset_ms(primary_log)
+    except (ValueError, OSError) as e:
+        print(f"[loader] could not derive wall-clock offset for {primary_log.name} "
+              f"({type(e).__name__}: {e}); leaving timestamps in boot time")
+    else:
+        _shift_timestamps_inplace(frames, offset_ms)
 
     return frames
 

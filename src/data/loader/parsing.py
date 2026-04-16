@@ -16,7 +16,9 @@ from src.physics import pressure_to_altitude
 from .constants import DATA_ROOT, SENSOR_COLUMNS
 
 
-_ISO_FILENAME_RE = re.compile(r"sensorLog_(\d{8}T\d{6})\.txt$")
+# Accept any `...YYYYMMDDTHHMMSS.txt` tail — some filenames carry extra tokens
+# between `sensorLog_` and the ISO timestamp (e.g. `sensorLog_abc_xyz_<iso>.txt`).
+_ISO_FILENAME_RE = re.compile(r"(\d{8}T\d{6})\.txt$")
 
 
 def _normalize_exp(exp: int | str) -> str:
@@ -100,9 +102,44 @@ def _parse_metadata_file(meta_path: Path) -> dict[str, str]:
 
 
 def _parse_iso_filename_to_ms(log_path: Path) -> int:
-    """Extract wall-clock start ms from `sensorLog_YYYYMMDDTHHMMSS.txt`."""
+    """Extract wall-clock start ms (Unix epoch) from
+    `sensorLog_YYYYMMDDTHHMMSS.txt`.
+
+    The filename timestamp is interpreted in the machine's local timezone
+    (matches the convention of `metadata.txt` `Date`/`Time` fields, which are
+    also recorded in local time on the device).
+    """
     m = _ISO_FILENAME_RE.search(log_path.name)
     if not m:
         raise ValueError(f"Cannot parse ISO timestamp from filename: {log_path.name}")
     dt = datetime.strptime(m.group(1), "%Y%m%dT%H%M%S")
     return int(dt.timestamp() * 1000)
+
+
+def _first_boot_ms_in_log(log_path: Path) -> int:
+    """Return the smallest valid `timestamp_ms` in the raw sensorLog file.
+
+    Scans the whole file (cheap — just reads first column) and returns the
+    minimum, since lines from different sensors can interleave slightly out
+    of order. Used to compute the boot→wall-clock offset.
+    """
+    from .constants import SENSOR_COLUMNS as _SC
+    best: int | None = None
+    with log_path.open() as f:
+        for line in f:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 3:
+                continue
+            ts, sensor, *values = parts
+            cols = _SC.get(sensor)
+            if cols is None or len(values) != len(cols):
+                continue
+            try:
+                t = int(ts)
+            except ValueError:
+                continue
+            if best is None or t < best:
+                best = t
+    if best is None:
+        raise ValueError(f"No valid sensor lines found in {log_path}")
+    return best

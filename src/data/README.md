@@ -95,6 +95,27 @@ directly. Otherwise the raw sensorLog is parsed, GT is derived from the
 barometer (`PRS.GT_height_m` → pressure-filter segmenter), and the CSVs are
 written.
 
+Timebase: `timestamp_ms` (sensor CSVs) and `start_ms` / `end_ms` (gt.csv) are
+**wall-clock Unix epoch milliseconds**, not phone uptime. The reference is the
+ISO timestamp embedded in the raw `sensorLog_YYYYMMDDTHHMMSS.txt` filename
+(interpreted as local time on the recording device): the smallest boot
+timestamp in the raw log is mapped to that wall-clock instant, and every
+sample / GT edge is offset by the same delta so relative durations are
+preserved. The forBarometer secondary device is start-aligned in boot time
+first, then receives the primary's wall-clock shift.
+
+Migrating older CSVs (one-off): when an existing experiment was processed
+before this change, its CSVs are still in boot time. Run
+
+```bash
+venv/bin/python -m src.data.migrate_to_wallclock          # all experiments
+venv/bin/python -m src.data.migrate_to_wallclock <name>   # one
+```
+
+to shift them in place. The script is idempotent (skips any CSV whose first
+`timestamp_ms` already looks like Unix epoch ms) and never re-derives GT —
+your edits in `gt.csv` are preserved, only their time axis moves.
+
 Other useful entry points:
 
 - `getExperimentRawParsed(exp)` — parse a raw sensorLog into per-sensor frames
@@ -188,8 +209,8 @@ Defined in `loader/constants.py`.
 
 | File              | Columns                                                                 |
 |-------------------|-------------------------------------------------------------------------|
-| `<SENSOR>.csv`    | `timestamp_ms` + sensor-specific (e.g. `ACC`: `x, y, z`; `PRS`: `pressure`, `GT_height_m`). All frames get an `exp_name` column stamped on load. |
-| `gt.csv`          | `start_ms, end_ms, type, description, signalClearRecording` (bool, defaults to `True` — set to `False` to mark intervals where the recording is unclear/unreliable) |
+| `<SENSOR>.csv`    | `timestamp_ms` (wall-clock Unix epoch ms) + sensor-specific (e.g. `ACC`: `x, y, z`; `PRS`: `pressure`, `GT_height_m`). All frames get an `exp_name` column stamped on load. |
+| `gt.csv`          | `start_ms, end_ms` (wall-clock Unix epoch ms), `type, description, signalClearRecording` (bool, defaults to `True` — set to `False` to mark intervals where the recording is unclear/unreliable) |
 | `metadata.csv`    | `exp_name, experimenter, phone, location, description, date, time`      |
 | `baramoshka.csv`  | `floor, height`                                                         |
 

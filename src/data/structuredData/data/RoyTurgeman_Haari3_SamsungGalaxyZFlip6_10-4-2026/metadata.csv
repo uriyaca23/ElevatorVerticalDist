@@ -1,2 +1,2 @@
-exp_name,experimenter,phone,location,description,date,time
-RoyTurgeman_Haari3_SamsungGalaxyZFlip6_10-4-2026,Roy Turgeman,Samsung Galaxy Z Flip6,"32.0658, 34.8233",,10.4.2026,23:46
+exp_name,experimenter,phone,location,description,date,time,experiment_type
+RoyTurgeman_Haari3_SamsungGalaxyZFlip6_10-4-2026,Roy Turgeman,Samsung Galaxy Z Flip6,"32.0658, 34.8233",,10.4.2026,23:46,train
