@@ -14,10 +14,12 @@ import importlib
 import numpy as np
 import pandas as pd
 
-from ..acc_segmentation import (
+from src.segmentation.algorithms.accelerometer_only.acc_segmentation import (
     _compute_a_vert, compute_velocity, lowpass,
 )
-from .templates import Templates, load_templates
+from src.segmentation.algorithms.accelerometer_only.template_match.templates import (
+    Templates, load_templates,
+)
 
 _config_mod = importlib.import_module("src.segmentation.algorithms.class")
 TemplateMatchConfig = _config_mod.TemplateMatchConfig

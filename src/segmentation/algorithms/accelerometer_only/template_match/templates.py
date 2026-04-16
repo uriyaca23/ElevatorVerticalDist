@@ -19,10 +19,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from ..acc_segmentation import (
+from src.segmentation.algorithms.accelerometer_only.acc_segmentation import (
     _compute_a_vert, compute_velocity, lowpass,
 )
-from ...metrics import ci_center
+from src.segmentation.algorithms.metrics import ci_center
 
 
 @dataclass
