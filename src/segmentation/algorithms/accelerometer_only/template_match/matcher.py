@@ -14,8 +14,9 @@ import importlib
 import numpy as np
 import pandas as pd
 
+from src.physics import calculate_velocity_from_accelerometer
 from src.segmentation.algorithms.accelerometer_only.acc_segmentation import (
-    _compute_a_vert, compute_velocity, lowpass,
+    _compute_a_vert,
 )
 from src.segmentation.algorithms.accelerometer_only.template_match.templates import (
     Templates, load_templates,
@@ -121,7 +122,7 @@ def compute_match_scores(
     ay = data[config.y_col].to_numpy(dtype=float)
     az = data[config.z_col].to_numpy(dtype=float)
     a_vert = _compute_a_vert(ax, ay, az, fs)
-    v_lpf = lowpass(compute_velocity(a_vert, fs), fs, cutoff_hz=float(config.lpf_hz))
+    v_lpf = calculate_velocity_from_accelerometer(ax, ay, az, fs)
 
     nv_up = ncc_slide(v_lpf, templates.pulse_up_v)
     nv_dn = ncc_slide(v_lpf, templates.pulse_down_v)

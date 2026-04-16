@@ -43,6 +43,7 @@ from src.data.loader import (
 )
 from src.data.loader.alignment import _smoothed_velocity
 from src.data.loader.pipeline import _coerce_bool
+from src.physics import calculate_velocity_from_accelerometer
 
 
 VALID_TYPES = ["outside", "up", "down"]
@@ -92,6 +93,26 @@ def _draw_acc(ax, data, t0):
     ax.set_ylabel("|a| (m/s²)")
 
 
+def _draw_acc_velocity(ax, data, t0):
+    df = data["ACC"]
+    ts_ms = df["timestamp_ms"].to_numpy(dtype=float)
+    t = (ts_ms - t0) / 1000.0
+    if len(ts_ms) < 2:
+        ax.set_ylabel("vz_acc (m/s)")
+        return
+    dt_ms = float(np.median(np.diff(ts_ms)))
+    fs = 1000.0 / dt_ms if dt_ms > 0 else 100.0
+    v = calculate_velocity_from_accelerometer(
+        df["x"].to_numpy(dtype=float),
+        df["y"].to_numpy(dtype=float),
+        df["z"].to_numpy(dtype=float),
+        fs,
+    )
+    ax.plot(t, v, color="tab:blue", lw=0.8)
+    ax.axhline(0, color="gray", lw=0.5, ls=":")
+    ax.set_ylabel("vz_acc (m/s)")
+
+
 def _draw_gyr(ax, data, t0):
     df = data["GYR"]
     t = (df["timestamp_ms"].to_numpy(dtype=float) - t0) / 1000.0
@@ -109,11 +130,12 @@ def _draw_mag(ax, data, t0):
 
 
 PANEL_DRAWERS = [
-    ("altitude", "PRS", _draw_altitude),
-    ("velocity", "PRS", _draw_velocity),
-    ("acc",      "ACC", _draw_acc),
-    ("gyr",      "GYR", _draw_gyr),
-    ("mag",      "MAG", _draw_mag),
+    ("altitude",     "PRS", _draw_altitude),
+    ("velocity",     "PRS", _draw_velocity),
+    ("acc",          "ACC", _draw_acc),
+    ("acc_velocity", "ACC", _draw_acc_velocity),
+    ("gyr",          "GYR", _draw_gyr),
+    ("mag",          "MAG", _draw_mag),
 ]
 
 
