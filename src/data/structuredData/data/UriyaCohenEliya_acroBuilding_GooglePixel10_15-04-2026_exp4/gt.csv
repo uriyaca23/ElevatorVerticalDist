@@ -1,7 +1,5 @@
 start_ms,end_ms,type,description,signalClearRecording,exp_name
-224866648,224879744,outside,,True,UriyaCohenEliya_acroBuilding_GooglePixel10_15-04-2026_exp4
-224879744,224886681,up,,True,UriyaCohenEliya_acroBuilding_GooglePixel10_15-04-2026_exp4
-224886681,225450968,outside,,True,UriyaCohenEliya_acroBuilding_GooglePixel10_15-04-2026_exp4
+224864371,225450968,outside,,True,UriyaCohenEliya_acroBuilding_GooglePixel10_15-04-2026_exp4
 225450968,225474430,up,,True,UriyaCohenEliya_acroBuilding_GooglePixel10_15-04-2026_exp4
 225474430,225500343,outside,,True,UriyaCohenEliya_acroBuilding_GooglePixel10_15-04-2026_exp4
 225500343,225517593,down,,True,UriyaCohenEliya_acroBuilding_GooglePixel10_15-04-2026_exp4

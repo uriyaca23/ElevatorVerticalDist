@@ -1,7 +1,5 @@
 start_ms,end_ms,type,description,signalClearRecording,exp_name
-226380680,226515991,outside,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
-226515991,226526871,down,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
-226526871,226914943,outside,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
+226373593,226914943,outside,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
 226914943,226941751,up,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
 226941751,226956675,outside,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
 226956675,226982927,down,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
@@ -24,8 +22,8 @@ start_ms,end_ms,type,description,signalClearRecording,exp_name
 227232785,227248383,outside,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
 227248383,227261651,down,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
 227261651,227298353,outside,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
-227298353,227348494,down,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
-227348494,227362501,outside,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
+227298353,227311893,down,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
+227313501,227328772,down,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
 227362501,227390703,up,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
 227390703,227404471,outside,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
 227404471,227431996,down,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
@@ -34,3 +32,4 @@ start_ms,end_ms,type,description,signalClearRecording,exp_name
 227555429,227607777,outside,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
 227607777,227624469,up,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
 227624469,227710868,outside,,True,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5
+227329576,227350205,down,,True,
