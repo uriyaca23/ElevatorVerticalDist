@@ -1,2 +1,2 @@
-exp_name,experimenter,phone,location,description,date,time,experiment_type
-UriyaCohenEliya_beitYitzchakiRaanana_GooglePixel10_15-04-2026_exp6,Uriya Cohen-Eliya,Google Pixel 10,בניין B בית יצחקי רעננה,"בניין B בית יצחקי רעננה. מעלית שדומה לבניין מגורים, ניתן ללחוץ על הרבה כפתורים, יחסית איטית וחלשה",15.4.2026,15:06,test
+exp_name,experimenter,phone,location,description,date,time,experiment_type,temperature_c,start_floor
+UriyaCohenEliya_beitYitzchakiRaanana_GooglePixel10_15-04-2026_exp6,Uriya Cohen-Eliya,Google Pixel 10,בניין B בית יצחקי רעננה,"בניין B בית יצחקי רעננה. מעלית שדומה לבניין מגורים, ניתן ללחוץ על הרבה כפתורים, יחסית איטית וחלשה",15.4.2026,15:06,test,30,Ground Floor

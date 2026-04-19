@@ -1,0 +1,2 @@
+segment_idx,type,start_ms,end_ms,raw_dh_m,corrected_dh_m,estimated_end_alt_m,snapped_floor,snap_distance_m
+53,up,1775768635768,1775768646792,4.947954856477963,2.5,25.947954856477963,Roof Level,2.4479548564779634

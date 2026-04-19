@@ -72,6 +72,7 @@ SENSOR_COLUMNS: dict[str, list[str]] = {
 METADATA_COLUMNS = [
     "exp_name", "experimenter", "phone", "location",
     "description", "date", "time", "experiment_type",
+    "temperature_c", "start_floor",
 ]
 
 # Allowed values for the metadata `experiment_type` column.

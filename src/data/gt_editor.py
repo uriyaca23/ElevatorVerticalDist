@@ -46,7 +46,7 @@ from src.data.loader import (
     saveExperimentData,
 )
 from src.data.loader.alignment import _smoothed_velocity
-from src.data.loader.pipeline import _coerce_bool, addGTtoSegment
+from src.data.loader.pipeline import _coerce_bool, addGTtoSegment, load_baramoshka
 from src.physics import calculate_velocity_from_accelerometer
 
 
@@ -782,10 +782,23 @@ class GtEditor(tk.Tk):
     # ---------- Edit actions ----------
 
     def _recompute_height_diffs(self):
-        """Refresh ``height_diff_m`` for every row via the barometer predictor."""
+        """Refresh ``height_diff_m`` for every row.
+
+        Uses gramushka snap mode when a populated ``baramoshka.csv`` +
+        ``start_floor`` are available for this experiment; otherwise falls
+        back to temperature-aware pure-barometer Δh. See
+        :func:`src.data.loader.pipeline.addGTtoSegment`.
+        """
         if self.pipeline is None:
             return
-        self.pipeline.gt = addGTtoSegment(self.pipeline.data, self.pipeline.gt)
+        exp_name = self.pipeline.metaData.get("exp_name", "") if self.pipeline.metaData else ""
+        baramoshka = load_baramoshka(exp_name) if exp_name else None
+        self.pipeline.gt = addGTtoSegment(
+            self.pipeline.data,
+            self.pipeline.gt,
+            metadata=self.pipeline.metaData,
+            baramoshka=baramoshka,
+        )
 
     def _on_apply(self):
         sel = self.tree.selection()

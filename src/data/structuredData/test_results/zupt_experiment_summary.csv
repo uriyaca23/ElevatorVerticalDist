@@ -1,0 +1,26 @@
+pixel_name,phone,n_segments,median_err_vs_pixel_m,median_err_vs_gt_m,max_err_vs_pixel_m
+UriyaCohenEliya_BarIlan2Herzelia_Pixel10_24-3-2026,UriyaCohenEliya_BarIlan2Herzelia_Pixel10_24-3-2026 (SELF),44,0.0,0.837,0.0
+UriyaCohenEliya_acroBuilding_GooglePixel10_15-04-2026_exp4,UriyaCohenEliya_acroBuilding_GooglePixel10_15-04-2026_exp4 (SELF),12,0.0,2.413,0.0
+UriyaCohenEliya_acroBuilding_GooglePixel10_15-04-2026_exp4,eyalyakir_acroBuilding_SamsungSM-S911B_15-04-2026_exp4,12,6.465,,22.802
+UriyaCohenEliya_acroBuilding_GooglePixel10_15-04-2026_exp4,eyalyakir_acroBuilding_Xiaomi22101320I_15-04-2026_exp4,12,0.971,,7.562
+UriyaCohenEliya_acroBuilding_GooglePixel10_15-04-2026_exp4,UriyaCohenEliya_acroBuilding_SamsungSM-A235F_15-04-2026_exp4,12,4.417,,7.992
+UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5,UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5 (SELF),18,0.0,4.602,0.0
+UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5,eyalyakir_beitMansour1_SamsungSM-S911B_15-04-2026_exp5,18,1.846,,24.241
+UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5,eyalyakir_beitMansour1_Xiaomi22101320I_15-04-2026_exp5,18,8.808,,44.589
+UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5,UriyaCohenEliya_beitMansour1_SamsungSM-A235F_15-04-2026_exp5,18,3.484,,17.722
+UriyaCohenEliya_beitYitzchakiRaanana_GooglePixel10_15-04-2026_exp6,UriyaCohenEliya_beitYitzchakiRaanana_GooglePixel10_15-04-2026_exp6 (SELF),29,0.0,0.345,0.0
+UriyaCohenEliya_beitYitzchakiRaanana_GooglePixel10_15-04-2026_exp6,eyalyakir_beitYitzchakiRaanana_SamsungSM-S911B_15-04-2026_exp6,29,0.452,,37.624
+UriyaCohenEliya_beitYitzchakiRaanana_GooglePixel10_15-04-2026_exp6,eyalyakir_beitYitzchakiRaanana_Xiaomi22101320I_15-04-2026_exp6,21,0.217,,17.811
+UriyaCohenEliya_beitYitzchakiRaanana_GooglePixel10_15-04-2026_exp6,UriyaCohenEliya_beitYitzchakiRaanana_SamsungSM-A235F_15-04-2026_exp6,29,0.121,,13.581
+UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp1,UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp1 (SELF),10,0.0,0.263,0.0
+UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp1,eyalyakir_milleniumHotel_SamsungSM-A235F_15-04-2026_exp1,10,0.058,,1.609
+UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp1,eyalyakir_milleniumHotel_SamsungSM-S911B_15-04-2026_exp1,10,0.367,,12.792
+UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp1,UriyaCohenEliya_milleniumHotel_Xiaomi22101320I_15-04-2026_exp1,10,2.886,,22.464
+UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp2,UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp2 (SELF),31,0.0,0.321,0.0
+UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp2,eyalyakir_milleniumHotel_SamsungSM-S911B_15-04-2026_exp2,31,0.22,,3.616
+UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp2,eyalyakir_milleniumHotel_Xiaomi22101320I_15-04-2026_exp2,31,0.177,,4.73
+UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp2,UriyaCohenEliya_milleniumHotel_SamsungSM-A235F_15-04-2026_exp2,31,0.121,,1.021
+UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp3,UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp3 (SELF),12,0.0,0.149,0.0
+UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp3,eyalyakir_milleniumHotel_SamsungSM-S911B_15-04-2026_exp3,12,0.237,,0.92
+UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp3,eyalyakir_milleniumHotel_Xiaomi22101320I_15-04-2026_exp3,12,0.047,,0.296
+UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp3,UriyaCohenEliya_milleniumHotel_SamsungSM-A235F_15-04-2026_exp3,12,0.08,,0.327

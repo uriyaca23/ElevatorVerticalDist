@@ -1,0 +1,2 @@
+segment_idx,type,start_ms,end_ms,raw_dh_m,corrected_dh_m,estimated_end_alt_m,snapped_floor,snap_distance_m
+2,up,1776252199919,1776252223381,27.777879293171665,29.69,33.277879293171665,Floor 8,1.9121207068283328

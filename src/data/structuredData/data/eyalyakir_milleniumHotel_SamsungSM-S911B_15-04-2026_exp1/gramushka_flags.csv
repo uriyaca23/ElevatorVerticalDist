@@ -1,0 +1,2 @@
+segment_idx,type,start_ms,end_ms,raw_dh_m,corrected_dh_m,estimated_end_alt_m,snapped_floor,snap_distance_m
+13,outside,1776244073903,1776244079110,-1.794292338499801,0.0,15.0057076615002,Entrance Floor,1.794292338499801

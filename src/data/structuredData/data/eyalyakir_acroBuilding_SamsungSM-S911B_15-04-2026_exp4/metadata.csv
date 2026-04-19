@@ -1,2 +1,2 @@
-exp_name,experimenter,phone,location,description,date,time,experiment_type
-eyalyakir_acroBuilding_SamsungSM-S911B_15-04-2026_exp4,Eyal Yakir,Samsung SM-S911B,בניין אקרו נדלן,בניין אקרו נדלן מעלית שחייבים לצאת החוצה בכל פעם,15.4.2026,14:13,train
+exp_name,experimenter,phone,location,description,date,time,experiment_type,temperature_c,start_floor
+eyalyakir_acroBuilding_SamsungSM-S911B_15-04-2026_exp4,Eyal Yakir,Samsung SM-S911B,בניין אקרו נדלן,בניין אקרו נדלן מעלית שחייבים לצאת החוצה בכל פעם,15.4.2026,14:13,train,30,Ground Floor
