@@ -214,6 +214,37 @@ Defined in `loader/constants.py`.
 | `metadata.csv`    | `exp_name, experimenter, phone, location, description, date, time`      |
 | `baramoshka.csv`  | `floor, height`                                                         |
 
+### Gramushka → baramoshka → `height_diff_m`
+
+Each building has a reference table at `src/data/gramushka/<building>/gramushka.csv`
+mapping floor names to absolute elevations. The `populate_baramoshka`
+script copies that table into every experiment's `baramoshka.csv` (with
+the columns renamed `Floor Name`→`floor`, `Elevation (m)`→`height`).
+
+When `baramoshka.csv` is populated and `metadata.csv` has a `start_floor`
+row, `addGTtoSegment` runs in **snap mode**: temperature-aware barometer
+altitudes are integrated from the known start-floor height and every
+segment endpoint is snapped to the nearest baramoshka floor. This makes
+`gt.csv`'s `height_diff_m` the difference of successive snapped floor
+heights — robust to barometer drift. Segments whose estimated endpoint
+is more than 1.5 m from any floor are listed in
+`structuredData/data/<exp>/gramushka_flags.csv` for manual review;
+`SNAP_AMBIGUITY_THRESHOLD_M` in `loader/pipeline.py` controls the cutoff.
+
+If the baramoshka is empty (e.g. exp3 at Millenium) or the start_floor
+doesn't resolve, the function falls back to pure temperature-aware
+barometer Δh (standard ISA at 15 °C when no `temperature_c` is set in
+metadata).
+
+### `dataset_cleanup/` package
+
+The full cleanup pipeline — gramushka snap, Pixel-10-anchored time
+calibration, per-phone-PRS reference consolidation, noisy-segment
+tagging, and verification plots — lives under
+[`dataset_cleanup/`](dataset_cleanup/README.md). See that package's
+README for the run order. Everything there is additive to the loader
+above; no public API was removed or renamed.
+
 Sensor column schemas for the raw parser:
 
 | Sensor   | Columns                                           |

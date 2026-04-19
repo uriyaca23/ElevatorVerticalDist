@@ -29,12 +29,7 @@ from typing import Iterator
 
 import pandas as pd
 
-from src.segmentation.algorithms import (
-    SEGMENT_ALGORITHM_CONFIG, SegmentAlgorithm, Segmenter,
-)
-from src.prediction.algorithms import (
-    PREDICT_ALGORITHM_CONFIG, PredictAlgorithm, Predictor,
-)
+from src.physics.barometric import pressure_to_altitude
 
 from .alignment import _merge_secondary_prs
 from .constants import (
@@ -80,12 +75,16 @@ def _structured_dir_for(name: str) -> Path:
 
 
 def classify_experiment_type(exp_name: str) -> str:
-    """Return `'test'` if the experiment name contains `exp6`, else `'train'`.
+    """Return `'test'` if the experiment was recorded at Beit Yitzchaki
+    Raanana, else `'train'`.
 
-    The rule is intentionally simple so `list_experiments` / metadata stays
-    deterministic from folder names alone.
+    Project-level split (Uriya, 2026-04-19): the Beit Yitzchaki
+    experiments are the held-out cross-building test set; everything
+    else (Millenium, Acro, Beit Mansour, Bar-Ilan 2, Haari) is train.
+    The rule is deterministic from folder names alone so
+    `list_experiments` / metadata stays consistent across reruns.
     """
-    return EXPERIMENT_TYPE_TEST if "exp6" in exp_name else EXPERIMENT_TYPE_TRAIN
+    return EXPERIMENT_TYPE_TEST if "beityitzchaki" in exp_name.lower() else EXPERIMENT_TYPE_TRAIN
 
 
 def list_experiments(
@@ -256,6 +255,12 @@ def _segments_to_full_gt(
 
 
 def _derive_gt_from_prs(prs: pd.DataFrame) -> pd.DataFrame:
+    # Lazy-import the segmenter so that merely importing `pipeline` doesn't pull
+    # in the accelerometer/quality stack (useful for tools that only need I/O).
+    from src.segmentation.algorithms import (
+        SEGMENT_ALGORITHM_CONFIG, SegmentAlgorithm, Segmenter,
+    )
+
     t0_ms = int(prs["timestamp_ms"].iloc[0])
     t_end_ms = int(prs["timestamp_ms"].iloc[-1])
     t_sec = (prs["timestamp_ms"].to_numpy(dtype=float) - t0_ms) / 1000.0
@@ -268,15 +273,140 @@ def _derive_gt_from_prs(prs: pd.DataFrame) -> pd.DataFrame:
     return _segments_to_full_gt(segments, t0_ms, t_end_ms)
 
 
+# Threshold (meters) above which a gramushka snap is considered ambiguous.
+# Uriya's rule (2026-04-19): ambiguous snaps mean something is wrong — flag
+# rather than silently accept.
+SNAP_AMBIGUITY_THRESHOLD_M = 1.5
+
+
+def _coerce_temperature(raw: str | float | None) -> float | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _lookup_floor_height(baramoshka: pd.DataFrame, floor_name: str) -> float | None:
+    """Find a floor's height from a baramoshka DataFrame.
+
+    Matching order (each case-insensitive on trimmed names):
+      1. exact match
+      2. substring either way (handles ``"Ground Floor"`` ↔ ``"Street Level / Ground"``)
+      3. only when `floor_name` contains the token ``"ground"``: the row
+         whose numeric height is closest to 0.0 (covers the
+         ``Bar Ilan 2`` entry ``"Street Level / Ground" = ±0.00``).
+
+    Returns ``None`` when nothing matches (e.g. a building whose gramushka has
+    no ground-level entry at all — user attention required).
+    """
+    if baramoshka is None or baramoshka.empty or not floor_name:
+        return None
+    target = str(floor_name).strip().lower()
+    names = baramoshka["floor"].astype(str).str.strip().str.lower()
+
+    # 1. exact
+    exact = baramoshka.loc[names == target]
+    if len(exact):
+        return float(exact["height"].iloc[0])
+
+    # 2. substring (either direction)
+    sub = baramoshka.loc[names.str.contains(target, regex=False) | names.apply(lambda n: target in n or n in target)]
+    if len(sub):
+        return float(sub["height"].iloc[0])
+
+    # 3. fallback for generic "ground" requests
+    if "ground" in target:
+        idx = int((baramoshka["height"].astype(float) - 0.0).abs().idxmin())
+        if abs(float(baramoshka["height"].iloc[idx])) <= 1.0:
+            return float(baramoshka["height"].iloc[idx])
+
+    return None
+
+
+def _snap_altitude_to_floor(
+    altitude_m: float, baramoshka: pd.DataFrame,
+) -> tuple[float, str, float]:
+    """Snap `altitude_m` to the closest entry in `baramoshka`.
+
+    Returns ``(snapped_height_m, floor_name, distance_m)``. `distance_m` is the
+    absolute gap between the input altitude and the chosen floor — the caller
+    flags the segment as inconsistent when this exceeds
+    :data:`SNAP_AMBIGUITY_THRESHOLD_M`.
+    """
+    diffs = (baramoshka["height"] - altitude_m).abs()
+    idx = int(diffs.idxmin())
+    return (
+        float(baramoshka["height"].iloc[idx]),
+        str(baramoshka["floor"].iloc[idx]),
+        float(diffs.iloc[idx]),
+    )
+
+
+def _compute_raw_dh_per_segment(
+    prs: pd.DataFrame, gt: pd.DataFrame, temperature_c: float | None,
+    edge_k: int = 1,
+) -> list[float]:
+    """Temperature-aware Δh per GT segment, edge-averaged against noise.
+
+    Returns a list aligned with ``gt`` rows. Rows with <2 samples yield 0.0.
+    """
+    if prs is None or prs.empty or "pressure" not in prs.columns:
+        return [0.0] * len(gt)
+
+    ts = prs["timestamp_ms"].astype("int64").to_numpy()
+    p_all = prs["pressure"].to_numpy(dtype=float)
+    alt_all = pressure_to_altitude(p_all, temperature_c=temperature_c)
+
+    import numpy as np
+    alt_all = np.asarray(alt_all, dtype=float)
+    diffs: list[float] = []
+    for _, row in gt.iterrows():
+        s, e = int(row["start_ms"]), int(row["end_ms"])
+        mask = (ts >= s) & (ts < e)
+        seg = alt_all[mask]
+        if seg.size < 2:
+            diffs.append(0.0)
+            continue
+        k = max(1, min(edge_k, seg.size // 2))
+        diffs.append(float(np.mean(seg[-k:]) - np.mean(seg[:k])))
+    return diffs
+
+
 def addGTtoSegment(
     sensors: dict[str, pd.DataFrame],
     gt: pd.DataFrame,
+    metadata: dict[str, str] | None = None,
+    baramoshka: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Populate ``height_diff_m`` for each GT row via the barometer predictor.
+    """Populate ``height_diff_m`` for each GT row.
 
-    For every ``(start_ms, end_ms)`` interval we slice the PRS frame and run
-    :class:`Predictor` (barometer algorithm) to compute the segment's altitude
-    change. Returns a new ``gt`` DataFrame with the column overwritten.
+    Modes:
+
+    * **Snap mode** (``baramoshka`` is populated AND ``metadata["start_floor"]``
+      resolves to a row in it): temperature-aware barometer altitudes are
+      integrated forward from the known start-floor height and every segment
+      endpoint is snapped to the nearest baramoshka floor. ``height_diff_m`` is
+      the difference of successive snapped altitudes — robust to barometer
+      drift because each segment re-anchors to a known floor.
+
+      A per-segment snap-distance is tracked. Any segment whose estimated
+      endpoint falls more than :data:`SNAP_AMBIGUITY_THRESHOLD_M` from any
+      gramushka floor is flagged (see ``gt.attrs["gramushka_snap_flags"]``)
+      — these are the cases Uriya asked to surface because an ambiguous snap
+      indicates something is wrong (drift, segmentation-boundary noise, wrong
+      start_floor, mis-labeled segment type, etc.).
+
+    * **Pure-barometer mode** (no baramoshka or no resolvable start_floor):
+      ``height_diff_m`` is the raw temperature-aware barometer Δh for each
+      segment. Temperature comes from ``metadata["temperature_c"]`` when
+      present; otherwise ISA-standard 15 °C is used.
+
+    Signature change — existing callers that pass only ``(sensors, gt)`` keep
+    the same behavior they had before, except Δh now uses a temperature-aware
+    ISA formula (identical at 15 °C). New callers should pass both
+    ``metadata`` and ``baramoshka`` to enable snap mode.
     """
     gt = gt.copy()
     prs = sensors.get("PRS")
@@ -284,18 +414,58 @@ def addGTtoSegment(
         gt["height_diff_m"] = float("nan")
         return gt
 
-    predictor = Predictor(PREDICT_ALGORITHM_CONFIG(
-        algorithm=PredictAlgorithm.BAROMETER_HEIGHT_DIFF,
-    ))
-    ts = prs["timestamp_ms"].astype("int64").to_numpy()
-    diffs: list[float] = []
-    for _, row in gt.iterrows():
-        s, e = int(row["start_ms"]), int(row["end_ms"])
-        segment = prs.loc[(ts >= s) & (ts < e)]
-        diffs.append(
-            float(predictor.forward(segment)) if len(segment) >= 2 else 0.0
+    temp_c: float | None = None
+    start_floor_name = ""
+    if metadata:
+        temp_c = _coerce_temperature(metadata.get("temperature_c"))
+        start_floor_name = str(metadata.get("start_floor", "") or "").strip()
+
+    has_baramoshka = (
+        baramoshka is not None
+        and not baramoshka.empty
+        and {"floor", "height"}.issubset(baramoshka.columns)
+    )
+    start_alt = (
+        _lookup_floor_height(baramoshka, start_floor_name) if has_baramoshka else None
+    )
+    snap_mode = has_baramoshka and start_alt is not None
+
+    raw_dhs = _compute_raw_dh_per_segment(prs, gt, temp_c)
+
+    if not snap_mode:
+        gt["height_diff_m"] = raw_dhs
+        gt.attrs["gramushka_snap_flags"] = []
+        gt.attrs["gramushka_mode"] = "pure_barometer"
+        return gt
+
+    snapped_dhs: list[float] = []
+    flags: list[dict] = []
+    running_alt = start_alt
+    for i, (_, row) in enumerate(gt.iterrows()):
+        raw = raw_dhs[i]
+        estimated_end = running_alt + raw
+        snapped_end, floor_name, snap_dist = _snap_altitude_to_floor(
+            estimated_end, baramoshka,
         )
-    gt["height_diff_m"] = diffs
+        corrected = snapped_end - running_alt
+        if snap_dist > SNAP_AMBIGUITY_THRESHOLD_M:
+            flags.append({
+                "segment_idx":         i,
+                "type":                str(row.get("type", "")),
+                "start_ms":            int(row["start_ms"]),
+                "end_ms":              int(row["end_ms"]),
+                "raw_dh_m":            raw,
+                "corrected_dh_m":      corrected,
+                "estimated_end_alt_m": estimated_end,
+                "snapped_floor":       floor_name,
+                "snap_distance_m":     snap_dist,
+            })
+        snapped_dhs.append(corrected)
+        running_alt = snapped_end
+
+    gt["height_diff_m"] = snapped_dhs
+    gt.attrs["gramushka_snap_flags"] = flags
+    gt.attrs["gramushka_mode"] = "snap"
     return gt
 
 
@@ -324,13 +494,30 @@ def _iso_date_time_from_filename(raw_dir: Path) -> tuple[str, str]:
     return f"{dt.day}.{dt.month}.{dt.year}", f"{dt.hour:02d}:{dt.minute:02d}"
 
 
+def _parse_temperature_c(raw_val: str) -> str:
+    """Extract numeric Celsius value from a `Temperature:` metadata.txt value.
+
+    Accepts `"14 degrees Celsius"`, `"14C"`, `"14 °C"`, `"14"` — anything whose
+    leading token parses as a number. Returns the value as a bare string
+    (e.g. `"14"` or `"14.5"`) so it round-trips cleanly through CSV I/O.
+    Returns `""` when no number is found.
+    """
+    if not raw_val:
+        return ""
+    import re
+    m = re.search(r"-?\d+(?:\.\d+)?", str(raw_val))
+    return m.group(0) if m else ""
+
+
 def _build_metadata_row(
     exp_name: str, raw_meta: dict[str, str], raw_dir: Path,
 ) -> dict[str, str]:
-    """Map raw metadata.txt keys to the 7-column schema.
+    """Map raw metadata.txt keys to the `METADATA_COLUMNS` schema.
 
     Falls back to the sensorLog filename's ISO timestamp for missing
-    `Date` / `Time` fields.
+    `Date` / `Time` fields. `temperature_c` is parsed from the raw
+    `Temperature:` line; `start_floor` is left blank and filled in separately
+    (it is not present in any raw metadata.txt).
     """
     iso_date, iso_time = _iso_date_time_from_filename(raw_dir)
     return {
@@ -342,6 +529,8 @@ def _build_metadata_row(
         "date":            raw_meta.get("Date", "") or iso_date,
         "time":            raw_meta.get("Time", "") or iso_time,
         "experiment_type": classify_experiment_type(exp_name),
+        "temperature_c":   _parse_temperature_c(raw_meta.get("Temperature", "")),
+        "start_floor":     "",
     }
 
 
@@ -386,15 +575,44 @@ def _has_complete_structured(out_dir: Path, required_sensors: list[str]) -> bool
     return True
 
 
+def load_baramoshka(exp: Path | str) -> pd.DataFrame | None:
+    """Read ``structuredData/data/<name>/baramoshka.csv`` into a DataFrame.
+
+    Returns ``None`` when the file is missing or empty (i.e. no gramushka is
+    associated with this experiment — the corrector treats that as
+    pure-barometer mode).
+    """
+    name = _resolve_raw_dir(exp).name
+    path = _structured_dir_for(name) / BAROMOSHKA_CSV
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return None
+    if df.empty or not {"floor", "height"}.issubset(df.columns):
+        return None
+    return df
+
+
 def _load_structured_triplet(
     out_dir: Path,
 ) -> tuple[dict[str, pd.DataFrame], pd.DataFrame, dict[str, str]]:
     """Read `(sensors, gt, metadata)` from an already-populated
-    `structuredData/data/<name>/` directory."""
+    `structuredData/data/<name>/` directory.
+
+    Only CSVs whose stem matches a known sensor name in
+    :data:`SENSOR_COLUMNS` are loaded into `data` — any other `*.csv`
+    sitting in the experiment folder (auxiliary outputs like
+    ``gramushka_flags.csv``, ``phone_time_verify.csv``, backups) is
+    ignored so downstream code that iterates slices by ``timestamp_ms``
+    can't accidentally pick them up as sensors.
+    """
+    from .constants import SENSOR_COLUMNS
     data: dict[str, pd.DataFrame] = {}
     for csv_path in sorted(out_dir.glob("*.csv")):
         stem = csv_path.stem
-        if stem in (Path(GT_CSV).stem, Path(METADATA_CSV).stem, Path(BAROMOSHKA_CSV).stem):
+        if stem not in SENSOR_COLUMNS:
             continue
         data[stem] = pd.read_csv(csv_path)
 
@@ -523,7 +741,8 @@ def getExperimentData(
                 data, gt, metadata_row = _load_structured_triplet(out_dir)
                 _inject_exp_name(name, data, gt)
                 if "height_diff_m" not in gt.columns or gt["height_diff_m"].isna().all():
-                    gt = addGTtoSegment(data, gt)
+                    bar = load_baramoshka(name)
+                    gt = addGTtoSegment(data, gt, metadata=metadata_row, baramoshka=bar)
                     _inject_exp_name(name, data, gt)
                     gt.to_csv(out_dir / GT_CSV, index=False)
                 return data, gt, metadata_row
@@ -550,10 +769,13 @@ def getExperimentData(
             columns=GT_COLUMNS,
         )
 
-    gt = addGTtoSegment(data, gt)
-
     raw_meta = _parse_metadata_file(raw_dir / METADATA_FILENAME)
     metadata_row = _build_metadata_row(name, raw_meta, raw_dir)
+
+    # First-time build: baramoshka hasn't been populated yet (populator runs
+    # after structuredData exists). Falls through to pure-barometer Δh.
+    bar = load_baramoshka(name)
+    gt = addGTtoSegment(data, gt, metadata=metadata_row, baramoshka=bar)
 
     _inject_exp_name(name, data, gt)
     _write_csvs(out_dir, data, gt, metadata_row)
