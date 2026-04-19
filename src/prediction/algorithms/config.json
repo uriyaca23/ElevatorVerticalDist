@@ -2,5 +2,7 @@
   "barometer_height_diff": {
     "p0_hpa": 1013.25,
     "edge_avg_samples": 1
-  }
+  },
+  "zupt_accel": {},
+  "scurve_accel": {}
 }

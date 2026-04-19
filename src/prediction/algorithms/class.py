@@ -1,4 +1,14 @@
-"""Pydantic config model for the prediction algorithm dispatcher."""
+"""Pydantic config model for the prediction algorithm dispatcher.
+
+Three algorithms are registered:
+  * ``BAROMETER_HEIGHT_DIFF`` — ISA-inversion Δh from pressure.
+  * ``ZUPT_ACCEL`` — Zero-Velocity Update double integration.
+  * ``SCURVE_ACCEL`` — 7-step S-curve velocity-domain fit.
+
+Each algorithm has its own Pydantic config subclass. The top-level
+``PREDICT_ALGORITHM_CONFIG`` selects one of them and (optionally)
+overrides fields from ``config.json``.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +26,8 @@ DEFAULT_CONFIG_PATH = Path(__file__).with_name("config.json")
 
 class PredictAlgorithm(str, Enum):
     BAROMETER_HEIGHT_DIFF = "barometer_height_diff"
+    ZUPT_ACCEL = "zupt_accel"
+    SCURVE_ACCEL = "scurve_accel"
 
 
 class BarometerHeightDiffConfig(BaseModel):
