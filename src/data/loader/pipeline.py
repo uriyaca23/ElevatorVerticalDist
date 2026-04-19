@@ -75,12 +75,16 @@ def _structured_dir_for(name: str) -> Path:
 
 
 def classify_experiment_type(exp_name: str) -> str:
-    """Return `'test'` if the experiment name contains `exp6`, else `'train'`.
+    """Return `'test'` if the experiment was recorded at Beit Yitzchaki
+    Raanana, else `'train'`.
 
-    The rule is intentionally simple so `list_experiments` / metadata stays
-    deterministic from folder names alone.
+    Project-level split (Uriya, 2026-04-19): the Beit Yitzchaki
+    experiments are the held-out cross-building test set; everything
+    else (Millenium, Acro, Beit Mansour, Bar-Ilan 2, Haari) is train.
+    The rule is deterministic from folder names alone so
+    `list_experiments` / metadata stays consistent across reruns.
     """
-    return EXPERIMENT_TYPE_TEST if "exp6" in exp_name else EXPERIMENT_TYPE_TRAIN
+    return EXPERIMENT_TYPE_TEST if "beityitzchaki" in exp_name.lower() else EXPERIMENT_TYPE_TRAIN
 
 
 def list_experiments(
