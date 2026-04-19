@@ -32,7 +32,6 @@ template_match/check_grid_across_signal/editor.py [exp_folder_name]
 
 from __future__ import annotations
 
-import importlib.util
 import sys
 import tkinter as tk
 from pathlib import Path
@@ -47,6 +46,8 @@ from matplotlib.backends.backend_tkagg import (  # noqa: E402
 )
 from matplotlib.figure import Figure  # noqa: E402
 
+# Make absolute ``src.*`` imports resolve when the editor is launched as
+# a standalone script (``python .../editor.py``) as well as via ``-m``.
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parents[5]
 if str(_REPO_ROOT) not in sys.path:
@@ -59,48 +60,16 @@ from src.data.loader import (  # noqa: E402
     getExperimentData,
     list_experiments,
 )
+from src.segmentation.algorithms.accelerometer_only.template_match.fit_elevator_parameters.common import (  # noqa: E402
+    GRID_W_S, GRID_F, SMOOTH_SEC, trapezoid_kernel,
+    _estimate_fs_hz, _vertical_accel, _smooth,
+)
+from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E402
+    detect as _detect,
+)
 
-# --------------------------------------------------------------------------
-# File-path bootstrap for both ``common.py`` and the sibling ``detect.py``.
-# Matches the pattern used elsewhere in this tree (basic_grid etc.) so the
-# broken ``src.segmentation.algorithms.__init__`` chain doesn't fire.
-# --------------------------------------------------------------------------
-_COMMON_PATH = _HERE.parent / "fit_elevator_parameters" / "common.py"
-_COMMON_MOD_NAME = "_fit_ep_common"
-if _COMMON_MOD_NAME in sys.modules:
-    _common = sys.modules[_COMMON_MOD_NAME]
-else:
-    _spec = importlib.util.spec_from_file_location(_COMMON_MOD_NAME, _COMMON_PATH)
-    _common = importlib.util.module_from_spec(_spec)
-    assert _spec.loader is not None
-    sys.modules[_COMMON_MOD_NAME] = _common
-    _spec.loader.exec_module(_common)
-
-GRID_W_S = _common.GRID_W_S
-GRID_F = _common.GRID_F
-SMOOTH_SEC = _common.SMOOTH_SEC
-trapezoid_kernel = _common.trapezoid_kernel
-_estimate_fs_hz = _common._estimate_fs_hz
-_vertical_accel = _common._vertical_accel
-_smooth = _common._smooth
-
-_DETECT_PATH = _HERE / "detect.py"
-_DETECT_MOD_NAME = "_check_grid_detect"
-if _DETECT_MOD_NAME in sys.modules:
-    _detect = sys.modules[_DETECT_MOD_NAME]
-else:
-    _spec = importlib.util.spec_from_file_location(_DETECT_MOD_NAME, _DETECT_PATH)
-    _detect = importlib.util.module_from_spec(_spec)
-    assert _spec.loader is not None
-    sys.modules[_DETECT_MOD_NAME] = _detect
-    _spec.loader.exec_module(_detect)
-
-preprocess_and_sweep = _detect.preprocess_and_sweep
-compute_predictions = _detect.compute_predictions
+predict_intervals = _detect.predict_intervals
 diagnose_window = _detect.diagnose_window
-_predict_pairs = _detect._predict_pairs
-R2_PEAK_THRESH = _detect.R2_PEAK_THRESH
-MIN_PEAK_ABS_A = _detect.MIN_PEAK_ABS_A
 
 PRED_COLORS = {"up": "#1f3a5f", "down": "#7d3c98"}
 HIGHLIGHT_COLOR = "#e67e22"
@@ -139,44 +108,6 @@ PANEL_DRAWERS = [
     ("gyr",          "GYR", _GT_PANEL_DRAWERS[4][2]),
     ("mag",          "MAG", _GT_PANEL_DRAWERS[5][2]),
 ]
-
-
-# --------------------------------------------------------------------------
-# Heatmap helper
-# --------------------------------------------------------------------------
-
-def _heatmap_at(a: np.ndarray, t: np.ndarray, i_center: int) -> np.ndarray:
-    """``(nW, nF)`` local R² of every ``(W, f)`` template at sample ``i_center``.
-
-    NaN cells correspond to templates whose ±W window falls off the
-    signal or whose local power is zero.
-    """
-    dt = float(np.median(np.diff(t))) if t.size > 1 else 0.01
-    n = a.size
-    nW, nF = len(GRID_W_S), len(GRID_F)
-    out = np.full((nW, nF), np.nan)
-    for wi, W in enumerate(GRID_W_S):
-        K = max(3, int(round(2 * W / dt)))
-        if K % 2 == 0:
-            K += 1
-        half = K // 2
-        if i_center - half < 0 or i_center + half >= n:
-            continue
-        win = a[i_center - half: i_center + half + 1]
-        p = float(np.dot(win, win))
-        if p < 1e-9:
-            continue
-        t_k = (np.arange(K) - half) * dt
-        for fi, f in enumerate(GRID_F):
-            tpl = trapezoid_kernel(t_k, 0.0, float(W), float(f))
-            norm_t = float(np.dot(tpl, tpl))
-            if norm_t < 1e-9:
-                continue
-            inner = float(np.dot(win, tpl))
-            A_hat = inner / norm_t
-            r2 = 1.0 - (p - A_hat * inner) / p
-            out[wi, fi] = r2
-    return out
 
 
 # --------------------------------------------------------------------------
@@ -438,14 +369,8 @@ class PredictionEditor(tk.Tk):
         self.status_var.set(f"Running detector on {name}…")
         self.update_idletasks()
         try:
-            self._state = preprocess_and_sweep(acc)
-            if self._state is None:
-                self.predictions = []
-            else:
-                self.predictions = _predict_pairs(
-                    self._state["t"], self._state["a_smooth"],
-                    self._state["final_peaks"], self._state["signs"],
-                )
+            self.predictions, state = predict_intervals(acc)
+            self._state = state if state else None
         except Exception as e:
             messagebox.showerror("Detector failed", f"{type(e).__name__}: {e}")
             self._state = None
@@ -682,70 +607,8 @@ class PredictionEditor(tk.Tk):
 
     # ---------- Signed-R² over time panel ----------
 
-    def _local_maxima_in_window(
-        self, arr: np.ndarray, t_lo: float, t_hi: float,
-        min_val: float = 0.5, min_gap_s: float = 1.0,
-    ) -> list[int]:
-        """Indices of local maxima of ``arr`` in the given time window.
-
-        Picks strict interior local maxima with ``arr[i] >= min_val``,
-        then applies a greedy time-gap NMS so the annotation list stays
-        readable.
-        """
-        if self._state is None:
-            return []
-        t = self._state["t"]
-        n = arr.size
-        mask = (t >= t_lo) & (t <= t_hi) & np.isfinite(arr)
-        ixs = np.where(mask)[0]
-        cands: list[int] = []
-        for i in ixs:
-            if i <= 0 or i >= n - 1:
-                continue
-            if arr[i] < min_val:
-                continue
-            if arr[i] >= arr[i - 1] and arr[i] >= arr[i + 1]:
-                cands.append(int(i))
-        cands.sort(key=lambda j: arr[j], reverse=True)
-        kept: list[int] = []
-        for i in cands:
-            if all(abs(t[i] - t[j]) >= min_gap_s for j in kept):
-                kept.append(i)
-        kept.sort()
-        return kept
-
-    def _classify_peak(self, i: int, sign: int) -> str:
-        """One-word status for a signed-R² peak at sample ``i``.
-
-        Tags map to the first threshold / stage the peak fails so the
-        annotation tells the user exactly what would need to change for
-        the peak to survive.
-        """
-        state = self._state
-        assert state is not None
-        t = state["t"]
-        A_field = "best_pos_A" if sign > 0 else "best_neg_A"
-        R2_field = "best_pos_r2" if sign > 0 else "best_neg_r2"
-        A_hat = float(state[A_field][i])
-        r2 = float(state[R2_field][i])
-        if abs(A_hat) < MIN_PEAK_ABS_A:
-            return "|A|<thr"
-        if r2 < R2_PEAK_THRESH:
-            return "R²<thr"
-        if np.sign(state["best_A"][i]) != sign:
-            return "lost to opp sign"
-        if i not in set(state["initial_peaks"]):
-            return "NMS (local)"
-        if i not in set(state["final_peaks"]):
-            return "same-sign NMS"
-        t_i = float(t[i])
-        for p in self.predictions:
-            if (abs(float(p["lobe1"]["t_c"]) - t_i) < 0.05
-                    or abs(float(p["lobe2"]["t_c"]) - t_i) < 0.05):
-                return "accepted"
-        return "unpaired (greedy)"
-
-    # Status → color mapping for signed-R² peak markers.
+    # Status → color mapping for signed-R² peak markers. Keys mirror the
+    # ``PEAK_STATUS_*`` tags :func:`detect.classify_peak` returns.
     _STATUS_COLORS: dict[str, str] = {
         "accepted":          "#27ae60",  # green
         "unpaired (greedy)": "#f39c12",  # orange
@@ -782,22 +645,23 @@ class PredictionEditor(tk.Tk):
         line_neg, = ax.plot(
             t[mask], neg_plot[mask], color="#c0392b", lw=0.9, label="max R² (−)",
         )
-        ax.axhline(R2_PEAK_THRESH, color="gray", lw=0.5, ls="--", alpha=0.6)
+        ax.axhline(state["config"].r2_peak_thresh, color="gray",
+                   lw=0.5, ls="--", alpha=0.6)
         ax.set_ylim(0, 1.05)
         ax.set_xlim(t_lo, t_hi)
         ax.set_ylabel("R² (per sign)")
         ax.set_xlabel("t (s, ACC-local)")
         ax.grid(True, alpha=0.25)
 
-        peaks_pos = self._local_maxima_in_window(pos_r2, t_lo, t_hi)
-        peaks_neg = self._local_maxima_in_window(neg_r2, t_lo, t_hi)
+        peaks_pos = _detect.find_local_maxima(pos_r2, t, t_lo, t_hi)
+        peaks_neg = _detect.find_local_maxima(neg_r2, t, t_lo, t_hi)
         statuses_seen: set[str] = set()
         for sign, peaks, arr in (
             (+1, peaks_pos, pos_r2),
             (-1, peaks_neg, neg_r2),
         ):
             for i in peaks:
-                tag = self._classify_peak(i, sign)
+                tag = _detect.classify_peak(state, i, sign, self.predictions)
                 color = self._STATUS_COLORS.get(tag, "#000000")
                 ax.scatter([t[i]], [arr[i]], color=color, s=36, zorder=5,
                            edgecolor="black", linewidth=0.4)
@@ -848,8 +712,8 @@ class PredictionEditor(tk.Tk):
         i1 = int(np.argmin(np.abs(t - t_c1)))
         i2 = int(np.argmin(np.abs(t - t_c2)))
 
-        heat1 = _heatmap_at(a_smooth, t, i1)
-        heat2 = _heatmap_at(a_smooth, t, i2)
+        heat1 = _detect.heatmap_at(a_smooth, t, i1)
+        heat2 = _detect.heatmap_at(a_smooth, t, i2)
 
         self.detail_fig.clear()
         gs = self.detail_fig.add_gridspec(
@@ -943,8 +807,8 @@ class PredictionEditor(tk.Tk):
                 ax.set_xticks([]); ax.set_yticks([])
                 ax.set_title(f"{label} lobe — n/a", fontsize=9)
                 return
-            i, A, r2 = peak
-            heat = _heatmap_at(a_smooth, t, i)
+            i, A, _r2 = peak
+            heat = _detect.heatmap_at(a_smooth, t, i)
             self._draw_heatmap(ax, heat, f"{label} @ t={t[i]:.1f}s  A={A:+.2f}")
 
         _plot_for(ax_h1, pos, "+")
