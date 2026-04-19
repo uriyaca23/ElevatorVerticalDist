@@ -79,4 +79,7 @@ EXPERIMENT_TYPE_TEST = "test"
 EXPERIMENT_TYPE_TRAIN = "train"
 EXPERIMENT_TYPES = (EXPERIMENT_TYPE_TEST, EXPERIMENT_TYPE_TRAIN)
 BAROMOSHKA_COLUMNS = ["floor", "height"]
-GT_COLUMNS = ["start_ms", "end_ms", "type", "description", "signalClearRecording"]
+GT_COLUMNS = [
+    "start_ms", "end_ms", "type", "description",
+    "signalClearRecording", "height_diff_m",
+]

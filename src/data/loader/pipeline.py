@@ -32,6 +32,9 @@ import pandas as pd
 from src.segmentation.algorithms import (
     SEGMENT_ALGORITHM_CONFIG, SegmentAlgorithm, Segmenter,
 )
+from src.prediction.algorithms import (
+    PREDICT_ALGORITHM_CONFIG, PredictAlgorithm, Predictor,
+)
 
 from .alignment import _merge_secondary_prs
 from .constants import (
@@ -265,6 +268,37 @@ def _derive_gt_from_prs(prs: pd.DataFrame) -> pd.DataFrame:
     return _segments_to_full_gt(segments, t0_ms, t_end_ms)
 
 
+def addGTtoSegment(
+    sensors: dict[str, pd.DataFrame],
+    gt: pd.DataFrame,
+) -> pd.DataFrame:
+    """Populate ``height_diff_m`` for each GT row via the barometer predictor.
+
+    For every ``(start_ms, end_ms)`` interval we slice the PRS frame and run
+    :class:`Predictor` (barometer algorithm) to compute the segment's altitude
+    change. Returns a new ``gt`` DataFrame with the column overwritten.
+    """
+    gt = gt.copy()
+    prs = sensors.get("PRS")
+    if prs is None or prs.empty or "pressure" not in prs.columns:
+        gt["height_diff_m"] = float("nan")
+        return gt
+
+    predictor = Predictor(PREDICT_ALGORITHM_CONFIG(
+        algorithm=PredictAlgorithm.BAROMETER_HEIGHT_DIFF,
+    ))
+    ts = prs["timestamp_ms"].astype("int64").to_numpy()
+    diffs: list[float] = []
+    for _, row in gt.iterrows():
+        s, e = int(row["start_ms"]), int(row["end_ms"])
+        segment = prs.loc[(ts >= s) & (ts < e)]
+        diffs.append(
+            float(predictor.forward(segment)) if len(segment) >= 2 else 0.0
+        )
+    gt["height_diff_m"] = diffs
+    return gt
+
+
 def _iso_date_time_from_filename(raw_dir: Path) -> tuple[str, str]:
     """Return (date, time) parsed from `sensorLog_YYYYMMDDTHHMMSS.txt`,
     or ("", "") if unavailable.
@@ -488,6 +522,10 @@ def getExperimentData(
             try:
                 data, gt, metadata_row = _load_structured_triplet(out_dir)
                 _inject_exp_name(name, data, gt)
+                if "height_diff_m" not in gt.columns or gt["height_diff_m"].isna().all():
+                    gt = addGTtoSegment(data, gt)
+                    _inject_exp_name(name, data, gt)
+                    gt.to_csv(out_dir / GT_CSV, index=False)
                 return data, gt, metadata_row
             except Exception as e:
                 print(f"[loader] failed to load structured CSVs "
@@ -511,6 +549,8 @@ def getExperimentData(
               "signalClearRecording": True}],
             columns=GT_COLUMNS,
         )
+
+    gt = addGTtoSegment(data, gt)
 
     raw_meta = _parse_metadata_file(raw_dir / METADATA_FILENAME)
     metadata_row = _build_metadata_row(name, raw_meta, raw_dir)

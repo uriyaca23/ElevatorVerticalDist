@@ -11,6 +11,10 @@ Keyboard shortcuts:
     Ctrl+S     save to pipeline_data.pkl
     Delete     remove the selected interval
     Ctrl+N     add a new interval after the selected one
+
+Mouse:
+    Scroll         zoom the (shared) x-axis around the cursor
+    Shift+Scroll   zoom the y-axis of the hovered panel only
 """
 
 from __future__ import annotations
@@ -42,7 +46,7 @@ from src.data.loader import (
     saveExperimentData,
 )
 from src.data.loader.alignment import _smoothed_velocity
-from src.data.loader.pipeline import _coerce_bool
+from src.data.loader.pipeline import _coerce_bool, addGTtoSegment
 from src.physics import calculate_velocity_from_accelerometer
 
 
@@ -237,7 +241,8 @@ class GtEditor(tk.Tk):
         tree_frame = ttk.Frame(right)
         tree_frame.pack(fill=tk.BOTH, expand=True)
         self.tree = ttk.Treeview(
-            tree_frame, columns=("idx", "start_s", "dur_s", "type", "clear", "desc"),
+            tree_frame,
+            columns=("idx", "start_s", "dur_s", "type", "dh", "clear", "desc"),
             show="headings", selectmode="browse",
         )
         for col, text, w, anchor in [
@@ -245,6 +250,7 @@ class GtEditor(tk.Tk):
             ("start_s", "start (s)", 80,  tk.E),
             ("dur_s",   "dur (s)",   70,  tk.E),
             ("type",    "type",      80,  tk.CENTER),
+            ("dh",      "Δh (m)",    75,  tk.E),
             ("clear",   "clear?",    55,  tk.CENTER),
             ("desc",    "note",      180, tk.W),
         ]:
@@ -292,8 +298,14 @@ class GtEditor(tk.Tk):
                         variable=self.clear_var)\
             .grid(row=4, column=0, columnspan=2, padx=4, pady=2, sticky=tk.W)
 
+        ttk.Label(edit, text="Δh (m):").grid(row=5, column=0, sticky=tk.W)
+        self.height_diff_var = tk.StringVar(value="—")
+        ttk.Label(edit, textvariable=self.height_diff_var,
+                  font=("Menlo", 10), foreground="#1f77b4")\
+            .grid(row=5, column=1, padx=4, pady=2, sticky=tk.W)
+
         ttk.Button(edit, text="Apply", command=self._on_apply)\
-            .grid(row=5, column=0, columnspan=2, pady=4, sticky=tk.EW)
+            .grid(row=6, column=0, columnspan=2, pady=4, sticky=tk.EW)
 
         # Actions
         actions = ttk.Frame(right)
@@ -553,6 +565,7 @@ class GtEditor(tk.Tk):
         idx = self._drag_idx
         self._drag_idx = None
         self._drag_edge = None
+        self._recompute_height_diffs()
         self._mark_dirty(f"Dragged interval {idx} — unsaved")
         # Full refresh so the colored GT span catches up with the final bounds.
         self._refresh_plot(preserve_xlim=True)
@@ -563,10 +576,18 @@ class GtEditor(tk.Tk):
 
     def _on_scroll(self, event):
         # mpl scroll_event — unreliable on macOS TkAgg, but wired up as backup.
-        if event.inaxes not in self._axes or event.xdata is None:
+        if event.inaxes not in self._axes:
             return
-        self._zoom_x_at(event.inaxes, event.xdata,
-                        zoom_in=(event.button == "up"))
+        zoom_in = (event.button == "up")
+        # Shift+scroll zooms the y-axis of the hovered panel only.
+        if event.key and "shift" in event.key:
+            if event.ydata is None:
+                return
+            self._zoom_y_at(event.inaxes, event.ydata, zoom_in=zoom_in)
+            return
+        if event.xdata is None:
+            return
+        self._zoom_x_at(event.inaxes, event.xdata, zoom_in=zoom_in)
 
     # ---------- X-axis zoom helpers ----------
 
@@ -589,6 +610,27 @@ class GtEditor(tk.Tk):
         ax = self._axes[0]
         xlim = ax.get_xlim()
         self._zoom_x_at(ax, (xlim[0] + xlim[1]) / 2.0, zoom_in=zoom_in)
+
+    # ---------- Y-axis zoom (per-panel) ----------
+
+    def _zoom_y_at(self, ax, center_y: float, zoom_in: bool) -> None:
+        """Zoom the y-axis of `ax` around `center_y` (data coords)."""
+        ylim = ax.get_ylim()
+        height = ylim[1] - ylim[0]
+        if height == 0:
+            return
+        factor = 1 / 1.5 if zoom_in else 1.5
+        new_height = height * factor
+        bot_frac = (center_y - ylim[0]) / height
+        new_bot = center_y - new_height * bot_frac
+        ax.set_ylim(new_bot, new_bot + new_height)
+        self.canvas.draw_idle()
+
+    def _fit_y(self, ax) -> None:
+        """Autoscale just this panel's y-axis to its visible x range."""
+        ax.relim()
+        ax.autoscale(axis="y")
+        self.canvas.draw_idle()
 
     def _pan_x(self, frac: float) -> None:
         """Pan the x-axis by `frac` of the current visible width.
@@ -646,8 +688,13 @@ class GtEditor(tk.Tk):
         if ax is None:
             ax = self._axes[0]
 
-        data_x, _ = ax.transData.inverted().transform((event.x, mpl_y))
-        self._zoom_x_at(ax, data_x, zoom_in=(delta > 0))
+        data_x, data_y = ax.transData.inverted().transform((event.x, mpl_y))
+        # Shift modifier → zoom this panel's y-axis only; else zoom shared x-axis.
+        shift_held = bool(getattr(event, "state", 0) & 0x0001)
+        if shift_held:
+            self._zoom_y_at(ax, data_y, zoom_in=(delta > 0))
+        else:
+            self._zoom_x_at(ax, data_x, zoom_in=(delta > 0))
 
     # ---------- Tree ----------
 
@@ -668,9 +715,11 @@ class GtEditor(tk.Tk):
             typ = str(row["type"])
             note = _cell_str(row.get("description", ""))
             clear = "✓" if _coerce_bool(row.get("signalClearRecording", True)) else "✗"
+            dh = row.get("height_diff_m", float("nan"))
+            dh_s = f"{dh:+.2f}" if pd.notna(dh) else "—"
             self.tree.insert(
                 "", tk.END, iid=str(i),
-                values=(i, f"{s_s:.1f}", f"{dur:.1f}", typ, clear, note),
+                values=(i, f"{s_s:.1f}", f"{dur:.1f}", typ, dh_s, clear, note),
                 tags=(typ,),
             )
 
@@ -687,9 +736,17 @@ class GtEditor(tk.Tk):
         self.type_var.set(str(row["type"]))
         self.desc_var.set(_cell_str(row.get("description", "")))
         self.clear_var.set(_coerce_bool(row.get("signalClearRecording", True)))
+        dh = row.get("height_diff_m", float("nan"))
+        self.height_diff_var.set(f"{dh:+.3f}" if pd.notna(dh) else "—")
         self._highlight_on_plot(row["start_ms"], row["end_ms"])
 
     # ---------- Edit actions ----------
+
+    def _recompute_height_diffs(self):
+        """Refresh ``height_diff_m`` for every row via the barometer predictor."""
+        if self.pipeline is None:
+            return
+        self.pipeline.gt = addGTtoSegment(self.pipeline.data, self.pipeline.gt)
 
     def _on_apply(self):
         sel = self.tree.selection()
@@ -716,6 +773,7 @@ class GtEditor(tk.Tk):
         self.pipeline.gt.loc[idx, "type"] = typ
         self.pipeline.gt.loc[idx, "description"] = note
         self.pipeline.gt.loc[idx, "signalClearRecording"] = clear
+        self._recompute_height_diffs()
         self._mark_dirty(f"Updated interval {idx}")
         self._refresh_plot(preserve_xlim=True)
         self._refresh_tree()
@@ -745,6 +803,7 @@ class GtEditor(tk.Tk):
                      "signalClearRecording"],
         )
         self.pipeline.gt = pd.concat([self.pipeline.gt, new_row], ignore_index=True)
+        self._recompute_height_diffs()
         self._mark_dirty("Added interval")
         self._refresh_plot(preserve_xlim=True)
         self._refresh_tree()
@@ -758,6 +817,7 @@ class GtEditor(tk.Tk):
             return
         idx = int(sel[0])
         self.pipeline.gt = self.pipeline.gt.drop(index=idx).reset_index(drop=True)
+        self._recompute_height_diffs()
         self._mark_dirty(f"Deleted interval {idx}")
         self._refresh_plot(preserve_xlim=True)
         self._refresh_tree()
@@ -801,6 +861,7 @@ class GtEditor(tk.Tk):
             fixed, columns=["start_ms", "end_ms", "type", "description",
                             "signalClearRecording"],
         )
+        self._recompute_height_diffs()
         self._mark_dirty(f"Auto-fixed → {len(self.pipeline.gt)} intervals")
         self._refresh_plot(preserve_xlim=True)
         self._refresh_tree()
