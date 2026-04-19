@@ -182,25 +182,44 @@ class GtEditor(tk.Tk):
         ttk.Label(top, text="Experiment:").pack(side=tk.LEFT)
         self.exp_var = tk.StringVar()
         self.exp_combo = ttk.Combobox(
-            top, textvariable=self.exp_var, width=80, state="readonly",
+            top, textvariable=self.exp_var, width=50, state="readonly",
         )
         self.exp_combo.pack(side=tk.LEFT, padx=6)
         ttk.Button(top, text="Load", command=self.load_experiment).pack(side=tk.LEFT)
-        ttk.Button(top, text="Fit (0)", width=7,
-                   command=lambda: self._fit_x()).pack(side=tk.LEFT, padx=(12, 2))
-        ttk.Button(top, text="− Zoom", width=7,
-                   command=lambda: self._zoom_x_around_center(zoom_in=False))\
-            .pack(side=tk.LEFT, padx=2)
-        ttk.Button(top, text="+ Zoom", width=7,
-                   command=lambda: self._zoom_x_around_center(zoom_in=True))\
-            .pack(side=tk.LEFT, padx=2)
-        ttk.Button(top, text="◀ Pan", width=6,
-                   command=lambda: self._pan_x(-0.25))\
-            .pack(side=tk.LEFT, padx=(8, 2))
-        ttk.Button(top, text="Pan ▶", width=6,
-                   command=lambda: self._pan_x(+0.25))\
-            .pack(side=tk.LEFT, padx=2)
         ttk.Button(top, text="Save (Ctrl+S)", command=self.save_gt).pack(side=tk.RIGHT)
+
+        # Navigation controls live in a compact 2-row grid so the top bar
+        # still fits on narrow screens. Row 0 = zoom, row 1 = pan, columns
+        # aligned so each pan button sits directly under its zoom button.
+        nav = ttk.Frame(top)
+        nav.pack(side=tk.LEFT, padx=(12, 6))
+        ttk.Button(nav, text="Fit (0)", width=9,
+                   command=lambda: self._fit_x())\
+            .grid(row=0, column=0, padx=2, pady=1)
+        ttk.Button(nav, text="− Zoom X", width=9,
+                   command=lambda: self._zoom_x_around_center(zoom_in=False))\
+            .grid(row=0, column=1, padx=(8, 2), pady=1)
+        ttk.Button(nav, text="+ Zoom X", width=9,
+                   command=lambda: self._zoom_x_around_center(zoom_in=True))\
+            .grid(row=0, column=2, padx=2, pady=1)
+        ttk.Button(nav, text="− Zoom Y", width=9,
+                   command=lambda: self._zoom_y_around_center(zoom_in=False))\
+            .grid(row=0, column=3, padx=(8, 2), pady=1)
+        ttk.Button(nav, text="+ Zoom Y", width=9,
+                   command=lambda: self._zoom_y_around_center(zoom_in=True))\
+            .grid(row=0, column=4, padx=2, pady=1)
+        ttk.Button(nav, text="◀ X", width=9,
+                   command=lambda: self._pan_x(-0.25))\
+            .grid(row=1, column=1, padx=(8, 2), pady=1)
+        ttk.Button(nav, text="X ▶", width=9,
+                   command=lambda: self._pan_x(+0.25))\
+            .grid(row=1, column=2, padx=2, pady=1)
+        ttk.Button(nav, text="▼ Y", width=9,
+                   command=lambda: self._pan_y(-0.25))\
+            .grid(row=1, column=3, padx=(8, 2), pady=1)
+        ttk.Button(nav, text="Y ▲", width=9,
+                   command=lambda: self._pan_y(+0.25))\
+            .grid(row=1, column=4, padx=2, pady=1)
         self.status_var = tk.StringVar(value="Pick an experiment, then Load.")
         ttk.Label(top, textvariable=self.status_var, foreground="#555")\
             .pack(side=tk.RIGHT, padx=10)
@@ -329,6 +348,9 @@ class GtEditor(tk.Tk):
         # X-axis pan shortcuts (Shift+Arrow to avoid clashing with interval nav).
         self.bind("<Shift-Left>",  lambda e: self._pan_x(-0.25))
         self.bind("<Shift-Right>", lambda e: self._pan_x(+0.25))
+        # Y-axis pan (Shift+Up / Shift+Down) — mirror of the X-axis shortcut.
+        self.bind("<Shift-Up>",    lambda e: self._pan_y(+0.25))
+        self.bind("<Shift-Down>",  lambda e: self._pan_y(-0.25))
 
     def _populate_experiments(self):
         self.exp_combo["values"] = list_experiments(RAW_DATA_ROOT)
@@ -632,6 +654,12 @@ class GtEditor(tk.Tk):
         ax.autoscale(axis="y")
         self.canvas.draw_idle()
 
+    def _zoom_y_around_center(self, zoom_in: bool) -> None:
+        """Zoom every panel's y-axis around its current midpoint."""
+        for ax in self._axes:
+            ylim = ax.get_ylim()
+            self._zoom_y_at(ax, (ylim[0] + ylim[1]) / 2.0, zoom_in=zoom_in)
+
     def _pan_x(self, frac: float) -> None:
         """Pan the x-axis by `frac` of the current visible width.
 
@@ -643,6 +671,17 @@ class GtEditor(tk.Tk):
         xlim = ax.get_xlim()
         shift = (xlim[1] - xlim[0]) * frac
         ax.set_xlim(xlim[0] + shift, xlim[1] + shift)
+        self.canvas.draw_idle()
+
+    def _pan_y(self, frac: float) -> None:
+        """Pan every panel's y-axis by `frac` of its visible height.
+
+        Positive `frac` pans up (toward larger values), negative down.
+        """
+        for ax in self._axes:
+            ylim = ax.get_ylim()
+            shift = (ylim[1] - ylim[0]) * frac
+            ax.set_ylim(ylim[0] + shift, ylim[1] + shift)
         self.canvas.draw_idle()
 
     def _fit_x(self) -> None:
