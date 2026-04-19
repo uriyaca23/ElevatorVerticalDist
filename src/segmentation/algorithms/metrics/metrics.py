@@ -277,3 +277,153 @@ class SegmentationMetrics:
         if end_residuals_sec is not None and end_q_sec is not None:
             out["edge_end_ci_coverage"] = cls.time_ci_coverage(end_residuals_sec, end_q_sec)
         return out
+
+
+# --------------------------------------------------------------------------
+# Interval-prediction metric — consumed by
+# ``check_grid_across_signal/evaluate.py`` to score the trapezoid detector.
+# --------------------------------------------------------------------------
+
+DEFAULT_MIN_OVERLAP_S = 1.0
+DEFAULT_MIN_OVERLAP_FRAC = 0.3
+
+
+def _overlap_s(a0: float, a1: float, b0: float, b1: float) -> float:
+    return max(0.0, min(a1, b1) - max(a0, b0))
+
+
+def _intervals_match(
+    g0: float, g1: float, p0: float, p1: float,
+    min_overlap_s: float, min_overlap_frac: float,
+) -> bool:
+    ov = _overlap_s(g0, g1, p0, p1)
+    if ov <= 0.0:
+        return False
+    shortest = max(1e-3, min(g1 - g0, p1 - p0))
+    return ov >= min_overlap_s or ov / shortest >= min_overlap_frac
+
+
+@dataclass
+class IntervalPredictionMetrics:
+    """Match counts between GT up/down rides and interval predictions.
+
+    Four named failure modes — each error counts once in :meth:`score`:
+
+    * ``missed``      GT with no overlapping prediction.
+    * ``fp``          prediction with no overlapping GT (landed on
+                      "outside").
+    * ``pred_merged`` prediction whose interval swallows >1 GT rides
+                      (e.g. GT = (1,2), (2.5,3.5), (4,5) and pred =
+                      (1,5) yields ``pred_merged=1`` with
+                      ``gt_merged=3``).
+    * ``gt_split``    GT covered by >1 predictions.
+
+    Plus the happy path, ``clean`` (one-to-one matches). Composite score:
+
+        2 * clean / (2 * clean + bad_gt + bad_pred)
+
+    Build via :meth:`from_intervals`. Aggregate across experiments with
+    ``+`` or :meth:`sum`. Derived rates in :meth:`rates`.
+    """
+
+    n_gt: int = 0
+    n_pred: int = 0
+    clean: int = 0
+    missed: int = 0
+    gt_merged: int = 0
+    gt_split: int = 0
+    fp: int = 0
+    pred_merged: int = 0
+    pred_split_part: int = 0
+
+    @classmethod
+    def from_intervals(
+        cls,
+        gt_rides: list[dict],
+        predictions: list[dict],
+        min_overlap_s: float = DEFAULT_MIN_OVERLAP_S,
+        min_overlap_frac: float = DEFAULT_MIN_OVERLAP_FRAC,
+    ) -> "IntervalPredictionMetrics":
+        """``gt_rides`` / ``predictions`` are dicts with at least
+        ``t_start_s`` and ``t_end_s``."""
+        n_g = len(gt_rides)
+        n_p = len(predictions)
+        gt_to_preds: list[list[int]] = [[] for _ in range(n_g)]
+        pred_to_gts: list[list[int]] = [[] for _ in range(n_p)]
+        for i, g in enumerate(gt_rides):
+            g0, g1 = g["t_start_s"], g["t_end_s"]
+            for j, p in enumerate(predictions):
+                if _intervals_match(
+                    g0, g1, p["t_start_s"], p["t_end_s"],
+                    min_overlap_s, min_overlap_frac,
+                ):
+                    gt_to_preds[i].append(j)
+                    pred_to_gts[j].append(i)
+
+        m = cls(n_gt=n_g, n_pred=n_p)
+        for ps in gt_to_preds:
+            if len(ps) == 0:
+                m.missed += 1
+            elif len(ps) == 1:
+                if len(pred_to_gts[ps[0]]) == 1:
+                    m.clean += 1
+                else:
+                    m.gt_merged += 1
+            else:
+                m.gt_split += 1
+        for gs in pred_to_gts:
+            if len(gs) == 0:
+                m.fp += 1
+            elif len(gs) == 1:
+                if len(gt_to_preds[gs[0]]) != 1:
+                    m.pred_split_part += 1
+            else:
+                m.pred_merged += 1
+        return m
+
+    def __add__(self, other: "IntervalPredictionMetrics") -> "IntervalPredictionMetrics":
+        return IntervalPredictionMetrics(
+            n_gt=self.n_gt + other.n_gt,
+            n_pred=self.n_pred + other.n_pred,
+            clean=self.clean + other.clean,
+            missed=self.missed + other.missed,
+            gt_merged=self.gt_merged + other.gt_merged,
+            gt_split=self.gt_split + other.gt_split,
+            fp=self.fp + other.fp,
+            pred_merged=self.pred_merged + other.pred_merged,
+            pred_split_part=self.pred_split_part + other.pred_split_part,
+        )
+
+    @classmethod
+    def sum(cls, items) -> "IntervalPredictionMetrics":
+        out = cls()
+        for m in items:
+            out = out + m
+        return out
+
+    def score(self) -> float:
+        bad_gt = self.missed + self.gt_merged + self.gt_split
+        bad_pred = self.fp + self.pred_merged + self.pred_split_part
+        denom = 2 * self.clean + bad_gt + bad_pred
+        return 0.0 if denom == 0 else (2.0 * self.clean) / denom
+
+    def rates(self) -> dict[str, float]:
+        return {
+            "f1_like":    self.score(),
+            "recall":     self.clean / self.n_gt   if self.n_gt   else 0.0,
+            "precision":  self.clean / self.n_pred if self.n_pred else 0.0,
+            "miss_rate":  self.missed / self.n_gt  if self.n_gt   else 0.0,
+            "merge_rate": self.pred_merged / self.n_pred if self.n_pred else 0.0,
+            "fp_rate":    self.fp / self.n_pred    if self.n_pred else 0.0,
+        }
+
+    def as_dict(self) -> dict:
+        """Flat dict of counts + derived rates — ready for a DataFrame row."""
+        return {
+            "n_gt": self.n_gt, "n_pred": self.n_pred,
+            "clean": self.clean, "missed": self.missed,
+            "gt_merged": self.gt_merged, "gt_split": self.gt_split,
+            "fp": self.fp, "pred_merged": self.pred_merged,
+            "pred_split_part": self.pred_split_part,
+            **self.rates(),
+        }

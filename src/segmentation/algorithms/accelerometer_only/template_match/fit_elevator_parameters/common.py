@@ -40,7 +40,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from src.data.loader import getExperimentData, list_experiments  # noqa: E402
 from src.physics import calculate_velocity_from_accelerometer  # noqa: E402
-from src.prediction.algorithms.oria_shit.quality_filter import estimate_gravity_vector  # noqa: E402
+from src.prediction.algorithms.quality_filter import estimate_gravity_vector  # noqa: E402
 
 LABELS_ROOT = (
     Path(__file__).resolve().parents[1]

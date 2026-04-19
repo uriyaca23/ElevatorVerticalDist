@@ -22,7 +22,7 @@ def lowpass(x: np.ndarray, fs: float, cutoff_hz: float = VELOCITY_LPF_HZ) -> np.
     return sosfiltfilt(sos, x)
 
 
-_quality = importlib.import_module("src.prediction.algorithms.oria_shit.quality_filter")
+_quality = importlib.import_module("src.prediction.algorithms.quality_filter")
 estimate_gravity_vector = _quality.estimate_gravity_vector
 
 
