@@ -1433,13 +1433,47 @@ def _maybe_register_hebrew_font() -> str:
     return "Helvetica"
 
 
+import re as _re
+_RL_TAG_RE = _re.compile(r"<[^<>]+>")
+
+
 def _rtl(s: str) -> str:
-    """Best-effort bidi reorder for Hebrew strings."""
+    """Bidi-reorder Hebrew strings while preserving ReportLab inline tags.
+
+    python-bidi's ``get_display`` reverses character order for RTL-dominant
+    text. Running it over a string that embeds ReportLab paraparser markup
+    (``<b>...</b>``, ``<font>...</font>``, etc.) also reverses the tag
+    bytes themselves, producing ``</b>...<b>`` — which paraparser then
+    rejects with "parse ended with 1 unclosed tags para". We therefore
+    apply the bidi reorder only to the plain-text chunks between tags and
+    leave the tags in their original LTR ASCII order.
+    """
     try:
         from bidi.algorithm import get_display
-        return get_display(s)
     except ImportError:
         return s
+    if "<" not in s:
+        return get_display(s)
+    parts: list[str] = []
+    idx = 0
+    for m in _RL_TAG_RE.finditer(s):
+        if m.start() > idx:
+            parts.append(get_display(s[idx:m.start()]))
+        parts.append(m.group(0))
+        idx = m.end()
+    if idx < len(s):
+        parts.append(get_display(s[idx:]))
+    return "".join(parts)
+
+
+def _esc(s) -> str:
+    """Escape `<`, `>`, `&` so dynamic values don't confuse paraparser."""
+    return (
+        str(s)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 
 
 def _build_main_signal_png(state: dict, segments: pd.DataFrame,
@@ -1624,7 +1658,7 @@ def _build_pdf(
         label = HEB.get(k, k)
         meta_rows.append((label, str(v)))
     for label, val in meta_rows:
-        story.append(P(f"<b>{label}:</b> {val}"))
+        story.append(P(f"<b>{_esc(label)}:</b> {_esc(val)}"))
 
     # Summary metrics + overall signal.
     df = pd.DataFrame(rows) if rows else pd.DataFrame()
@@ -1701,7 +1735,7 @@ def _build_pdf(
         story.append(P(f"<b>{HEB['col_accepted']}:</b> {yn}"))
         if r.get("reject_reason"):
             story.append(
-                P(f"<b>{HEB['reject_reason']}:</b> {r['reject_reason']}")
+                P(f"<b>{HEB['reject_reason']}:</b> {_esc(r['reject_reason'])}")
             )
 
         story.append(Spacer(1, 0.3 * cm))
