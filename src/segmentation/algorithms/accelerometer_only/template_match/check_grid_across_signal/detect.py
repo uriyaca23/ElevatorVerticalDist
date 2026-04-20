@@ -27,9 +27,11 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
+
+from src.utils.sensor_noise import get_phone_accel_noise_sigma
 
 from ..fit_elevator_parameters.common import (
     SMOOTH_SEC,
@@ -74,6 +76,19 @@ class DetectConfig:
 
     * ``w_min_s`` / ``w_max_s`` / ``n_w``  bounds + count of the half-width axis.
     * ``f_min`` / ``f_max`` / ``n_f``      bounds + count of the flat-fraction axis.
+
+    Phone-aware noise floor (opt-in via ``phone_model`` on
+    :func:`detect` / :func:`predict_intervals`):
+
+    * ``noise_sigma_multiplier`` — when a phone model is supplied, the
+      per-peak and per-pair ``|A|`` floors are lifted to
+      ``max(min_peak_abs_a, multiplier · σ_a)`` (and analogously for the
+      pair floor), where ``σ_a`` is the phone's accelerometer white-noise
+      σ at the session's sampling rate (see
+      :mod:`src.utils.sensor_noise`). A multiplier of ~6 is a standard
+      "well above noise" gate. Hard-coded floors win when the phone is
+      unknown or noisier than expected — this is a tightening knob, not
+      a loosening one.
     """
     r2_peak_thresh: float = 0.80
 
@@ -97,6 +112,8 @@ class DetectConfig:
     f_min: float = 0.05
     f_max: float = 0.80
     n_f: int = 15
+
+    noise_sigma_multiplier: float = 6.0
 
     def grid_w_s(self) -> np.ndarray:
         return np.linspace(self.w_min_s, self.w_max_s, self.n_w)
@@ -203,9 +220,36 @@ def _same_sign_nms(
     return sorted(_one_sign(pos) + _one_sign(neg))
 
 
-def detect(acc, config: DetectConfig = DEFAULT_CONFIG) -> dict | None:
+def _apply_phone_noise_floor(
+    config: DetectConfig, phone_model: str, fs: float,
+) -> tuple[DetectConfig, float]:
+    """Tighten the amplitude floors to the phone's noise σ when known.
+
+    Returns ``(effective_config, sigma_a)``. When ``phone_model`` is
+    empty the config is returned unchanged and ``sigma_a = 0.0``.
+    """
+    if not phone_model:
+        return config, 0.0
+    sigma_a = float(get_phone_accel_noise_sigma(phone_model, fs))
+    floor = config.noise_sigma_multiplier * sigma_a
+    return replace(
+        config,
+        min_peak_abs_a=max(config.min_peak_abs_a, floor),
+        min_pair_abs_a=max(config.min_pair_abs_a, floor),
+    ), sigma_a
+
+
+def detect(
+    acc, config: DetectConfig = DEFAULT_CONFIG, phone_model: str = "",
+) -> dict | None:
     """Run detection stages 1–4. Returns the state dict or ``None`` if
     ``acc`` is empty/unusable.
+
+    When ``phone_model`` is provided, the ``|A|`` floors are tightened
+    to the phone's accelerometer noise σ (see
+    :func:`_apply_phone_noise_floor`); the resulting effective config is
+    echoed in ``state["config"]`` so downstream code and the editor UI
+    see exactly the thresholds used.
 
     Dict keys (everything the editor UI, :mod:`pair_filter` and
     :func:`diagnose_window` consume):
@@ -216,7 +260,8 @@ def detect(acc, config: DetectConfig = DEFAULT_CONFIG) -> dict | None:
       ``best_neg_A``
     * peak-pick:           ``best_r2_gated``, ``signs``, ``initial_peaks``,
       ``final_peaks``
-    * echo:                ``config`` — the config that produced this state
+    * phone-aware:         ``phone_model``, ``sigma_a_m_s2``
+    * echo:                ``config`` — effective config after phone floor
     """
     if acc is None or acc.empty:
         return None
@@ -232,6 +277,7 @@ def detect(acc, config: DetectConfig = DEFAULT_CONFIG) -> dict | None:
     a_vert = _vertical_accel(ax_, ay_, az_, fs)
     a_smooth = _smooth(a_vert, fs, SMOOTH_SEC)
 
+    config, sigma_a = _apply_phone_noise_floor(config, phone_model, fs)
     grid_w_s = config.grid_w_s()
     grid_f = config.grid_f()
 
@@ -270,6 +316,8 @@ def detect(acc, config: DetectConfig = DEFAULT_CONFIG) -> dict | None:
         "grid_w_s": grid_w_s,
         "grid_f": grid_f,
         "config": config,
+        "phone_model": phone_model,
+        "sigma_a_m_s2": sigma_a,
     }
 
 
@@ -278,7 +326,7 @@ def detect(acc, config: DetectConfig = DEFAULT_CONFIG) -> dict | None:
 # --------------------------------------------------------------------------
 
 def predict_intervals(
-    acc, config: DetectConfig | None = None,
+    acc, config: DetectConfig | None = None, phone_model: str = "",
 ) -> tuple[list[dict], dict]:
     """Full pipeline. Returns ``(predictions, plotting_info)``.
 
@@ -289,12 +337,16 @@ def predict_intervals(
     * ``plotting_info`` — the detection state dict (see :func:`detect`);
       contains every intermediate the editor / :func:`diagnose_window`
       needs. Empty dict if ``acc`` is unusable.
+
+    ``phone_model`` (optional) enables the chip-spec-derived noise floor
+    on the ``|A|`` thresholds — see :func:`detect`.
     """
     cfg = config if config is not None else DEFAULT_CONFIG
-    state = detect(acc, cfg)
+    state = detect(acc, cfg, phone_model=phone_model)
     if state is None:
         return [], {}
-    predictions = pair_filter.predict_pairs(state, cfg)
+    # Use the effective (phone-aware) config that detect emitted.
+    predictions = pair_filter.predict_pairs(state, state["config"])
     return predictions, state
 
 

@@ -10,15 +10,15 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-from ..common.accel_utils import (
+from src.utils.accelerometer_utils import (
     estimate_gravity_stationary,
     vertical_accel_magnitude,
     vertical_accel_projected,
     zupt_integrate,
 )
-from ..common.conformal import ConformalCalibrator
-from ..common.noise_db import get_phone_accel_noise_sigma
-from ..common.pulse_pair import (
+from src.utils.conformal import ConformalCalibrator
+from src.utils.sensor_noise import get_phone_accel_noise_sigma
+from .pulse_pair import (
     GRID_W_S,
     fit_shared_shape_pair,
     height_from_fit,
@@ -26,8 +26,8 @@ from ..common.pulse_pair import (
     theoretical_sigma_height,
     trapezoid_kernel,
 )
-from ..common.types import CalibrationSample, PredictionOutput
-from .config import TrapezoidAccelConfig
+from ...common.types import CalibrationSample, PredictionOutput
+from ...configTypes import TrapezoidAccelConfig
 from .quality import assess as quality_assess
 
 
@@ -50,7 +50,7 @@ class TrapezoidAccelEstimator:
       2. Detrend with a slow rolling mean (absorbs residual bias).
       3. Rolling-mean smooth at ``smooth_sec`` to kill hand-tremor leakage.
       4. Fit shared-shape trapezoid-pulse pair (W, f, |A|, t_c1, t_c2)
-         by matched-filter grid search (see ``common.pulse_pair``).
+         by matched-filter grid search (see ``.pulse_pair``).
       5. Analytic Δh = sign · |A| · W · (1+f) · (t_c2 − t_c1).
       6. Theoretical σ via delta method on (A, W, f, Δt_c), scaled by
          an empirical drift-factor + relative-|Δh| term that absorb

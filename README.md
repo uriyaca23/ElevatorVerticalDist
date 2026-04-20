@@ -1,351 +1,263 @@
-# Elevator Vertical Distance Estimator
+# ElevatorVerticalDist — Codebase Map
 
-Accelerometer-only elevator height estimation pipeline with conformal prediction intervals.
+This document is the single source of truth for where things live in this
+repository. It exists so that an LLM (or a human) dropped into any corner of
+the codebase can orient quickly: what problem we're solving, which folder owns
+which stage, and where to look for deeper context.
 
-Three-stage pipeline: **Detection** → **Quality Filter** → **Height Estimation** with 90% conformal coverage.
-
-## Quick Start
-
-```python
-from src.pipeline import ElevatorHeightPipeline
-
-# Load pre-calibrated pipeline
-pipeline = ElevatorHeightPipeline.load("model/")
-
-# Process raw 3-axis accelerometer data (numpy arrays, m/s²)
-results = pipeline.process(acc_x, acc_y, acc_z, fs=100)
-
-# Print accepted rides with time frames
-for r in results:
-    if r['accepted']:
-        ci = f" ± {r['confidence_interval_90']:.2f}m" if r['confidence_interval_90'] else ""
-        print(f"  [{r['start_time']:.1f}s – {r['end_time']:.1f}s]  "
-              f"Height: {r['height_estimate']:+.2f}m{ci}")
-```
-
-## Visual Output
-
-Generate a figure showing all detected rides and their height estimates:
-
-```python
-# process_plot returns (results_dict, matplotlib_figure)
-results, fig = pipeline.process_plot(acc_x, acc_y, acc_z, fs=100,
-                                     save_path="output.png")
-```
-
-This produces a 2-panel figure:
-- **Top**: Accelerometer magnitude with detected segments highlighted (green=accepted, red=rejected)
-- **Bottom**: Height estimate bar chart with 90% confidence interval whiskers
+> **Project idea.** Estimate the vertical distance travelled by a passenger
+> during an elevator ride using only the sensors on their phone
+> (accelerometer always; barometer when available). The pipeline runs in two
+> stages: **(1) segmentation** — slice a full sensor session into discrete
+> `up` / `down` / `outside` ride intervals; **(2) prediction** — for each
+> detected ride, predict the signed Δh (meters) with a calibrated 90 %
+> confidence interval.
 
 ---
 
-## Using Pre-Computed Segments
+## Top-level layout
 
-If you already have detection/segmentation results (e.g. from your own algorithm or manual annotation), you can skip the detection stage and go directly to quality filtering + height estimation.
-
-### Python API
-
-```python
-from src.pipeline import ElevatorHeightPipeline
-
-pipeline = ElevatorHeightPipeline.load("model/")
-
-# Define your segments as time intervals within the recording
-segments = [
-    {"start_time": 10.5, "end_time": 25.3},
-    {"start_time": 45.0, "end_time": 62.1},
-    {"start_time": 120.0, "end_time": 145.8},
-]
-
-# Process with pre-computed segments (skips detection entirely)
-results = pipeline.process_segments(acc_x, acc_y, acc_z, segments, fs=100)
-
-# Same output format as process()
-for r in results:
-    status = "✓" if r['accepted'] else "✗"
-    ci = f" ± {r['confidence_interval_90']:.2f}m" if r['confidence_interval_90'] else ""
-    print(f"  {status} [{r['start_time']:.1f}s – {r['end_time']:.1f}s]  "
-          f"Height: {r['height_estimate']:+.2f}m{ci}")
-
-# Visual output
-results, fig = pipeline.process_segments_plot(
-    acc_x, acc_y, acc_z, segments, fs=100,
-    save_path="segments_output.png"
-)
+```
+ElevatorVerticalDist/
+├── src/                      # all library code
+├── scripts/                  # one-shot runners (build reports, evaluations)
+├── docs/                     # LaTeX report + figures
+├── metadata/                 # experiment-level metadata artefacts
+├── papers/                   # reference papers (elevator motion profiles, etc.)
+├── mistake/                  # scratch / dumps (ignore)
+├── requirements.txt
+├── README.md                 # ← you are here
+└── CLAUDE.md                 # LLM onboarding notes (project idea + setup)
 ```
 
-### CLI with Segments
-
-```bash
-# Create a segments JSON file
-echo [{"start_time": 10.5, "end_time": 25.3}, {"start_time": 45.0, "end_time": 62.1}] > segments.json
-
-# Run inference with pre-computed segments (skips detection)
-python run_inference.py --input data.csv --segments segments.json --verbose
-
-# Only accepted rides
-python run_inference.py --input data.csv --segments segments.json --accepted-only -v
-```
-
-**Segments JSON format:**
-```json
-[
-  {"start_time": 10.5, "end_time": 25.3},
-  {"start_time": 45.0, "end_time": 62.1}
-]
-```
-
-Each segment specifies a `start_time` and `end_time` in seconds within the accelerometer recording.
+Everything that ships is under `src/`. Scripts import from `src/`; nothing in
+the root is part of the library itself.
 
 ---
 
-## Custom Dataset Evaluation
+## `src/` — the library
 
-Evaluate the pipeline on your own tagged dataset with comprehensive figures, metrics, and quality analysis. This is designed for **test-set evaluation** — the pre-calibrated model is used as-is (no re-calibration on your data).
-
-### Dataset CSV Format
-
-Create a CSV index file with the following columns:
-
-| Column | Required | Description |
-|--------|----------|-------------|
-| `segment_id` | Yes | Unique integer ID for each ride segment |
-| `acc_data_path` | Yes | Path to the accelerometer CSV file |
-| `start_time` | Yes | Segment start time in seconds |
-| `end_time` | Yes | Segment end time in seconds |
-| `true_height` | Yes | Ground-truth height difference in meters (signed: positive=up, negative=down) |
-| `phone_position` | No | Phone position during ride (e.g. `hand`, `pocket`) — used for analysis breakdowns |
-| `fs` | No | Sampling rate in Hz (defaults to auto-detect or 100 Hz) |
-
-**Example CSV:**
-```csv
-segment_id,acc_data_path,start_time,end_time,true_height,phone_position
-1,data/recording1.csv,85.9,108.0,18.4,hand
-2,data/recording1.csv,150.3,172.1,-12.6,hand
-3,data/recording2.csv,22.0,45.5,6.1,pocket
+```
+src/
+├── data/              # sensor I/O, ground truth, dataset cleanup, GT editor
+├── physics/           # pressure → altitude (ISA inversion)
+├── utils/             # reusable helpers (accelerometer, conformal, chip noise)
+├── segmentation/      # stage 1 — detect elevator rides in a session
+├── prediction/        # stage 2 — Δh per ride, with CI
+├── pipelines/         # end-to-end orchestration across both stages
+├── plotting/          # shared plotting helpers (experiment overviews)
+└── (archive)/         # old code kept for reference; not imported by anything
 ```
 
-**Notes:**
-- Multiple segments can reference the same accelerometer file
-- The `acc_data_path` must point to a CSV with accelerometer data. Supported formats:
-  - Standard: `acc_x, acc_y, acc_z` columns (with optional `time` column)
-  - Headerless 4-column: `time_ms, x, y, z` (auto-detected)
-- `start_time` and `end_time` are in seconds from the start of the recording
-- `true_height` is signed: positive = upward movement, negative = downward
+### `src/data/` — sensor I/O and ground truth
 
-### Evaluation Modes
+> See `src/data/README.md` for the full schema.
 
-| Mode | What it tests | When to use |
-|------|--------------|-------------|
-| `segments_only` | Quality filter + height estimation only | You have reliable segment boundaries and want to test estimation accuracy |
-| `full` | Detection + segmentation + quality + estimation | You want to test the entire pipeline end-to-end |
+- **`rawData/`** — raw per-experiment sensor logs (input only, never mutated).
+- **`structuredData/`** — processed CSV artifacts (one folder per experiment;
+  per-sensor CSVs + `gt.csv` + `metadata.csv`).
+- **`loader/`** — the public loader package. `getExperimentData(name)` and
+  `list_experiments(kind=...)` are the two entry points every downstream
+  stage calls. `pipeline.py` is the modern CSV flow; `legacy.py` is the old
+  Excel-cached flow retained for a few callers.
+- **`gramushka/`** — barometer-derived calibration reference data.
+- **`dataset_cleanup/`** — one-shot scripts for curating the dataset
+  (time-calibration, noise tagging, residual calibration, etc.). Read their
+  docstrings; they're not part of the runtime path.
+- **`gt_editor.py`** — Tkinter GUI for hand-editing `gt.csv`.
 
-### Running Evaluation
+### `src/physics/`
 
-```bash
-# Segments-only evaluation (recommended for testing estimation quality)
-python run_custom_evaluation.py --dataset my_dataset.csv --mode segments_only -v
+- **`barometric.py`** — ISA pressure → altitude inversion (`pressure_to_altitude`).
+  Used by the barometer-only segmenter and predictor.
 
-# Full pipeline evaluation (tests detection + estimation)
-python run_custom_evaluation.py --dataset my_dataset.csv --mode full -v
+### `src/utils/` — reusable, stage-agnostic helpers
 
-# Custom output directory
-python run_custom_evaluation.py --dataset my_dataset.csv --mode segments_only \
-    --output-dir my_results/ -v
+Plain-numpy utilities that segmentation, prediction, and dataset-cleanup
+share. If it has no dependency on either stage's data types, it lives here.
+
+- **`accelerometer_utils.py`** — gravity estimation
+  (`estimate_gravity_stationary`), vertical-accel projection
+  (`vertical_accel_projected`, `vertical_accel_magnitude`), convenience
+  `compute_a_vert`, `compute_velocity`, ZUPT double-integration
+  (`zupt_integrate`), and a ride-band low-pass (`lowpass`, cutoff 0.3 Hz).
+- **`signal_processing.py`** — general-purpose `butter_lowpass` (filtfilt,
+  order-2, 3 Hz default).
+- **`conformal.py`** — `ConformalCalibrator`: split-conformal multiplier on
+  `|err|/σ` scores; used by the accelerometer predictors to calibrate their
+  theoretical σ into a 90 %-coverage CI.
+- **`sensor_noise.py`** — phone-model → accelerometer-chip noise σ
+  (`get_phone_accel_noise_sigma`, `resolve_phone_to_chip`).
+
+### `src/segmentation/` — stage 1
+
+> See `src/segmentation/README.md` for the physics of elevator motion and
+> why we use a trapezoid pulse-pair matched filter.
+
+```
+segmentation/
+├── algorithms/
+│   ├── configTypes.py        # Pydantic configs: SEGMENT_ALGORITHM_CONFIG,
+│   │                         # SegmentAlgorithm enum, PressureFilterConfig,
+│   │                         # TemplateMatchConfig
+│   ├── config.json           # per-algorithm hyperparameters loaded by configTypes
+│   ├── segmenter.py          # public Segmenter class + .detect(data)
+│   │                         # dispatcher
+│   ├── metrics/              # IntervalPredictionMetrics, SegmentationMetrics
+│   ├── barometer_only/
+│   │   └── height_segmentation.py    # HeightSegmenter (pressure-filter)
+│   └── accelerometer_only/
+│       └── template_match/           # the trapezoid pulse-pair detector
+│           ├── templates.py          # per-experimenter template fit
+│           ├── matcher.py            # sliding-NCC detector (legacy entry point)
+│           ├── fit_elevator_parameters/  # offline template-parameter fitter
+│           └── check_grid_across_signal/
+│               ├── detect.py         # stage 1–4: R² + |A| peak-pick,
+│               │                     # same-sign NMS — THIS is the active
+│               │                     # detector. Accepts optional
+│               │                     # phone_model for chip-spec-aware
+│               │                     # amplitude floors.
+│               ├── pair_filter.py    # stage 5–6: shared-shape joint fit,
+│               │                     # greedy pair resolver
+│               └── editor.py         # Tk/matplotlib diagnostic UI
+└── evaluate/                 # generic, algorithm-agnostic evaluation harness
+    ├── evaluator.py          # sweep_hyperparameters + evaluate_algorithm
+    ├── plots.py              # CDFs (IoU, start/end residual, duration err)
+    └── __main__.py           # python -m src.segmentation.evaluate ...
 ```
 
-### Output Files
+**Public API**: `Segmenter(config).detect(data)` → DataFrame with
+`start_ci`, `end_ci`, `duration`, `type`, `probability_ci`. The `data`
+schema depends on the algorithm (see the docstring on `Segmenter.detect`).
 
-All outputs are saved to the `--output-dir` directory (default: `evaluation_output/`):
+### `src/prediction/` — stage 2
 
-| File | Description |
-|------|-------------|
-| `results.json` | Per-ride detailed results including estimated height, error, method, accept/reject status, quality features |
-| `summary.json` | Aggregate metrics: MAE, median error, acceptance rate, conformal coverage |
-
-### Output Figures
-
-| Figure | Description |
-|--------|-------------|
-| `fig_scatter.png` | True vs Estimated height scatter plot (accepted + rejected) |
-| `fig_per_ride_errors.png` | Per-ride absolute error bar chart with segment IDs |
-| `fig_error_histogram.png` | Error distribution histogram |
-| `fig_error_cdf.png` | Cumulative error distribution (accepted vs all) |
-| `fig_conformal_coverage.png` | Pre-calibrated conformal interval coverage check |
-| `fig_quality_vs_error.png` | Quality score vs height error relationship |
-| `fig_rejection_analysis.png` | Rejection reasons breakdown + error comparison |
-| `fig_error_vs_height.png` | Error vs ride height magnitude |
-| `fig_method_breakdown.png` | Estimation method usage and per-method accuracy |
-| `fig_individual_rides.png` | Best and worst ride height curves |
-| `fig_phone_positions.png` | Error by phone position (if applicable) |
-| `fig_summary_dashboard.png` | 4-panel summary with key metrics table |
-| `fig_detection_*.png` | Detection timeline (full mode only) |
-| `fig_iou_distribution.png` | Detection IoU distribution (full mode only) |
-
-### Reading the Results
-
-**`summary.json`** contains the key metrics:
-```json
-{
-  "n_total": 33,
-  "n_accepted": 12,
-  "n_rejected": 21,
-  "acceptance_rate": 36.4,
-  "accepted_mae": 0.996,
-  "accepted_median": 0.579,
-  "accepted_max_err": 3.881,
-  "accepted_within_1m": 7,
-  "conformal_interval": 3.62,
-  "conformal_coverage": 91.7
-}
+```
+prediction/
+├── algorithms/
+│   ├── configTypes.py        # PREDICT_ALGORITHM_CONFIG, PredictAlgorithm,
+│   │                         # BarometerHeightDiffConfig, ZuptAccelConfig,
+│   │                         # TrapezoidAccelConfig
+│   ├── config.json           # per-algorithm hyperparameters
+│   ├── predictor.py          # public Predictor class + .predict(data, pre,
+│   │                         # post, phone_model) dispatcher
+│   ├── common/
+│   │   └── types.py          # PredictionOutput, CalibrationSample
+│   ├── barometer_only/
+│   │   └── height_difference.py
+│   └── accelerometer_only/
+│       ├── zupt_accel/
+│       │   ├── estimator.py     # ZuptAccelEstimator
+│       │   ├── quality.py       # quality filter (gravity drift, peaks, ...)
+│       │   └── theoretical_ci.py  # σ_pos = σ_a · dt² · √(N³/12) noise model
+│       └── trapezoid_accel/
+│           ├── estimator.py     # TrapezoidAccelEstimator
+│           ├── pulse_pair.py    # shared-shape trapezoid pulse-pair fitter
+│           └── quality.py
+└── evaluation/               # prediction-specific evaluation & reporting
+    ├── runner.py             # per-experiment inference loop
+    ├── dataset.py            # iterator over GT-intervals + sensors
+    ├── metrics.py            # coverage, CI-width, abs-error statistics
+    ├── figures.py            # reliability, coverage, error scatter
+    └── report.py             # assembles a full evaluation report
 ```
 
-Key things to check:
-1. **`conformal_coverage`** ≥ 90%: The pre-calibrated conformal interval achieves the target coverage on your data
-2. **`accepted_mae`**: Mean absolute error on accepted rides should be low (~1m or less)
-3. **`acceptance_rate`**: What fraction of rides pass quality filtering
-4. **Rejection quality** (in console output): Most rejected rides should genuinely have high error
+**Public API**: `Predictor(config).predict(data, pre, post, phone_model)` →
+`PredictionOutput` with `height_diff`, `ci_half_width`, `theoretical_sigma`,
+`accepted`, `quality_score`, `reject_reason`, `meta`. Accelerometer
+algorithms need `pre`/`post` (stationary windows around the ride) for
+gravity calibration; the barometer algorithm ignores them.
 
-**`results.json`** contains per-ride details:
-```json
-[
-  {
-    "segment_id": 1,
-    "true_dh": 18.4,
-    "est_dh": 16.56,
-    "err": 1.84,
-    "method": "gravity_proj",
-    "accepted": true,
-    "reject_reason": "",
-    "quality_score": 1.23,
-    "confidence_interval_90": 3.62
-  }
-]
-```
+### `src/pipelines/`
 
-### Example: Bar-Ilan Dataset
+- **`boutique_pipeline.py`** — end-to-end: loads an experiment → runs
+  segmentation → runs prediction per detected ride → writes diagnostic
+  figures. Use this as the integration-test entry point.
 
-Generate and run the example evaluation dataset:
+### `src/plotting/`
 
-```bash
-# Generate example CSV from Bar-Ilan dataset
-python scripts/generate_example_eval_csv.py
+Shared plotting helpers (experiment-overview figures, etc). Stage-specific
+plots live inside each stage's `evaluate/` or `evaluation/` module.
 
-# Run segments-only evaluation
-python run_custom_evaluation.py --dataset datasets/bar_ilan_eval_example.csv \
-    --mode segments_only --output-dir evaluation_output/ -v
-```
+### `src/(archive)/`
+
+Pre-refactor code kept for reference. **Nothing in `src/` imports from
+here.** Scripts in this folder reference paths like `src/algorithms/` that
+no longer exist.
 
 ---
 
-## CLI Usage
+## `scripts/` — top-level runners
 
-```bash
-# Run on a CSV file (columns: acc_x, acc_y, acc_z)
-python run_inference.py --input data.csv --output results.json --verbose
+- **`run_prediction_evaluation.py`** — run the full prediction evaluation
+  (trains conformal, runs on test split, writes report).
+- **`build_prediction_report_assets.py`** — build figures for the LaTeX
+  report under `docs/latex/`.
 
-# Only accepted rides
-python run_inference.py --input data.csv --accepted-only -v
+---
 
-# With pre-computed segments
-python run_inference.py --input data.csv --segments segments.json -v
-```
+## Conventions worth knowing
 
-## Input Format
+### Config modules are named `configTypes.py`
 
-CSV with columns (case-insensitive):
-| Column | Description |
-|--------|-------------|
-| `acc_x` | X-axis acceleration (m/s²) |
-| `acc_y` | Y-axis acceleration (m/s²) |
-| `acc_z` | Z-axis acceleration (m/s²) |
-| `time` (optional) | Timestamp in seconds |
+`segmentation/algorithms/configTypes.py` and
+`prediction/algorithms/configTypes.py` hold the Pydantic config models
+(was previously `class.py`, renamed because `class` is a reserved keyword
+and forced `importlib.import_module` hacks). Each stage has one top-level
+config (`SEGMENT_ALGORITHM_CONFIG` / `PREDICT_ALGORITHM_CONFIG`) that
+selects an algorithm enum and holds hyperparameter overrides merged on top
+of `config.json`.
 
-Also supports headerless 4-column CSVs (`time_ms, x, y, z`).
+### Dispatcher pattern
 
-## Output Format
+Both stages have a single public dispatcher class:
+- `segmentation/algorithms/segmenter.py` → `Segmenter.detect(data)`
+- `prediction/algorithms/predictor.py` → `Predictor.predict(data, ...)`
 
-JSON array of detected rides:
-```json
-[
-  {
-    "start_time": 85.9,
-    "end_time": 108.0,
-    "height_estimate": 18.4,
-    "confidence_interval_90": 3.62,
-    "method": "gravity_proj",
-    "accepted": true,
-    "reject_reason": ""
-  }
-]
-```
+The dispatcher reads its config's `algorithm` enum and builds the right
+algorithm implementation. Callers never instantiate algorithm classes
+directly.
 
-## Pipeline Stages
+### Algorithm-specific vs. reusable
 
-1. **Detection**: Finds elevator rides via accelerometer magnitude variance analysis and velocity zero-crossing segmentation.
-2. **Quality Filter**: Accelerometer-only assessment of orientation stability, gravity drift, impact peaks, and noise. Rejects unreliable segments with clear reasons.
-3. **Height Estimation**: Gravity-projected ZUPT integration with drift-corrected magnitude fallback. Three estimation methods with automatic selection based on signal quality.
-4. **Conformal Prediction**: LOO conformal provides 90% coverage intervals calibrated on the Bar-Ilan dataset.
+Inside each stage, algorithms are grouped by the sensor modality they
+depend on: `barometer_only/` for pressure-based algorithms,
+`accelerometer_only/` for accelerometer-based ones. Anything that *isn't*
+specific to one algorithm — signal processing, gravity math, conformal
+calibration, phone-chip noise — lives in `src/utils/`.
 
-## Re-Calibration
+### Outputs are CI-valued
 
-```python
-from src.pipeline import ElevatorHeightPipeline
+Segmentation emits `(lo, hi)` tuples for `start_ci`, `end_ci`,
+`probability_ci`. Prediction emits a scalar `height_diff` plus a scalar
+`ci_half_width`. When the algorithm is deterministic, the CIs collapse to
+zero-width tuples — downstream code must not assume the interval is
+non-empty.
 
-pipeline = ElevatorHeightPipeline(fs=100)
-stats = pipeline.calibrate(rides_with_gt=[
-    {'acc_x': ax, 'acc_y': ay, 'acc_z': az, 'true_height': 6.0},
-    # ... more labeled rides
-])
-pipeline.save("model/")
-```
+---
 
+## Entry points cheat-sheet
 
-## Evaluation
+| Need to… | Use |
+|---|---|
+| Load an experiment | `src.data.loader.getExperimentData(name)` |
+| List experiments | `src.data.loader.list_experiments(kind='train'/'test'/'all')` |
+| Segment a session | `src.segmentation.algorithms.Segmenter(config).detect(data)` |
+| Predict Δh of a ride | `src.prediction.algorithms.Predictor(config).predict(data, pre, post, phone_model)` |
+| Sweep segmentation hyperparams | `src.segmentation.evaluate.sweep_hyperparameters(...)` |
+| Evaluate a segmentation config | `src.segmentation.evaluate.evaluate_algorithm(...)` |
+| Run the end-to-end pipeline | `src.pipelines.boutique_pipeline` |
 
-```bash
-# Run full evaluation pipeline on Bar-Ilan dataset with figures
-python run_evaluation.py
+---
 
-# Run evaluation on custom dataset
-python run_custom_evaluation.py --dataset my_data.csv --mode segments_only -v
-```
+## Where to look for deeper docs
 
-## Project Structure
-
-```
-├── run_inference.py              # CLI inference entry point
-├── run_evaluation.py             # Bar-Ilan evaluation pipeline with figures
-├── run_custom_evaluation.py      # Custom dataset evaluation (test-set)
-├── src/
-│   ├── pipeline.py               # Production pipeline class
-│   ├── algorithms/               # Core algorithms (quality_filter, ZUPT, etc.)
-│   └── legacy/                   # Historical algorithm files
-├── model/                        # Saved pipeline parameters
-├── datasets/                     # ADVIO, Bar-Ilan, synthetic data
-│   └── bar_ilan_eval_example.csv # Example evaluation dataset CSV
-├── scripts/
-│   └── generate_example_eval_csv.py  # Generate example from Bar-Ilan
-├── docs/                         # Reports, figures
-├── tests/                        # Test suite
-└── prompt/                       # Project prompts history
-```
-
-## Requirements
-
-```bash
-pip install -r requirements.txt
-```
-
-Dependencies: `numpy`, `pandas`, `scipy`, `matplotlib`, `python-docx`
-
-## Performance (Bar-Ilan Dataset)
-
-| Metric | Value |
-|--------|-------|
-| Detection | 28/33 rides matched (85%) |
-| Acceptance rate | 58% (19/33) |
-| Accepted MAE | 1.16m |
-| Accepted Median Error | 0.80m |
-| LOO Conformal Coverage | 94.7% (≥90% target) |
-| LOO Conformal Interval | ±3.98m |
+- `src/segmentation/README.md` — physics of elevator motion, why trapezoids,
+  and the full segmentation problem statement.
+- `src/segmentation/algorithms/accelerometer_only/template_match/README.md`
+  — the template-match detector internals.
+- `src/segmentation/algorithms/accelerometer_only/template_match/check_grid_across_signal/README.md`
+  — the active detector's state-dict schema.
+- `src/data/README.md` — data schemas, folder layout, loader conventions.
+- `src/data/dataset_cleanup/README.md` — dataset curation workflow.
+- `src/segmentation/algorithms/metrics/METRICS.md` — metric definitions.

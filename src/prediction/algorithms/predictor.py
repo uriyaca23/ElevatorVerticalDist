@@ -1,35 +1,12 @@
 """Prediction algorithm dispatch.
 
 :class:`Predictor` is configured via :class:`PREDICT_ALGORITHM_CONFIG`
-(see ``class.py``) which selects one of three algorithms and loads
-its hyperparameters from ``config.json``:
-
-  * :class:`~.barometer_only.predict_height_difference_from_barometer`
-    — a pure function, float-in-float-out.
-  * :class:`~.zupt_accel.ZuptAccelEstimator`
-  * :class:`~.trapezoid_accel.TrapezoidAccelEstimator`
-
-Both accelerometer-based algorithms are classes that carry state (the
-calibrated conformal multiplier), so :class:`Predictor` instantiates
-the correct class at construction time.
-
-Public API:
-
-  * :meth:`Predictor.forward(data)` — returns a ``float`` Δh
-    (meters). Backwards-compatible with the barometer baseline.
-  * :meth:`Predictor.predict(data, phone_model, pre, post)` — returns
-    the full :class:`PredictionOutput` (Δh, CI, accept flag, quality,
-    metadata). Available on all algorithms; for the barometer baseline
-    we synthesise a permissive PredictionOutput so downstream code can
-    treat all three uniformly.
-  * :meth:`Predictor.calibrate(samples)` — no-op for the barometer;
-    fits the conformal multiplier for ZUPT / trapezoid.
-  * :meth:`Predictor.save_calibration(path)` / :meth:`load_calibration(path)`.
+(see ``configTypes.py``) which selects one of three algorithms and
+loads its hyperparameters from ``config.json``.
 """
 
 from __future__ import annotations
 
-import importlib
 import math
 from pathlib import Path
 from typing import Optional
@@ -38,26 +15,23 @@ import pandas as pd
 
 from .barometer_only import predict_height_difference_from_barometer
 from .common import CalibrationSample, PredictionOutput
-from .zupt_accel import ZuptAccelConfig, ZuptAccelEstimator
-from .trapezoid_accel import TrapezoidAccelConfig, TrapezoidAccelEstimator
-
-_config_mod = importlib.import_module(__package__ + ".class")
-PREDICT_ALGORITHM_CONFIG = _config_mod.PREDICT_ALGORITHM_CONFIG
-PredictAlgorithm = _config_mod.PredictAlgorithm
-BarometerHeightDiffConfig = _config_mod.BarometerHeightDiffConfig
+from .accelerometer_only.zupt_accel import ZuptAccelConfig, ZuptAccelEstimator
+from .accelerometer_only.trapezoid_accel import (
+    TrapezoidAccelConfig, TrapezoidAccelEstimator,
+)
+from .configTypes import (
+    PREDICT_ALGORITHM_CONFIG,
+    PredictAlgorithm,
+    BarometerHeightDiffConfig,
+)
 
 
 class Predictor:
-    """Unified front-end for all height-difference prediction algorithms."""
-
     def __init__(self, config: PREDICT_ALGORITHM_CONFIG):
         self.config = config
         self.params = config.load_params()
         self._algo_impl = self._build_algo()
 
-    # ------------------------------------------------------------------
-    # Construction
-    # ------------------------------------------------------------------
     def _build_algo(self):
         algo = self.config.algorithm
         if algo is PredictAlgorithm.BAROMETER_HEIGHT_DIFF:
@@ -68,13 +42,29 @@ class Predictor:
             return TrapezoidAccelEstimator(TrapezoidAccelConfig(**self.params))
         raise ValueError(f"Unsupported algorithm: {algo}")
 
-    # ------------------------------------------------------------------
-    # Inference
-    # ------------------------------------------------------------------
-    def forward(self, data: pd.DataFrame, **kwargs) -> float:
-        """Point estimate of the height difference (meters)."""
-        return self.predict(data, **kwargs).height_diff
-
+    # Dispatch a prediction algorithm on a single elevator ride segment.
+    #
+    # Input (`data`): a pandas DataFrame of raw sensor samples covering
+    # exactly one ride, whose required columns depend on the selected
+    # algorithm:
+    #   - BAROMETER_HEIGHT_DIFF → column `pressure` (hPa) by default;
+    #                             column name configurable via
+    #                             `BarometerHeightDiffConfig.pressure_col`.
+    #   - ZUPT_ACCEL            → columns `timestamp_ms`, `x`, `y`, `z`
+    #                             (raw accelerometer, m/s^2) by default;
+    #                             column names configurable on the config.
+    #   - TRAPEZOID_ACCEL       → same raw accelerometer schema as ZUPT.
+    #
+    # The two accelerometer algorithms also accept optional stationary
+    # pre/post windows and a `phone_model` string; these feed the gravity-
+    # projection and phone-specific noise-DB lookups.
+    #
+    # Output: a :class:`PredictionOutput` bundling the predicted
+    # height-difference (meters), conformal CI half-width, theoretical σ,
+    # accept/reject verdict, quality score, and a free-form meta dict.
+    # The barometer baseline does not model quality or CI, so it returns
+    # a permissive PredictionOutput (accepted=True, ci=inf) so downstream
+    # code can treat all algorithms uniformly.
     def predict(
         self,
         data: pd.DataFrame,
@@ -84,11 +74,7 @@ class Predictor:
     ) -> PredictionOutput:
         algo = self.config.algorithm
         if algo is PredictAlgorithm.BAROMETER_HEIGHT_DIFF:
-            cfg: BarometerHeightDiffConfig = self._algo_impl
-            dh = predict_height_difference_from_barometer(data, cfg)
-            # The barometer baseline does not model quality or CI; we
-            # surface the estimate with a permissive PredictionOutput so
-            # downstream code can treat all three algorithms uniformly.
+            dh = predict_height_difference_from_barometer(data, self._algo_impl)
             return PredictionOutput(
                 height_diff=float(dh),
                 ci_half_width=math.inf,
@@ -96,18 +82,12 @@ class Predictor:
                 accepted=True, quality_score=0.0, reject_reason="",
                 meta={"method": "barometer"},
             )
-
-        # Accelerometer algorithms share a common per-segment method.
         return self._algo_impl.predict_segment(
             data, phone_model=phone_model, pre=pre, post=post,
         )
 
-    # ------------------------------------------------------------------
-    # Calibration + checkpoint IO
-    # ------------------------------------------------------------------
     def calibrate(self, samples: list[CalibrationSample]) -> dict:
-        algo = self.config.algorithm
-        if algo is PredictAlgorithm.BAROMETER_HEIGHT_DIFF:
+        if self.config.algorithm is PredictAlgorithm.BAROMETER_HEIGHT_DIFF:
             return {"note": "barometer_does_not_require_calibration"}
         return self._algo_impl.calibrate(samples)
 

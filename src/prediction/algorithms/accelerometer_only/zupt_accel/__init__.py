@@ -15,7 +15,7 @@ Strategy:
 See :mod:`.estimator` for the public :class:`ZuptAccelEstimator` class.
 """
 
-from .config import ZuptAccelConfig
+from src.prediction.algorithms.configTypes import ZuptAccelConfig
 from .estimator import ZuptAccelEstimator
 
 __all__ = ["ZuptAccelConfig", "ZuptAccelEstimator"]

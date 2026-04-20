@@ -9,21 +9,15 @@ with NMS, then greedily pair start peaks (pulse-up) with later end peaks
 
 from __future__ import annotations
 
-import importlib
-
 import numpy as np
 import pandas as pd
 
 from src.physics import calculate_velocity_from_accelerometer
-from src.segmentation.algorithms.accelerometer_only.acc_segmentation import (
-    _compute_a_vert,
-)
+from src.utils.accelerometer_utils import compute_a_vert
 from src.segmentation.algorithms.accelerometer_only.template_match.templates import (
     Templates, load_templates,
 )
-
-_config_mod = importlib.import_module("src.segmentation.algorithms.class")
-TemplateMatchConfig = _config_mod.TemplateMatchConfig
+from src.segmentation.algorithms.configTypes import TemplateMatchConfig
 
 OUTPUT_COLUMNS = ["start_ci", "end_ci", "duration", "type", "probability_ci"]
 
@@ -121,7 +115,7 @@ def compute_match_scores(
     ax = data[config.x_col].to_numpy(dtype=float)
     ay = data[config.y_col].to_numpy(dtype=float)
     az = data[config.z_col].to_numpy(dtype=float)
-    a_vert = _compute_a_vert(ax, ay, az, fs)
+    a_vert = compute_a_vert(ax, ay, az, fs)
     v_lpf = calculate_velocity_from_accelerometer(ax, ay, az, fs)
 
     nv_up = ncc_slide(v_lpf, templates.pulse_up_v)

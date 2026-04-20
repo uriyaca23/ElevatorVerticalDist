@@ -8,15 +8,11 @@ damp barometer noise.
 
 from __future__ import annotations
 
-import importlib
-
 import numpy as np
 import pandas as pd
 
 from src.physics.barometric import pressure_to_altitude
-
-_config_mod = importlib.import_module("src.prediction.algorithms.class")
-BarometerHeightDiffConfig = _config_mod.BarometerHeightDiffConfig
+from src.prediction.algorithms.configTypes import BarometerHeightDiffConfig
 
 
 def predict_height_difference_from_barometer(

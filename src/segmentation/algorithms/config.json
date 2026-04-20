@@ -9,16 +9,21 @@
     "pad_sec": 1.0
   },
   "acc_template_match": {
-    "fs_hz": 100.0,
-    "lpf_hz": 0.3,
-    "template_len": 256,
-    "entry_frac": 0.5,
-    "exit_frac": 0.5,
-    "enter_threshold": 0.55,
-    "nms_radius_sec": 4.0,
-    "min_pair_gap_sec": 3.0,
-    "max_pair_gap_sec": 90.0,
-    "vel_weight": 0.6,
-    "pad_sec": 1.5
+    "r2_peak_thresh": 0.80,
+    "min_peak_abs_a": 0.5,
+    "nms_radius_s": 0.5,
+    "same_sign_min_gap_s": 3.0,
+    "min_ride_s": 0.0,
+    "max_ride_s": 120.0,
+    "joint_r2_thresh": 0.75,
+    "min_pair_abs_a": 0.5,
+    "heatmap_energy_thresh": 0.30,
+    "w_min_s": 0.4,
+    "w_max_s": 3.0,
+    "n_w": 30,
+    "f_min": 0.05,
+    "f_max": 0.80,
+    "n_f": 15,
+    "noise_sigma_multiplier": 6.0
   }
 }

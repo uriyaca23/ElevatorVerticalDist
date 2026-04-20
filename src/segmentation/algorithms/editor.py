@@ -26,12 +26,19 @@ Two tables on the right:
 Read-only. Use ``gt_editor.py`` for GT edits.
 
 Usage:
-    venv/bin/python src/segmentation/algorithms/accelerometer_only/\
-template_match/check_grid_across_signal/editor.py [exp_folder_name]
+    venv/bin/python src/segmentation/algorithms/editor.py [exp_folder_name]
+
+Predict button
+--------------
+Each selected interval (prediction or GT) can be run through every
+:class:`src.prediction.algorithms.Predictor` algorithm by clicking
+**Predict** in the detail header. The verdict pane then shows Δh + CI
+per algorithm alongside the barometer-derived GT Δh.
 """
 
 from __future__ import annotations
 
+import math
 import sys
 import tkinter as tk
 from pathlib import Path
@@ -49,7 +56,7 @@ from matplotlib.figure import Figure  # noqa: E402
 # Make absolute ``src.*`` imports resolve when the editor is launched as
 # a standalone script (``python .../editor.py``) as well as via ``-m``.
 _HERE = Path(__file__).resolve().parent
-_REPO_ROOT = _HERE.parents[5]
+_REPO_ROOT = _HERE.parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
@@ -67,12 +74,24 @@ from src.segmentation.algorithms.accelerometer_only.template_match.fit_elevator_
 from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E402
     detect as _detect,
 )
+from src.prediction.algorithms import (  # noqa: E402
+    Predictor,
+    PREDICT_ALGORITHM_CONFIG,
+    PredictAlgorithm,
+)
+from src.physics.barometric import pressure_to_altitude  # noqa: E402
 
 predict_intervals = _detect.predict_intervals
 diagnose_window = _detect.diagnose_window
 
 PRED_COLORS = {"up": "#1f3a5f", "down": "#7d3c98"}
 HIGHLIGHT_COLOR = "#e67e22"
+
+# Seconds of pre/post stationary window passed to accelerometer predictors
+# for gravity calibration. 2 s at typical phone sampling rates (50–200 Hz)
+# gives 100–400 samples — comfortably above the grav_window_sec · fs floor
+# inside ``estimate_gravity_stationary``.
+PREDICT_PRE_POST_SEC = 2.0
 
 
 # --------------------------------------------------------------------------
@@ -306,6 +325,11 @@ class PredictionEditor(tk.Tk):
         ttk.Button(detail_header, text="÷2", width=3,
                    command=lambda: self._scale_pad(0.5))\
             .pack(side=tk.LEFT, padx=1)
+        ttk.Separator(detail_header, orient=tk.VERTICAL)\
+            .pack(side=tk.LEFT, padx=8, fill=tk.Y)
+        ttk.Button(detail_header, text="▶ Predict all algorithms",
+                   command=self._on_predict_clicked)\
+            .pack(side=tk.LEFT, padx=(2, 0))
         self.detail_fig = Figure(figsize=(6, 5))
         self.detail_canvas = FigureCanvasTkAgg(self.detail_fig, master=detail_frame)
         self.detail_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -569,6 +593,189 @@ class PredictionEditor(tk.Tk):
         self._highlight_on_plot(t_s_acc + offset, t_e_acc + offset)
         self._last_sel = ("gt", (t_s_acc, t_e_acc, rt, gi))
         self._render_detail_for_gt(t_s_acc, t_e_acc, rt, gi)
+
+    # ---------- "Predict all algorithms" button ----------
+
+    def _interval_for_sel(self) -> tuple[float, float, str] | None:
+        """Resolve ``self._last_sel`` to ``(t_start_acc, t_end_acc, label)``.
+
+        Both time values are on the ACC-local seconds axis (same frame
+        the detector state uses). Returns ``None`` if no usable selection
+        is active.
+        """
+        if self._last_sel is None:
+            return None
+        kind, payload = self._last_sel
+        if kind == "pred":
+            (idx,) = payload
+            match = next(
+                (p for p in self.predictions if int(p["index"]) == idx), None,
+            )
+            if match is None:
+                return None
+            return (
+                float(match["t_start_s"]),
+                float(match["t_end_s"]),
+                f"pred #{idx:02d} ({match['ride_type']})",
+            )
+        if kind == "gt":
+            t_s, t_e, rt, gi = payload
+            return float(t_s), float(t_e), f"gt #{gi:02d} ({rt})"
+        return None
+
+    def _slice_sensor_ms(self, df, t_lo_ms: float, t_hi_ms: float):
+        """Return the rows of ``df`` whose ``timestamp_ms`` falls in the
+        absolute-ms window ``[t_lo_ms, t_hi_ms]``.
+
+        ``df`` may be ``None`` or empty — callers should treat the return
+        value as possibly-empty.
+        """
+        if df is None or df.empty:
+            return df
+        ts = df["timestamp_ms"].to_numpy(dtype=float)
+        mask = (ts >= t_lo_ms) & (ts <= t_hi_ms)
+        return df.loc[mask].reset_index(drop=True)
+
+    def _run_all_predictors(
+        self, t_start_acc: float, t_end_acc: float,
+    ) -> dict:
+        """Run every :class:`PredictAlgorithm` on the selected interval.
+
+        Also derives a GT Δh by converting the ride's PRS pressure
+        samples to altitude and taking the endpoint difference. Keys are
+        each algorithm's ``.value`` plus ``"gt_dh"`` (``None`` if the
+        experiment has no PRS data).
+        """
+        if self.sensors is None:
+            return {}
+        t_lo_ms = self._acc_t0_ms + t_start_acc * 1000.0
+        t_hi_ms = self._acc_t0_ms + t_end_acc * 1000.0
+        pad_ms = PREDICT_PRE_POST_SEC * 1000.0
+
+        acc = self.sensors.get("ACC")
+        prs = self.sensors.get("PRS")
+        ride_acc = self._slice_sensor_ms(acc, t_lo_ms, t_hi_ms)
+        pre_acc = self._slice_sensor_ms(acc, t_lo_ms - pad_ms, t_lo_ms)
+        post_acc = self._slice_sensor_ms(acc, t_hi_ms, t_hi_ms + pad_ms)
+        ride_prs = self._slice_sensor_ms(prs, t_lo_ms, t_hi_ms)
+
+        results: dict = {"gt_dh": None}
+        if ride_prs is not None and not ride_prs.empty and len(ride_prs) >= 2:
+            alt = pressure_to_altitude(ride_prs["pressure"].to_numpy(dtype=float))
+            results["gt_dh"] = float(alt[-1] - alt[0])
+
+        for algo in PredictAlgorithm:
+            try:
+                predictor = Predictor(PREDICT_ALGORITHM_CONFIG(algorithm=algo))
+                if algo is PredictAlgorithm.BAROMETER_HEIGHT_DIFF:
+                    if ride_prs is None or ride_prs.empty:
+                        results[algo.value] = {"error": "no PRS data"}
+                        continue
+                    out = predictor.predict(ride_prs)
+                else:
+                    if ride_acc is None or ride_acc.empty:
+                        results[algo.value] = {"error": "no ACC data"}
+                        continue
+                    out = predictor.predict(
+                        ride_acc, phone_model="",
+                        pre=pre_acc, post=post_acc,
+                    )
+                results[algo.value] = {
+                    "dh":       float(out.height_diff),
+                    "ci":       float(out.ci_half_width),
+                    "sigma":    float(out.theoretical_sigma),
+                    "accepted": bool(out.accepted),
+                    "reason":   str(out.reject_reason),
+                    "q":        float(out.quality_score),
+                }
+            except Exception as exc:
+                results[algo.value] = {
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+        return results
+
+    def _format_predictions(self, results: dict, label: str) -> str:
+        lines = [f"Predict all algorithms — {label}:"]
+        for algo in PredictAlgorithm:
+            row = results.get(algo.value, {})
+            name = f"{algo.value}"
+            if "error" in row:
+                lines.append(f"  {name:26s} error: {row['error']}")
+                continue
+            ci_str = (
+                f"±{row['ci']:.2f}m" if math.isfinite(row["ci"]) else "±inf"
+            )
+            verdict = (
+                "OK" if row["accepted"]
+                else f"REJECT ({row['reason'] or 'no reason'})"
+            )
+            lines.append(
+                f"  {name:26s} Δh = {row['dh']:+7.2f} m   CI {ci_str}   "
+                f"q={row['q']:.2f}   [{verdict}]"
+            )
+        gt = results.get("gt_dh")
+        if gt is None:
+            lines.append(f"  {'GT (barometer altitude)':26s} — no PRS data")
+        else:
+            lines.append(
+                f"  {'GT (barometer altitude)':26s} Δh = {gt:+7.2f} m"
+            )
+        return "\n".join(lines)
+
+    def _annotate_detail_with_predictions(self, summary: str) -> None:
+        """Overlay the prediction summary as a small text box on the detail
+        signal axis, so the comparison is visible in the overview panel.
+
+        Silently skips if there is no signal subplot (i.e., the placeholder
+        is showing) or the axis layout changed.
+        """
+        if not self.detail_fig.axes:
+            return
+        axes = [
+            ax for ax in self.detail_fig.axes
+            if ax.get_xlabel() == "t (s, ACC-local)"
+            and ax.get_ylabel() == "a (m/s²)"
+        ]
+        if not axes:
+            return
+        ax = axes[0]
+        ax.text(
+            0.01, 0.98, summary, transform=ax.transAxes,
+            ha="left", va="top", fontsize=7.5, family="monospace",
+            bbox=dict(facecolor="#ffffff", alpha=0.85,
+                      edgecolor="#888", boxstyle="round,pad=0.3"),
+            zorder=20,
+        )
+        self.detail_canvas.draw_idle()
+
+    def _on_predict_clicked(self) -> None:
+        """Handler for the "▶ Predict all algorithms" button.
+
+        Runs every :class:`PredictAlgorithm` on the currently-selected
+        prediction or GT interval, appends the results + GT Δh to the
+        verdict text, and overlays a summary on the detail signal panel.
+        """
+        if self.sensors is None:
+            self.status_var.set("Load an experiment first.")
+            return
+        interval = self._interval_for_sel()
+        if interval is None:
+            self.status_var.set(
+                "Select a prediction or a GT row before predicting."
+            )
+            return
+        t_start, t_end, label = interval
+        self.status_var.set(f"Running all predictors on {label}…")
+        self.update_idletasks()
+
+        results = self._run_all_predictors(t_start, t_end)
+        summary = self._format_predictions(results, label)
+
+        current = self.verdict_text.get("1.0", "end-1c").rstrip()
+        combined = (current + "\n\n" + summary) if current else summary
+        self._set_verdict(combined)
+        self._annotate_detail_with_predictions(summary)
+        self.status_var.set(f"Predicted Δh for {label}.")
 
     # ---------- Detail window pad ----------
 

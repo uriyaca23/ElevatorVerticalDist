@@ -19,8 +19,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.segmentation.algorithms.accelerometer_only.acc_segmentation import (
-    _compute_a_vert, compute_velocity, lowpass,
+from src.utils.accelerometer_utils import (
+    compute_a_vert, compute_velocity, lowpass,
 )
 from src.segmentation.algorithms.metrics import ci_center
 
@@ -50,7 +50,7 @@ def _build_signals(
     ax = acc_frame[x_col].to_numpy(dtype=float)
     ay = acc_frame[y_col].to_numpy(dtype=float)
     az = acc_frame[z_col].to_numpy(dtype=float)
-    a_vert = _compute_a_vert(ax, ay, az, fs)
+    a_vert = compute_a_vert(ax, ay, az, fs)
     v = compute_velocity(a_vert, fs)
     v_lpf = lowpass(v, fs, cutoff_hz=lpf_hz)
     return t, v_lpf, a_vert

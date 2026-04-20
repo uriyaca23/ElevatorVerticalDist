@@ -1,11 +1,8 @@
-from .templates import Templates, fit_templates, save_templates, load_templates
-from .matcher import detect_elevator_segments_from_template_match, compute_match_scores
+# Active detector lives in ``check_grid_across_signal.detect`` and is
+# wired through ``Segmenter``. The legacy sliding-NCC ``matcher.py`` +
+# ``templates.py`` / ``build_pulse_labels.py`` files are kept on disk for
+# reference but no longer re-exported — they depend on an older
+# ``TemplateMatchConfig`` shape that has been repurposed for the grid
+# detector.
 
-__all__ = [
-    "Templates",
-    "fit_templates",
-    "save_templates",
-    "load_templates",
-    "detect_elevator_segments_from_template_match",
-    "compute_match_scores",
-]
+__all__: list[str] = []

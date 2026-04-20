@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..common.accel_utils import estimate_gravity_stationary
+from src.utils.accelerometer_utils import estimate_gravity_stationary
 
 
 @dataclass

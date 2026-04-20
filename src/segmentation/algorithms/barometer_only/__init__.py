@@ -1,3 +1,3 @@
-from .height_segmentation import detect_elevator_segments_from_height
+from .height_segmentation import HeightSegmenter
 
-__all__ = ["detect_elevator_segments_from_height"]
+__all__ = ["HeightSegmenter"]

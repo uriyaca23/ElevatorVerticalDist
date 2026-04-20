@@ -15,12 +15,12 @@ grid search over (W, f). This exploits two project-relevant facts:
   (W, f, |A|) across the pair removes 3 degrees of freedom that were
   otherwise just fitting noise.
 
-See :mod:`src.prediction.algorithms.common.pulse_pair` for the
+See :mod:`.pulse_pair` for the
 mathematical content and :class:`~.estimator.TrapezoidAccelEstimator`
 for the public interface.
 """
 
-from .config import TrapezoidAccelConfig
+from src.prediction.algorithms.configTypes import TrapezoidAccelConfig
 from .estimator import TrapezoidAccelEstimator
 
 __all__ = ["TrapezoidAccelConfig", "TrapezoidAccelEstimator"]

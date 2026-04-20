@@ -28,18 +28,17 @@ from .parsing import (
 def _annotate_prs_with_gt(prs: pd.DataFrame) -> pd.DataFrame:
     """Add a `gt_label` column ('idle' / 'up' / 'down') to the PRS frame using
     the barometer-based segment detector."""
-    import importlib
-    config_mod = importlib.import_module("src.segmentation.algorithms.class")
-    seg_mod = importlib.import_module(
-        "src.segmentation.algorithms.barometer_only.height_segmentation"
+    from src.segmentation.algorithms.configTypes import PressureFilterConfig
+    from src.segmentation.algorithms.barometer_only.height_segmentation import (
+        HeightSegmenter,
     )
 
-    cfg = config_mod.PressureFilterConfig(time_col="time", height_col="height")
+    cfg = PressureFilterConfig(time_col="time", height_col="height")
     seg_input = pd.DataFrame({
         "time": prs["timestamp_ms"].to_numpy(dtype=float) / 1000.0,
         "height": prs["GT_height_m"].to_numpy(dtype=float),
     })
-    segments = seg_mod.detect_elevator_segments_from_height(seg_input, cfg)
+    segments = HeightSegmenter(cfg).segment(seg_input)
 
     labels = np.full(len(prs), "idle", dtype=object)
     t = seg_input["time"].to_numpy()

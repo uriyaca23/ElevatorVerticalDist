@@ -40,7 +40,10 @@ if str(_REPO_ROOT) not in sys.path:
 
 from src.data.loader import getExperimentData, list_experiments  # noqa: E402
 from src.physics import calculate_velocity_from_accelerometer  # noqa: E402
-from src.prediction.algorithms.quality_filter import estimate_gravity_vector  # noqa: E402
+from src.utils.accelerometer_utils import (  # noqa: E402
+    estimate_gravity_stationary,
+    vertical_accel_projected,
+)
 
 LABELS_ROOT = (
     Path(__file__).resolve().parents[1]
@@ -118,9 +121,8 @@ _DETREND_SEC = 8.0
 
 
 def _vertical_accel(ax: np.ndarray, ay: np.ndarray, az: np.ndarray, fs: float) -> np.ndarray:
-    gvec, g_mag, _stab = estimate_gravity_vector(ax, ay, az, fs=fs, window_sec=0.5)
-    g_hat = gvec / (np.linalg.norm(gvec) + 1e-12)
-    a = ax * g_hat[0] + ay * g_hat[1] + az * g_hat[2] - g_mag
+    gvec, _g_mag, _stab = estimate_gravity_stationary(ax, ay, az, fs=fs, window_sec=0.5)
+    a = vertical_accel_projected(ax, ay, az, gvec)
     # DC-detrend: a single global ``g_hat`` can't cancel gravity when the
     # phone's orientation during rides differs from the calibration window.
     # Subtracting a slow rolling mean removes the residual bias without
