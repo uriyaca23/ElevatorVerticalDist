@@ -4,5 +4,5 @@
     "edge_avg_samples": 1
   },
   "zupt_accel": {},
-  "scurve_accel": {}
+  "trapezoid_accel": {}
 }

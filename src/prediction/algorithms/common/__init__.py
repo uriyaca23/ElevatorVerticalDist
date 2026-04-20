@@ -1,11 +1,13 @@
 """Shared utilities for the accelerometer-based prediction algorithms.
 
-The two algorithms (ZUPT and 7-step S-curve) both need:
-  * a sensor-noise lookup table indexed by phone model (``noise_db``),
-  * a conformal-prediction calibrator (``conformal``),
-  * lightweight accelerometer helpers: gravity estimation, vertical
-    projection, ZUPT integration (``accel_utils``),
-  * a shared ``PredictionOutput`` dataclass (``types``).
+Modules:
+  * ``noise_db`` — phone-model → accelerometer noise σ lookup.
+  * ``conformal`` — split-conformal CI calibrator.
+  * ``accel_utils`` — gravity estimation, vertical projection, ZUPT
+    integration, low-pass filter.
+  * ``pulse_pair`` — trapezoid-pulse-pair matched-filter fitter and
+    analytic Δh + delta-method σ for the new trapezoid-S-curve method.
+  * ``types`` — ``PredictionOutput`` and ``CalibrationSample``.
 """
 
 from .types import PredictionOutput, CalibrationSample
@@ -17,6 +19,16 @@ from .accel_utils import (
     vertical_accel_projected,
     zupt_integrate,
     butter_lowpass,
+)
+from .pulse_pair import (
+    PulsePairFit,
+    fit_shared_shape_pair,
+    height_from_fit,
+    theoretical_sigma_height,
+    trapezoid_kernel,
+    smooth_rolling_mean,
+    GRID_W_S,
+    GRID_F,
 )
 
 __all__ = [
@@ -30,4 +42,12 @@ __all__ = [
     "vertical_accel_projected",
     "zupt_integrate",
     "butter_lowpass",
+    "PulsePairFit",
+    "fit_shared_shape_pair",
+    "height_from_fit",
+    "theoretical_sigma_height",
+    "trapezoid_kernel",
+    "smooth_rolling_mean",
+    "GRID_W_S",
+    "GRID_F",
 ]

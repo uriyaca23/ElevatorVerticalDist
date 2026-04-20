@@ -123,4 +123,9 @@ def per_experiment_metrics(df: pd.DataFrame) -> pd.DataFrame:
             "median_ci": float(np.median(grp["ci_half_width"])),
             "experiment_type": grp["experiment_type"].iloc[0],
         })
+    if not rows:
+        return pd.DataFrame(columns=[
+            "exp_name", "n_clean", "mae", "median_abs_err",
+            "coverage_90", "median_ci", "experiment_type",
+        ])
     return pd.DataFrame(rows).sort_values(["experiment_type", "exp_name"])

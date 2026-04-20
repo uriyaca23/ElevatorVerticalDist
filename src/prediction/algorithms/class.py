@@ -3,7 +3,13 @@
 Three algorithms are registered:
   * ``BAROMETER_HEIGHT_DIFF`` — ISA-inversion Δh from pressure.
   * ``ZUPT_ACCEL`` — Zero-Velocity Update double integration.
-  * ``SCURVE_ACCEL`` — 7-step S-curve velocity-domain fit.
+  * ``TRAPEZOID_ACCEL`` — shared-shape trapezoid pulse-pair matched-filter
+    fit in the acceleration domain. Replaces the old 7-step S-curve
+    velocity-domain NLS fitter — the new method is physically
+    equivalent (the trapezoid is the jerk-limited acceleration profile
+    with phases 1-3 collapsed to a single symmetric pulse), simpler
+    (2 shape params + closed-form amplitude), and more accurate on
+    our dataset.
 
 Each algorithm has its own Pydantic config subclass. The top-level
 ``PREDICT_ALGORITHM_CONFIG`` selects one of them and (optionally)
@@ -27,7 +33,7 @@ DEFAULT_CONFIG_PATH = Path(__file__).with_name("config.json")
 class PredictAlgorithm(str, Enum):
     BAROMETER_HEIGHT_DIFF = "barometer_height_diff"
     ZUPT_ACCEL = "zupt_accel"
-    SCURVE_ACCEL = "scurve_accel"
+    TRAPEZOID_ACCEL = "trapezoid_accel"
 
 
 class BarometerHeightDiffConfig(BaseModel):

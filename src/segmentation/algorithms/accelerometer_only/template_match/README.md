@@ -1,9 +1,12 @@
 # `template_match/` — trapezoid-based elevator-ride work
 
 Everything that matches a **trapezoid pulse** against the accelerometer
-signal lives under this folder. Three sub-packages share the same
-`(W, f)` trapezoid-template grid and the same matched-filter primitive,
-then branch on how they use it:
+signal lives under this folder. The matching primitive is **normalized
+cross-correlation (NCC) with a closed-form LS amplitude** over a
+discrete `(W, f)` shape grid — not dynamic time warping, despite the
+"DTW" label that appeared in earlier drafts of the parent README.
+Three sub-packages share the same `(W, f)` trapezoid-template grid and
+the same matched-filter primitive, then branch on how they use it:
 
 | sub-package | input | output | GT used at runtime? |
 |---|---|---|---|
@@ -249,8 +252,8 @@ labels/
 ├── experiment_overview/              # per-experiment overview PNGs (legacy)
 ├── ride_segments/                    # GT-ride-per-PNG (legacy)
 ├── fit_elevator_paramater/
-│   ├── basicTreepzeGrid/             # basic_grid.py outputs
-│   └── basicTreepzeGridWithConstraint/
+│   ├── basicTrapezoidGrid/             # basic_grid.py outputs
+│   └── basicTrapezoidGridWithConstraint/
 └── check_grid_across_signal/         # the detector's artefacts
     ├── best_detect_config.json       # sweep winner
     ├── interval_sweep.csv            # full 144-row sweep table

@@ -1,4 +1,4 @@
-"""Algorithm: ``basicTreepzeGridWithConstraint`` — shared-shape per-ride fit.
+"""Algorithm: ``basicTrapezoidGridWithConstraint`` — shared-shape per-ride fit.
 
 The two lobes of an elevator ride (take-off vs landing) are physically the
 same pulse up to sign — same ``|A|``, ``W``, ``f``. The basic fitter in
@@ -35,7 +35,7 @@ Selection rule. For every ``(W, f)`` on the :data:`common.GRID_W_S` ×
 The search is fully exhaustive over the sign-valid pair grid (done with a
 single broadcast per ``(W, f)``), so we're not relying on a top-K heuristic.
 
-Outputs under ``labels/fit_elevator_paramater/basicTreepzeGridWithConstraint/``.
+Outputs under ``labels/fit_elevator_paramater/basicTrapezoidGridWithConstraint/``.
 Each :class:`~common.LobeFit` still carries its own ``half_width_s`` /
 ``frac_flat`` / ``a_peak`` — by construction ``|a_peak|``, ``half_width_s``,
 ``frac_flat`` are identical between lobe1 and lobe2 in this variant.
@@ -74,7 +74,7 @@ LOBE2_REGION = _common.LOBE2_REGION
 match_one_template = _common.match_one_template
 run_fitter = _common.run_fitter
 
-OUT_DIR_NAME = "basicTreepzeGridWithConstraint"
+OUT_DIR_NAME = "basicTrapezoidGridWithConstraint"
 TITLE_SUFFIX = "shared-shape per-ride trapezoid fit (|A|,W,f tied; max mean R²)"
 
 
