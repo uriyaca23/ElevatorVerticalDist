@@ -29,34 +29,33 @@
       "clean_frac_within_3m": 0.8036649214659686
     }
   },
-  "scurve": {
+  "trapezoid": {
     "calibration": {
-      "n_used": 382,
-      "n_accepted": 354,
-      "multiplier": 1.8040214582003382,
-      "p95_score": 1.8040214582003382
+      "n_used": 361,
+      "multiplier": 5.593893097983049,
+      "p95_score": 5.593893097983049
     },
     "metrics": {
       "n_total": 415,
       "n_clean": 382,
-      "n_accepted_clean": 354,
-      "clean_mae": 1.621656320535197,
-      "clean_median_abs_err": 0.4350971525770093,
-      "clean_rmse": 3.331391354167752,
+      "n_accepted_clean": 361,
+      "clean_mae": 1.4808750975714982,
+      "clean_median_abs_err": 0.36410932170336374,
+      "clean_rmse": 2.9168863081562355,
       "clean_coverage_90": 0.9240837696335078,
-      "clean_median_ci": 3.391712043297632,
-      "clean_mean_ci": 4.896268861267327,
-      "clean_p95_abs_err": 6.101384209581523,
-      "accepted_clean_mae": 1.388947498173487,
-      "accepted_clean_median_abs_err": 0.37523427385897845,
-      "accepted_clean_rmse": 2.9982847998252935,
-      "accepted_clean_coverage_90": 0.9293785310734464,
-      "accepted_clean_median_ci": 2.8078682366144885,
-      "filter_accept_rate": 0.9012048192771084,
-      "filter_accept_rate_clean": 0.9267015706806283,
-      "filter_reject_rate_unclean": 0.3939393939393939,
-      "clean_frac_within_1_5m": 0.7225130890052356,
-      "clean_frac_within_3m": 0.8272251308900523
+      "clean_median_ci": 2.6926884928119614,
+      "clean_mean_ci": 4.078553022217239,
+      "clean_p95_abs_err": 5.730018881950629,
+      "accepted_clean_mae": 1.3166559732429381,
+      "accepted_clean_median_abs_err": 0.3401175355453976,
+      "accepted_clean_rmse": 2.7068778012882166,
+      "accepted_clean_coverage_90": 0.925207756232687,
+      "accepted_clean_median_ci": 2.588208849684254,
+      "filter_accept_rate": 0.9204819277108434,
+      "filter_accept_rate_clean": 0.9450261780104712,
+      "filter_reject_rate_unclean": 0.36363636363636365,
+      "clean_frac_within_1_5m": 0.725130890052356,
+      "clean_frac_within_3m": 0.837696335078534
     }
   }
 }

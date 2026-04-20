@@ -1,4 +1,4 @@
-"""Algorithm: ``basicTreepzeGrid`` — independent per-lobe trapezoid fit.
+"""Algorithm: ``basicTrapezoidGrid`` — independent per-lobe trapezoid fit.
 
 For every GT ride, search the :data:`common.GRID_W_S` × :data:`common.GRID_F`
 template grid and pick the best ``(t_c, A, W, f)`` for lobe 1 and lobe 2
@@ -12,7 +12,7 @@ This matches the original ``fit_trapezoid_pulses.py`` flavour — kept
 verbatim so downstream labels/plots don't regress. The shared-shape
 alternative lives in :mod:`constrained_grid`.
 
-Outputs under ``labels/fit_elevator_paramater/basicTreepzeGrid/``.
+Outputs under ``labels/fit_elevator_paramater/basicTrapezoidGrid/``.
 
 Run:
     venv/bin/python src/segmentation/algorithms/accelerometer_only/\
@@ -51,7 +51,7 @@ LOBE2_REGION = _common.LOBE2_REGION
 match_one_template = _common.match_one_template
 run_fitter = _common.run_fitter
 
-OUT_DIR_NAME = "basicTreepzeGrid"
+OUT_DIR_NAME = "basicTrapezoidGrid"
 TITLE_SUFFIX = "independent per-lobe trapezoid fit (matched-filter grid)"
 
 

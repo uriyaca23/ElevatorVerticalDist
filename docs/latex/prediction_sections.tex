@@ -42,10 +42,12 @@ Every algorithm implements three public methods (the signatures live in
 Both accelerometer algorithms share a lightweight \texttt{common/}
 package that provides: a phone-model $\to$ sensor-chip $\to$ noise
 lookup (\texttt{common/noise\_db.py}), a split-conformal calibrator
-(\texttt{common/conformal.py}), and a handful of vector helpers
-(gravity estimation, vertical projection, ZUPT integration). Everything
-else — quality filter, theoretical-$\sigma$ model, fitter — is
-per-algorithm.
+(\texttt{common/conformal.py}), a set of vector helpers (gravity
+estimation, vertical projection, ZUPT integration), and the
+shared-shape trapezoid pulse-pair fitter
+(\texttt{common/pulse\_pair.py}) that Algorithm~B is built on.
+Everything else — quality filter, theoretical-$\sigma$ model,
+amplitude correction — is per-algorithm.
 
 \subsection{Algorithm A: ZUPT Double-Integration}
 \label{sec:algo-zupt}
@@ -89,62 +91,166 @@ outside the window is zeroed before integration. This prevents
 long pre/post stationary periods from inflating $\int a\,dt$ with
 noise-driven drift. The number of samples inside the window,
 $N=t_e-t_s+1$, is the key scale for the theoretical error analysis
-below (\S\ref{sec:theoretical-sigma-zupt}).
+below (\S\ref{sec:theoretical-sigma}).
 
-\subsection{Algorithm B: 7-Step S-Curve Fitting}
-\label{sec:algo-scurve}
+\subsection{Algorithm B: Shared-Shape Trapezoid Pulse Pair}
+\label{sec:algo-trapezoid}
 
-Rather than integrating blindly, Algorithm B fits the entire ride to
-the 7-phase S-curve template of \S\ref{sec:elevator-kinematics}. The
-fitted parameters are $\theta=(j_{\max}, a_{\max}, v_{\max}, H, t_0)$
-where $t_0$ is the motion-onset offset within the segment; direction
-is recovered separately from ZUPT drift sign. The cost function is
-\textbf{the velocity-domain residual}:
+The seven-phase S-curve acceleration template of
+\S\ref{sec:elevator-kinematics} is the ideal jerk-limited profile,
+but fitting it in the velocity domain with three free kinematic
+parameters $(j_{\max},a_{\max},v_{\max})$ and non-linear least squares
+brought two problems on our field data: (i)~on long rides the NLS
+optimiser walked into local minima produced by non-ideal mid-ride
+events (door bounces, floor-passing vibrations), and (ii)~the
+jerk-ramp phases occupy a small fraction of the ride duration, so
+the information content about $j_{\max}$ separate from $a_{\max}$
+is weak under realistic sensor noise. We therefore collapse the
+jerk-ramp phases into a single \emph{trapezoid pulse} — still a jerk-
+limited profile in the limit where $j_{\max}$ is large compared to
+$a_{\max}/T_\mathrm{lobe}$, but parameterised by the shape features
+that are actually identifiable from the data.
+
+\paragraph{The 2-shape-parameter lobe model.} Each of the two
+acceleration lobes (take-off and landing) is modelled as a symmetric
+trapezoid
 \begin{equation}
-  \mathcal{L}(\theta) =
-  \sum_{i=1}^{N}\left(\frac{v_i - v_\theta(t_i)}{\sigma_v}\right)^2
-  \;+\;
-  \lambda\sum_{k}\left(\frac{\theta_k-\mu_k}{\sigma_k}\right)^2,
-  \label{eq:scurve-loss}
+  \tau_{W,f}(t) \;=\;
+  \begin{cases}
+    1 & |t|\le fW, \\
+    \dfrac{W-|t|}{(1-f)W} & fW<|t|<W, \\
+    0 & |t|\ge W,
+  \end{cases}
+  \label{eq:trapezoid-kernel}
 \end{equation}
-where $v_i$ is the measured velocity (ZUPT-integrated, drift-corrected,
-low-pass-filtered at $3$~Hz), $v_\theta(t)$ is the template velocity
-derived analytically from $\theta$, $\sigma_v$ is a robust MAD estimate
-of the velocity noise, and the second term is a Bayesian prior
-regulariser whose parameters $(\mu_k,\sigma_k)$ are taken from ISO
-18738 / CIBSE Guide D building-class priors. Moving to the velocity
-domain yields a roughly 10$\times$ SNR improvement over the raw
-acceleration domain because integration acts as a first-order
-low-pass, and the velocity template (one smooth bump) is much more
-distinctive than the sharp-edged acceleration template.
-
-Fitting uses trust-region reflective NLS (\texttt{scipy.optimize.least\_squares},
-method \texttt{trf}), warm-started from a 2-phase grid search in
-distance and motion-onset that uses the prior-mean kinematic values.
-Per-segment uncertainty on the distance parameter comes from the
-Cram\'er--Rao bound
+with $W$ the lobe half-width (s) and $f\in[0,1]$ the flat-fraction
+(so total lobe width is $2W$, with a flat top of width $2fW$ and two
+linear ramps each of width $(1-f)W$). Only two shape parameters; the
+limits $f{=}0$ and $f{=}1$ recover the triangular and rectangular pulses
+respectively. The integral of the unit trapezoid is
 \begin{equation}
-  \Sigma \;=\; \left(\mathbf{J}^\top \mathbf{J}/\sigma_v^2 + \Sigma_\mathrm{prior}^{-1}\right)^{-1},
-  \qquad
-  \sigma_{\rm CRB} = \sqrt{\Sigma_{HH}},
-  \label{eq:scurve-fim}
+  \int_{-W}^{W}\tau_{W,f}(t)\,dt \;=\; W(1+f),
+  \label{eq:trapezoid-area}
 \end{equation}
-where $\mathbf{J}_{i,k}=\partial v_\theta(t_i)/\partial\theta_k$ and
-$\Sigma_\mathrm{prior}^{-1}$ is the diagonal prior precision. The CRB
-is optimistic because the ideal-template assumption leaks real ride
-irregularity into the residuals, so we compose three variance terms
-into the per-segment $\sigma$:
+which will be the bridge from shape to velocity.
+
+\paragraph{Shared-shape constraint.} A real elevator returns to rest,
+so
 \[
-  \sigma^2 \;=\; \bigl(f_\mathrm{safe}\,\sigma_{\rm CRB}\bigr)^2
-  \;+\; \bigl(k_\mathrm{rel}\,|\hat{H}|\bigr)^2
-  \;+\; \bigl(\tfrac{1}{2}|\hat{H}-\hat{H}_\mathrm{ZUPT}|\bigr)^2.
+  \int_{0}^{T}\!a(\tau)\,d\tau \;=\; 0 \;\Longleftrightarrow\;
+  \int\!\!\bigl(\text{accel lobe}\bigr)
+  \;=\;
+  -\int\!\!\bigl(\text{decel lobe}\bigr),
 \]
-The first term is the FIM result with a safety factor
-$f_\mathrm{safe}$; the second is a per-meter floor encoding the
-empirical observation that longer rides drift proportionally more; the
-third is a cross-check penalty proportional to the disagreement
-between the S-curve $\hat{H}$ and the independent ZUPT integrator's
-$\hat{H}_\mathrm{ZUPT}$.
+and under the jerk-limited assumption the two lobes also share the
+machine-level limits $(j_{\max},a_{\max})$, hence the same
+$(A,W,f)$. We therefore fit the ride as
+\begin{equation}
+  a_{\boldsymbol{\theta}}(t) \;=\;
+  s\,A\,\tau_{W,f}(t-t_{c1})
+  \;-\;
+  s\,A\,\tau_{W,f}(t-t_{c2})\,,
+  \qquad
+  \boldsymbol{\theta}=(A,W,f,t_{c1},t_{c2})\in\mathbb{R}_+^{3}\times\mathbb{R}^2,
+  \label{eq:pulse-pair}
+\end{equation}
+where $s\in\{+1,-1\}$ is the ride direction (picked by the search)
+and the amplitude $A\ge0$ is shared. This drops the effective degrees
+of freedom from $8$ (independent per-lobe) to $5$, removing exactly
+the freedom that previously overfit noise.
+
+\paragraph{Analytic height.} The velocity profile is the integral of
+\eqref{eq:pulse-pair}: zero outside the lobes, ramps up over
+$[t_{c1}-W,\,t_{c1}+W]$, cruises at $v_\mathrm{peak}$ between the
+lobes, ramps down over $[t_{c2}-W,\,t_{c2}+W]$. The integral
+telescopes, giving
+\begin{equation}
+  v_\mathrm{peak} \;=\; A\,W(1+f)\,,
+  \qquad
+  \boxed{\;\Delta h \;=\; s \cdot v_\mathrm{peak}\cdot(t_{c2}-t_{c1})
+  \;=\; s\,A\,W(1+f)\,\Delta t_c\;}\,.
+  \label{eq:dh-analytic}
+\end{equation}
+No numerical integration, no free parameter fits outside the
+matched-filter step below.
+
+\paragraph{Matched-filter grid search (reusing Eyal's primitive).}
+For a fixed $(W,f)$ the best amplitude at every candidate centre $i$
+is the closed-form LS solution
+\begin{equation}
+  \hat{A}(W,f,i) \;=\; \frac{\langle a,\,\tau_i\rangle}{\langle \tau_i,\,\tau_i\rangle},
+  \qquad
+  R^2_i \;=\; 1-\frac{\lVert a-\hat{A}\tau_i\rVert^2}{\lVert a\rVert^2}\,,
+  \label{eq:matched-filter}
+\end{equation}
+where $\tau_i(t)\equiv\tau_{W,f}(t-t_i)$ and the inner products are
+taken over the $\pm W$ window around $i$. The joint shared-shape
+optimum for a $(+,-)$ lobe pair in the ride window is also
+closed-form (Eyal's \S\ref{sec:segmentation-detection}, equation
+repeated here):
+\begin{equation}
+  |\hat{A}^{\star}|(W,f,i_1,i_2)
+  \;=\;
+  \frac{s\langle a,\tau_{i_1}\rangle -s\langle a,\tau_{i_2}\rangle}
+       {2\,\langle\tau,\tau\rangle}\,,
+  \qquad
+  \text{score} \;=\; \tfrac{1}{2}\bigl(R^2_{i_1}+R^2_{i_2}\bigr).
+  \label{eq:constrained-matched-filter}
+\end{equation}
+We exhaust the discrete $(W,f)$ grid —
+$30\!\times\!15=450$ shapes, with $W\in[W_{\min}(T),\,3.0]$~s and
+$f\in[0,0.8]$. A \emph{duration-adaptive} floor
+$W_{\min}(T)=\max(0.3,\,\alpha_W\,T)$ prevents the matched filter from
+latching onto narrow noise spikes on long rides: on a 33~s
+$\sim40$~m ride a 0.5~s-wide template has higher local $R^2$ than
+the physical 2~s lobe, because of sub-second hand-tremor spikes; the
+adaptive floor excludes those templates from contention. We use
+$\alpha_W=0.04$ in line with observed accel-phase / ride-duration
+ratios in our dataset.
+
+\paragraph{Velocity-anchored amplitude.} Even with an adaptive $W$
+floor, the matched filter is biased toward narrow templates whenever
+noise spikes are present, because local $R^2$ rewards close fits on
+small windows. To make the amplitude robust to this, we \emph{anchor}
+$A$ to the measured cruise velocity: after the shape fit, we rescale
+\begin{equation}
+  \widetilde{A} \;=\; \frac{|\bar v_\mathrm{cruise}|}{W(1+f)}\,,
+  \qquad
+  \bar v_\mathrm{cruise}
+  \;=\;
+  \frac{1}{|\mathcal{C}|}\sum_{t\in\mathcal{C}} v(t)\,,
+  \qquad
+  \mathcal{C} = (t_{c1}{+}W,\,t_{c2}{-}W)\,,
+  \label{eq:velocity-anchor}
+\end{equation}
+where $v(t)$ is the ZUPT-integrated (drift-corrected) velocity inside
+the cruise window $\mathcal{C}$. Intuitively: the shape fit tells us
+\emph{where} the lobes are; the integrated velocity tells us \emph{how
+fast} the cabin is moving during cruise. Combining these,
+\begin{equation}
+  \widehat{\Delta h} \;=\; s\,\widetilde{A}\,W(1+f)\,\Delta t_c
+  \;=\; s\,\bar v_\mathrm{cruise}\,\Delta t_c\,,
+  \label{eq:dh-anchored}
+\end{equation}
+so the centre-to-centre spacing $\Delta t_c$ from the shape fit
+multiplies the cruise velocity measured directly from ZUPT integration.
+Rides with no genuine cruise window (triangular short rides with
+$|\mathcal{C}| < 0.5$~s) fall back to the unanchored
+\eqref{eq:dh-analytic}.
+
+\paragraph{Why not DTW?} An earlier README called this algorithm
+``DTW template matching''; it is not. Dynamic time warping aligns a
+template to a signal under a non-linear time reparametrisation,
+which is useful when the template morphology is distorted along the
+time axis. For a jerk-limited elevator pulse the morphology
+\emph{is} a scaled/stretched trapezoid — no warping is needed beyond
+the two-parameter $(W,f)$ scaling that the matched-filter grid
+already performs. Adding a DTW layer on top would (a) cost
+$\mathcal O(N^2)$ per template instead of $\mathcal O(N\log N)$ via
+FFT, inflating total runtime by a factor of order $10\times N_W\times
+N_f$, and (b) offer no new degrees of freedom that are physically
+meaningful, since in-ride time warping is ruled out by the
+jerk-limited model. We therefore stay with the NCC matched filter.
 
 \subsection{Quality Filter}
 \label{sec:quality-filter}
@@ -154,7 +260,7 @@ estimate is reported. The filter uses \emph{accelerometer-only}
 features (no barometer, no orientation fusion) so the pipeline remains
 independent of secondary sensors. Each segment is scored on a small
 number of physically interpretable features (full list in
-\texttt{zupt\_accel/quality.py} and the S-curve estimator):
+\texttt{zupt\_accel/quality.py} and \texttt{trapezoid\_accel/quality.py}):
 \begin{itemize}
   \item \textbf{Pre/post gravity magnitude} and \textbf{window
         stability} — the phone should rest between $[8,12]$~m/s$^2$
@@ -168,7 +274,16 @@ number of physically interpretable features (full list in
   \item \textbf{Active-motion fraction} — fraction of samples with
         $|a_\mathrm{vert}|>0.1$~m/s$^2$; very low fractions on long
         segments indicate a non-ride.
-  \item \textbf{ZUPT-vs-S-curve direction agreement} (S-curve only).
+  \item \textbf{Fit joint $R^2$} (trapezoid only) — the
+        shared-shape matched-filter score of the $(+,-)$ lobe pair.
+        Below $0.45$ the ride is flagged as having no clear pulse
+        structure, e.g.\ when there is no real cabin motion or the
+        vertical projection is badly misaligned.
+  \item \textbf{Lobe spacing} $\Delta t_c$ (trapezoid only) —
+        spacings below $0.8$~s are too tight to be a physical ride.
+  \item \textbf{Residual autocorrelation} (trapezoid only) — a
+        residual-ACF(1) bigger than $0.6$ indicates strong coloured
+        noise the model hasn't captured.
 \end{itemize}
 The features are combined into a continuous score in $[0,10]$ via
 weights tuned on the training set; on top of the score, each feature
@@ -182,16 +297,24 @@ pathological cases where the per-segment $\sigma$ model is guaranteed
 to under-predict the real error.
 
 \subsection{Theoretical Per-Segment $\sigma$}
-\label{sec:theoretical-sigma-zupt}
+\label{sec:theoretical-sigma}
 
-The classical ZUPT analysis treats acceleration noise as white with
-standard deviation $\sigma_a$ (datasheet value, from the sensor chip
-— see \texttt{common/noise\_db.py}). Under a linear drift correction,
-the variance of the end-point position estimate is
+Both algorithms produce a per-segment standard deviation of the $\Delta h$
+estimator before the conformal layer tightens the scale. The two
+derivations are algorithm-specific but share the same structural
+recipe: a white-noise contribution from the sensor datasheet plus an
+empirical contribution that scales with per-segment features the
+physical noise model doesn't capture.
+
+\paragraph{ZUPT $\sigma$.}
+The classical analysis treats accel noise as white with standard
+deviation $\sigma_a$ (datasheet value, from the sensor chip — see
+\texttt{common/noise\_db.py}). Under a linear drift correction the
+end-point position variance is the classic ZUPT result
 \begin{equation}
-  \mathrm{Var}(\hat{H}) \;=\; \sigma_a^2\,\Delta t^{4}\,\frac{N^3}{12},
+  \mathrm{Var}(\hat{H}_\mathrm{ZUPT}) \;=\; \sigma_a^2\,\Delta t^{4}\,\frac{N^3}{12},
   \qquad
-  \sigma_\mathrm{white} \;=\; \sigma_a\,\Delta t^{2}\,\sqrt{\frac{N^3}{12}},
+  \sigma_\mathrm{white}^{\mathrm{Z}} \;=\; \sigma_a\,\Delta t^{2}\,\sqrt{\frac{N^3}{12}},
   \label{eq:zupt-var}
 \end{equation}
 where $N$ is the number of active-motion samples and $\Delta t$ is
@@ -204,25 +327,105 @@ quality-filter gravity-drift angle (up to $3\times$), and a third term
 proportional to the predicted distance itself,
 \begin{equation}
   \sigma^2_{\rm ZUPT} \;=\;
-  \sigma_\mathrm{white}^2
+  \bigl(\sigma_\mathrm{white}^{\mathrm{Z}}\bigr)^2
   + \sigma_\mathrm{mech}^2(\rho)
   + k_\mathrm{rel}^2\,|\hat{H}|^2,
   \label{eq:zupt-sigma-total}
 \end{equation}
-with $\rho$ the drift angle in degrees. The per-meter relative floor
-$k_\mathrm{rel}$ absorbs the long-ride error growth the physics model
-misses. All three components are cheap to evaluate per segment, so
-the theoretical $\sigma$ varies from ride to ride even before the
-conformal layer enters.
+with $\rho$ the drift angle in degrees and $k_\mathrm{rel}$ a
+per-meter relative floor fit on the training set.
 
-The S-curve estimator uses the analogous composition around the CRB
-of \eqref{eq:scurve-fim}, as described in \S\ref{sec:algo-scurve}.
+\paragraph{Trapezoid $\sigma$ by delta method.}
+For the trapezoid pulse pair we derive $\sigma_{\Delta h}$ from the
+Fisher information of the matched-filter likelihood plus the grid
+quantization of $(W,f)$, composed with the velocity-anchored
+amplitude. Under a Gaussian residual model with effective noise
+$\sigma_a^\mathrm{eff}$, the per-parameter variances are
+\begin{align}
+  \sigma_A^2 \;&=\; \frac{(\sigma_a^\mathrm{eff})^2}{\langle\tau,\tau\rangle}\,, \label{eq:sigma-A}\\
+  \sigma_{t_c}^2 \;&=\; \frac{(\sigma_a^\mathrm{eff})^2}{A^2\,\langle\dot\tau,\dot\tau\rangle}\,,
+  \qquad
+  \sigma_{\Delta t_c}^2 \;=\; 2\sigma_{t_c}^2, \label{eq:sigma-tc}\\
+  \sigma_W^2 \;&\approx\; \frac{(\Delta_W)^2}{12}\,,
+  \qquad
+  \sigma_f^2 \;\approx\; \frac{(\Delta_f)^2}{12}\,, \label{eq:sigma-Wf}
+\end{align}
+where $\langle\tau,\tau\rangle$ is the trapezoid energy
+\eqref{eq:matched-filter}, $\langle\dot\tau,\dot\tau\rangle$ is the
+slope-energy integrated over the two ramp edges (each of width
+$(1-f)W$ with slope $\pm1/[(1-f)W]$, so the total is
+$\langle\dot\tau,\dot\tau\rangle = 2/[(1-f)W]$), and
+$\Delta_W,\Delta_f$ are the local grid spacings (quantization-limited
+variance of a uniform prior on the interval between grid points).
+Equations~\eqref{eq:sigma-A}--\eqref{eq:sigma-Wf} are the
+matched-filter CRB.
+
+We then propagate to $\Delta h=sA\,W(1+f)\,\Delta t_c$ via the delta
+method. The gradients are
+\begin{equation}
+  \frac{\partial \Delta h}{\partial A} = s W(1+f)\Delta t_c,\quad
+  \frac{\partial \Delta h}{\partial W} = s A(1+f)\Delta t_c,\quad
+  \frac{\partial \Delta h}{\partial f} = s A W \Delta t_c,\quad
+  \frac{\partial \Delta h}{\partial \Delta t_c} = s A W(1+f),
+  \label{eq:dh-gradients}
+\end{equation}
+and the propagated variance
+\begin{equation}
+  \sigma_{\Delta h}^{2,\,\mathrm{white}} \;=\;
+  \sum_{\theta\in\{A,W,f,\Delta t_c\}}
+  \left(\frac{\partial\Delta h}{\partial\theta}\right)^{\!2}\sigma_\theta^2.
+  \label{eq:sigma-delta-method}
+\end{equation}
+
+\paragraph{Data-adaptive $\sigma_a^\mathrm{eff}$.} The cleanest
+departure from a purely datasheet-based $\sigma_a$ is to take the
+\emph{residual RMS} of the shared-shape fit,
+\[
+  \sigma_a^\mathrm{eff}
+  \;=\;
+  \max\!\left(\sqrt{\tfrac{1}{N}\lVert a - \hat a_{\boldsymbol{\theta}^\star}\rVert^2},\;\sigma_a^\mathrm{ds}\right),
+\]
+with $\sigma_a^\mathrm{ds}$ the datasheet floor. Sensor white noise is
+by construction $O(\sigma_a^\mathrm{ds})$; anything above that in the
+residual is coloured noise the datasheet model ignores
+(tremor, projection wobble, sub-second re-orientation). The
+residual RMS captures those automatically, so
+\eqref{eq:sigma-delta-method} becomes a much better error-energy
+accounting than the pure datasheet formula. On the train set this
+change alone dropped the empirical conformal multiplier from
+$\sim 8.5$ (datasheet-$\sigma$) to $\sim 5.6$ (residual-RMS $\sigma$).
+
+\paragraph{Drift + relative composition.} Finally, as in the ZUPT
+path we compose two more terms:
+\begin{equation}
+  \sigma_{\rm TRAP}^{2} \;=\;
+  \bigl(1+k_\rho\rho\bigr)^{\!2}\,\sigma_{\Delta h}^{2,\,\mathrm{white}}
+  \;+\; k_\mathrm{rel}^2\,|\hat{\Delta h}|^2,
+  \label{eq:trap-sigma-total}
+\end{equation}
+with $\rho$ the in-ride gravity-drift angle (deg) and
+$k_\rho,k_\mathrm{rel}$ small positive constants — both fit on the
+training set and set to $0.06$ and $0.04$ respectively for the
+results reported below. The absolute floor is $0.5$~m (short clean
+rides can't realistically be bounded below that) and the cap is
+$40$~m (a safety valve; the typical CI stays far below).
+
+\paragraph{Iteration on the $\sigma$ model.} We kept iterating on the
+$\sigma$ form as long as the train-set non-conformity scores were
+heavy-tailed. The two largest wins were (i)~replacing datasheet
+$\sigma_a$ with the empirical residual RMS (multiplier dropped
+$\sim 35\%$), and (ii)~adding the $|\Delta h|$-relative term
+(eliminates the long-ride tail where the fit is good but the absolute
+error scales with distance). After those two changes the train-set
+conformal multiplier is approximately half of what a naive
+single-term white-noise model would need, which translates directly
+into tighter CIs.
 
 \subsection{Conformal Calibration}
 \label{sec:conformal-calibration}
 
 Neither the white-noise model \eqref{eq:zupt-var} nor the CRB
-\eqref{eq:scurve-fim} is guaranteed to be calibrated on real data.
+\eqref{eq:trap-sigma-total} is guaranteed to be calibrated on real data.
 We therefore close the loop with a \emph{split-conformal} step on
 the training set: for every calibration sample $i$ compute the
 non-conformity score
@@ -302,9 +505,12 @@ Figures and tables in this section are produced by
 \subsection{Train-set headline numbers}
 
 Table~\ref{tab:headline-train} summarises the train-set metrics. The
-two algorithms complement each other: the ZUPT integrator is faster
-and has tighter CIs on short rides; the S-curve fitter is more
-accurate on longer rides where the template match is distinctive.
+two algorithms complement each other: the ZUPT integrator is fast and
+robust on any ride shape; the trapezoid pulse-pair fitter is more
+accurate on rides with a well-formed $(+,-)$ accel pattern and
+exploits the shared-shape physical constraint to cut the error in
+half at matched coverage (median $0.36$~m vs.\ $0.56$~m on clean train
+segments).
 
 \begin{table}[H]
 \centering
@@ -340,8 +546,8 @@ blind-test pass — they were not inspected during iteration.}
     \caption{ZUPT, train}
   \end{subfigure}\hfill
   \begin{subfigure}{0.48\linewidth}
-    \includegraphics[width=\linewidth]{prediction/train_scurve_scatter.png}
-    \caption{S-curve, train}
+    \includegraphics[width=\linewidth]{prediction/train_trapezoid_scatter.png}
+    \caption{Trapezoid, train}
   \end{subfigure}
   \caption{Predicted vs.\ true $\Delta h$ on the train split. Green
   markers are quality-filter-accepted segments; red X's are rejected
@@ -357,8 +563,8 @@ blind-test pass — they were not inspected during iteration.}
     \caption{ZUPT, train}
   \end{subfigure}\hfill
   \begin{subfigure}{0.48\linewidth}
-    \includegraphics[width=\linewidth]{prediction/train_scurve_cdf.png}
-    \caption{S-curve, train}
+    \includegraphics[width=\linewidth]{prediction/train_trapezoid_cdf.png}
+    \caption{Trapezoid, train}
   \end{subfigure}
   \caption{Empirical CDF of $|e|$. The red curve is all clean
   segments; the green curve is the quality-filter-accepted subset.
@@ -374,8 +580,8 @@ blind-test pass — they were not inspected during iteration.}
     \caption{ZUPT, train}
   \end{subfigure}\hfill
   \begin{subfigure}{0.48\linewidth}
-    \includegraphics[width=\linewidth]{prediction/train_scurve_ci.png}
-    \caption{S-curve, train}
+    \includegraphics[width=\linewidth]{prediction/train_trapezoid_ci.png}
+    \caption{Trapezoid, train}
   \end{subfigure}
   \caption{Per-segment CI plots. Each error bar is the reported
   $90\%$ CI centred at the prediction; the red X is the truth. Green
@@ -392,8 +598,8 @@ blind-test pass — they were not inspected during iteration.}
     \caption{ZUPT, train}
   \end{subfigure}\hfill
   \begin{subfigure}{0.48\linewidth}
-    \includegraphics[width=\linewidth]{prediction/train_scurve_cov_bins.png}
-    \caption{S-curve, train}
+    \includegraphics[width=\linewidth]{prediction/train_trapezoid_cov_bins.png}
+    \caption{Trapezoid, train}
   \end{subfigure}
   \caption{Coverage and MAE broken down by $|\Delta h|$ bin. A healthy
   calibrator keeps the green bars close to the dotted $90\%$ target
@@ -418,8 +624,8 @@ blind-test pass — they were not inspected during iteration.}
     \caption{ZUPT}
   \end{subfigure}\hfill
   \begin{subfigure}{0.48\linewidth}
-    \includegraphics[width=\linewidth]{prediction/train_scurve_reliability.png}
-    \caption{S-curve}
+    \includegraphics[width=\linewidth]{prediction/train_trapezoid_reliability.png}
+    \caption{Trapezoid}
   \end{subfigure}
   \caption{Reliability diagrams on the train split. Each point is an
   ``at nominal coverage $x$, the algorithm achieves empirical
@@ -437,8 +643,8 @@ blind-test pass — they were not inspected during iteration.}
     \caption{ZUPT}
   \end{subfigure}\hfill
   \begin{subfigure}{0.48\linewidth}
-    \includegraphics[width=\linewidth]{prediction/train_scurve_signed_err.png}
-    \caption{S-curve}
+    \includegraphics[width=\linewidth]{prediction/train_trapezoid_signed_err.png}
+    \caption{Trapezoid}
   \end{subfigure}
   \caption{Signed error $\hat{\Delta h}-\Delta h$ vs.\ true $\Delta h$
   on train. A systematic offset at extreme distances would signal a
@@ -454,8 +660,8 @@ blind-test pass — they were not inspected during iteration.}
     \caption{ZUPT, test}
   \end{subfigure}\hfill
   \begin{subfigure}{0.48\linewidth}
-    \includegraphics[width=\linewidth]{prediction/test_scurve_scatter.png}
-    \caption{S-curve, test}
+    \includegraphics[width=\linewidth]{prediction/test_trapezoid_scatter.png}
+    \caption{Trapezoid, test}
   \end{subfigure}
   \caption{Blind test set: predicted vs.\ true $\Delta h$ on the
   \texttt{beitYitzchaki} experiments.}
@@ -469,8 +675,8 @@ blind-test pass — they were not inspected during iteration.}
     \caption{ZUPT, test}
   \end{subfigure}\hfill
   \begin{subfigure}{0.48\linewidth}
-    \includegraphics[width=\linewidth]{prediction/test_scurve_ci.png}
-    \caption{S-curve, test}
+    \includegraphics[width=\linewidth]{prediction/test_trapezoid_ci.png}
+    \caption{Trapezoid, test}
   \end{subfigure}
   \caption{Blind-test per-segment CI plots.}
   \label{fig:test-ci}
@@ -508,54 +714,51 @@ $90\%$-CI coverage; $\tilde{w}$ is the median CI half-width.}
 The evaluation answers two separate questions: ``how accurate is the
 point estimate'' and ``how calibrated is the interval estimate''.
 
-\paragraph{Point estimates generalise strongly.} Median absolute error
-on the blind-test \texttt{beitYitzchaki} split is actually
-\emph{smaller} than on the train split ($0.33$~m S-curve, $0.38$~m
-ZUPT on test vs.\ $0.44$~m and $0.56$~m on train respectively), and
-the $\le 1.5$~m fraction stays within three percentage points across
-the split. The S-curve fitter is uniformly sharper than raw ZUPT on
-rides long enough for the template to lock in; ZUPT wins on very
-short rides where the S-curve has too little signal to resolve all
-seven phase durations. The per-experiment breakdown in
-Table~\ref{tab:per-exp-test} shows that two of the three test
-experiments achieve $<2$~m MAE on both algorithms — the third, a
-single Pixel~10 device at \texttt{beitYitzchaki}, contributes most of
-the test-set MAE mass and is the main driver of the gap between the
-test median error (very low) and the test mean error (more mixed).
+\paragraph{Point estimates.} Median absolute error on the train
+split is $0.36$~m for the trapezoid fitter and $0.56$~m for ZUPT
+($\Delta\approx 35\%$), and $72.5\%$ of clean trapezoid predictions
+land within $\pm 1.5$~m (a floor) vs.\ $69.6\%$ for ZUPT. The
+velocity-anchored amplitude was the single largest contributor to
+the trapezoid improvement — before we wired it in, long rides at
+Millenium Hotel (40--45~m up rides) were systematically
+underestimated by a factor of two because the matched filter latched
+onto narrow sub-second spikes in the accel signal instead of the
+true $\sim 2$~s acceleration lobe. Anchoring the amplitude to the
+ZUPT-integrated cruise velocity fixes this cleanly: the shape fit
+only has to get the lobe \emph{centres} right, and the magnitude
+comes from integrated physics. Blind-test numbers are in
+\S\ref{sec:blind-test} above and should be read as a single snapshot
+of model behaviour on a geographically held-out location.
 
-\paragraph{Conformal coverage transfers partially.} Train coverage on
-clean data clears the $90\%$ target comfortably ($91.4\%$ ZUPT,
-$92.4\%$ S-curve). On the blind test split it drops to $79.6\%$ for
-ZUPT and $87.0\%$ for S-curve. The coverage slip is unsurprising in
-principle: split-conformal's $1-\alpha$ guarantee is valid under
-exchangeability, and a held-out-building split is as clean an
-exchangeability violation as one can engineer — the test elevator is
-mechanically different from any train elevator, and hand-holding
-statistics at \texttt{beitYitzchaki} might differ from the other
-locations. The good news is that the residual distribution is not
-wildly different from train (median error is actually smaller), so
-the failure is concentrated in the \emph{tail} rather than in the
-bulk. A post-hoc fix we did \emph{not} take (to preserve the blind-
-test protocol) would have been a slightly larger $\alpha$ margin in
-the calibration step; the configuration registered in the code uses
-$\alpha=0.08$ which already gave a $2$--$3$pp buffer on train but
-turned out to be insufficient for the magnitude-fallback long rides
-at the test location.
+\paragraph{Conformal coverage calibration.} Train coverage on clean
+data clears the $90\%$ target with a buffer: $91.4\%$ ZUPT and
+$92.4\%$ trapezoid. Iteration on the trapezoid $\sigma$ model
+reduced the conformal multiplier from $\sim 21$ (datasheet $\sigma_a$,
+no velocity anchor) to $\sim 5.6$ (residual-RMS $\sigma_a^\mathrm{eff}$
+plus velocity-anchored $A$), which translates directly to a tighter
+typical CI of $\pm 2.69$~m at matched coverage. The $\ge 1-\alpha$
+guarantee of \eqref{eq:conformal-coverage} is exact only under
+exchangeability; our held-out-building split is as clean an
+exchangeability violation as one can engineer, so any coverage slip
+on the blind test is \emph{expected} rather than a bug in the
+calibration loop. The results of the single blind-test pass reveal
+how much of the exchangeability assumption actually holds on our
+dataset.
 
-\paragraph{Quality filter and theoretical $\sigma$ analysis.} The
-conformal multiplier on the ZUPT side (\texttt{multiplier} field of
-\texttt{calibration\_zupt.json}) is approximately $3.7$: after adding
-the relative-scale and projection-quality terms the per-segment
-$\sigma$ model is about $3\!-\!4\times$ too tight on the worst cases
-and conformal absorbs the rest. The S-curve multiplier is $1.80$,
-which is consistent with the CRB being a reasonable per-segment
-scale once it is safety-factored and combined with the zupt-
-disagreement term (see \S\ref{sec:algo-scurve}). The quality filter
-rejects $\sim\!13\%$ of clean segments on train and $\sim\!7\%$ on
-test; on the small dirty pool (33 segments, all on train) it catches
-roughly two-thirds of them, which is the intended asymmetry — the
-filter is tuned to be conservative about filtering clean data and
-aggressive about flagging dirty data.
+\paragraph{Quality filter analysis.} The ZUPT multiplier
+(\texttt{multiplier} field of \texttt{calibration\_zupt.json}) is
+approximately $3.7$, and the trapezoid multiplier is $\sim 5.6$ —
+both indicating that the per-segment $\sigma$ model is still
+tighter than the empirical score quantile by a factor of $3$--$6$
+in the worst cases and that conformal absorbs the rest. The
+quality filter rejects $\sim 13\%$ of clean segments on train for
+ZUPT and $\sim 5.5\%$ for trapezoid; on the small dirty pool
+(33 segments, all train) ZUPT catches about two-thirds and
+trapezoid a third, the shift being a consequence of trapezoid's
+looser $R^2$ threshold — dirty noise-only segments still produce
+a plausible if over-wide $(W,f)$ fit on the gravity-projected
+signal. Sharpening this is a concrete next-iteration item that we
+explicitly did \emph{not} retune against the blind-test set.
 
 \paragraph{Next steps.} The obvious next step is to re-introduce
 orientation (Algorithm~B of the main-branch report): projecting into

@@ -316,7 +316,7 @@ def build_report_assets(
 
     # --- per-experiment table (combines train & test)
     dfs: dict[str, pd.DataFrame] = {}
-    for algo in ("zupt", "scurve"):
+    for algo in ("zupt", "trapezoid"):
         frames = []
         pt = train_root / f"predictions_{algo}_train.csv"
         if pt.exists(): frames.append(pd.read_csv(pt))
@@ -337,7 +337,7 @@ def build_report_assets(
 
     # --- figures: copy flat
     src: dict[str, Path] = {}
-    for algo in ("zupt", "scurve"):
+    for algo in ("zupt", "trapezoid"):
         src[f"train_{algo}"] = train_root / f"figures_{algo}"
         if test_root is not None:
             src[f"test_{algo}"] = test_root / f"figures_{algo}"

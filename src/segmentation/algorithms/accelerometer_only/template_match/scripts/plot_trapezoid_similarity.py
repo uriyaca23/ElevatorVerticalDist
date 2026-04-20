@@ -2,7 +2,7 @@
 
 Runs over **every** variant folder under
 ``template_match/labels/fit_elevator_paramater/`` (currently
-``basicTreepzeGrid`` and ``basicTreepzeGridWithConstraint``) and writes
+``basicTrapezoidGrid`` and ``basicTrapezoidGridWithConstraint``) and writes
 two PNGs directly inside each variant folder:
 
 * ``_trapezoid_similarity_grid.png`` — per experiment overlay every
@@ -18,7 +18,7 @@ two PNGs directly inside each variant folder:
   construction (take-off vs landing); taking ``abs`` should make them
   coincide. Each panel annotates the per-ride RMS between ``|lobe1|``
   and ``|lobe2|`` (median + mean over that experiment's rides). For the
-  ``basicTreepzeGridWithConstraint`` variant the fitter already forces
+  ``basicTrapezoidGridWithConstraint`` variant the fitter already forces
   the two lobes to share ``|A|, W, f``, so the per-ride RMS collapses
   to zero — the plot is still useful as a visual sanity check.
 

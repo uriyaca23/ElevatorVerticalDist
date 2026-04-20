@@ -76,7 +76,7 @@ elevator/building (constant within a building); only `H` varies per ride.
 |---|---|---|
 | **Barometer-only** (GT source) | `v_z` thresholding on smoothed altitude | `algorithms/barometer_only/` |
 | **State machine / pulse detect** | `a_max` threshold + lobe-duration floor `≈ T_j` | `algorithms/accelerometer_only/template_match/scripts/{acc_,}pulse_detect.py` |
-| **Template / DTW matching** | Synthetic `a_θ(t)` family from the four parameters above | `algorithms/accelerometer_only/template_match/` |
+| **Matched-filter template matching (NCC)** | Synthetic `a_θ(t)` family from the four parameters above, searched by normalized cross-correlation with closed-form LS amplitude | `algorithms/accelerometer_only/template_match/` |
 | **Velocity-integral / ZUPT** | `∫a dt = 0` and `∫|v| dt ≳ H_min` | (planned) |
 
 ## Pointers for deeper context

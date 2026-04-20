@@ -1,5 +1,5 @@
 """End-to-end evaluation driver for the two accelerometer-only
-prediction algorithms (ZUPT and 7-step S-curve).
+prediction algorithms (ZUPT and trapezoid pulse-pair).
 
 Train mode (default) computes train-set metrics and figures and
 refits the conformal calibration. Test mode runs the final blind-test
@@ -53,8 +53,8 @@ from src.prediction.evaluation.runner import (
 
 
 ALGORITHMS: dict[str, PredictAlgorithm] = {
-    "zupt":   PredictAlgorithm.ZUPT_ACCEL,
-    "scurve": PredictAlgorithm.SCURVE_ACCEL,
+    "zupt":      PredictAlgorithm.ZUPT_ACCEL,
+    "trapezoid": PredictAlgorithm.TRAPEZOID_ACCEL,
 }
 
 DEFAULT_OUTPUT = _REPO_ROOT / "src" / "data" / "structuredData" / "test_results" / "prediction"

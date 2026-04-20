@@ -5,7 +5,7 @@ from .predictor import (
     BarometerHeightDiffConfig,
 )
 from .zupt_accel import ZuptAccelConfig, ZuptAccelEstimator
-from .scurve_accel import ScurveAccelConfig, ScurveAccelEstimator
+from .trapezoid_accel import TrapezoidAccelConfig, TrapezoidAccelEstimator
 
 __all__ = [
     "predict_height_difference_from_barometer",
@@ -17,6 +17,6 @@ __all__ = [
     "BarometerHeightDiffConfig",
     "ZuptAccelConfig",
     "ZuptAccelEstimator",
-    "ScurveAccelConfig",
-    "ScurveAccelEstimator",
+    "TrapezoidAccelConfig",
+    "TrapezoidAccelEstimator",
 ]

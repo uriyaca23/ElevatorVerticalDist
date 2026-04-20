@@ -7,7 +7,7 @@ its hyperparameters from ``config.json``:
   * :class:`~.barometer_only.predict_height_difference_from_barometer`
     — a pure function, float-in-float-out.
   * :class:`~.zupt_accel.ZuptAccelEstimator`
-  * :class:`~.scurve_accel.ScurveAccelEstimator`
+  * :class:`~.trapezoid_accel.TrapezoidAccelEstimator`
 
 Both accelerometer-based algorithms are classes that carry state (the
 calibrated conformal multiplier), so :class:`Predictor` instantiates
@@ -23,7 +23,7 @@ Public API:
     we synthesise a permissive PredictionOutput so downstream code can
     treat all three uniformly.
   * :meth:`Predictor.calibrate(samples)` — no-op for the barometer;
-    fits the conformal multiplier for ZUPT / S-curve.
+    fits the conformal multiplier for ZUPT / trapezoid.
   * :meth:`Predictor.save_calibration(path)` / :meth:`load_calibration(path)`.
 """
 
@@ -39,7 +39,7 @@ import pandas as pd
 from .barometer_only import predict_height_difference_from_barometer
 from .common import CalibrationSample, PredictionOutput
 from .zupt_accel import ZuptAccelConfig, ZuptAccelEstimator
-from .scurve_accel import ScurveAccelConfig, ScurveAccelEstimator
+from .trapezoid_accel import TrapezoidAccelConfig, TrapezoidAccelEstimator
 
 _config_mod = importlib.import_module(__package__ + ".class")
 PREDICT_ALGORITHM_CONFIG = _config_mod.PREDICT_ALGORITHM_CONFIG
@@ -64,8 +64,8 @@ class Predictor:
             return BarometerHeightDiffConfig(**self.params)
         if algo is PredictAlgorithm.ZUPT_ACCEL:
             return ZuptAccelEstimator(ZuptAccelConfig(**self.params))
-        if algo is PredictAlgorithm.SCURVE_ACCEL:
-            return ScurveAccelEstimator(ScurveAccelConfig(**self.params))
+        if algo is PredictAlgorithm.TRAPEZOID_ACCEL:
+            return TrapezoidAccelEstimator(TrapezoidAccelConfig(**self.params))
         raise ValueError(f"Unsupported algorithm: {algo}")
 
     # ------------------------------------------------------------------
