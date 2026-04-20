@@ -21,7 +21,7 @@ def estimate_gravity_vector(ax, ay, az, fs=100, window_sec=0.5):
     
     win = max(10, int(fs * window_sec))
     n_windows = max(1, n // win)
-    
+
     gx_list, gy_list, gz_list = [], [], []
     for i in range(n_windows):
         s = i * win
@@ -29,7 +29,7 @@ def estimate_gravity_vector(ax, ay, az, fs=100, window_sec=0.5):
         gx_list.append(np.mean(ax[s:e]))
         gy_list.append(np.mean(ay[s:e]))
         gz_list.append(np.mean(az[s:e]))
-    
+
     gx = np.median(gx_list)
     gy = np.median(gy_list)
     gz = np.median(gz_list)

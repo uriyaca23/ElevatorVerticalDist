@@ -588,26 +588,597 @@ and by the matched-filter pulse detector in
   \label{fig:elevator-allrides}
 \end{figure}
 
-\paragraph{Implications for detection.} The four-parameter model
-\eqref{eq:elevator-params} gives every detector built on top concrete
-physical knobs:
-\begin{itemize}
-  \item State-machine detectors (Algorithm~1 in
-    \texttt{papers/algorithm1\_state\_machine.md}) threshold on
-    $a_{\max}$ to find lobe entries and on a pulse-duration floor of
-    $\sim T_j$.
-  \item DTW-based template matching (Algorithm~2 in
-    \texttt{papers/algorithm2\_dtw.md}) generates one template per
-    plausible $\theta_{\text{ride}}$ and warps it.
-  \item Velocity-integral / ZUPT detectors (Algorithm~3 in
-    \texttt{papers/algorithm3\_integral\_zupt.md}) check the integral
-    identity $\int a\,dt = 0$ and the lower bound
-    $\int|v|\,dt \gtrsim H_{\min}$.
-\end{itemize}
 The barometer-based GT detector described in
 \S\ref{sec:barometer-algorithm} uses none of this --- it works in
 altitude space directly --- but the kinematic decomposition above is
 what makes its output a sensible reference signal for the
 accelerometer-based algorithms that follow.
+
+\subsection{Whole-Signal Trapezoid Detector}
+\label{sec:trapezoid-detector}
+
+Our production accelerometer-only detector works directly on the
+idealised two-lobe model from Section~\ref{sec:elevator-kinematics}:
+a ride is a signed acceleration pulse at take-off followed by an
+opposite-sign acceleration pulse at landing. The algorithm is split
+into two stages that mirror the two halves of the problem. A
+\emph{detection} stage finds candidate lobes in the raw signal; a
+\emph{pair-filter} stage decides which pairs of lobes constitute
+genuine rides. Eight tunable parameters --- four in each stage ---
+are bundled in a single configuration object, so a sweep can move
+them all in lockstep.
+
+\subsubsection{Detection: Per-Sample Best Template}
+\label{sec:trapezoid-detect}
+
+\paragraph{Preprocess.} The raw three-axis accelerometer
+$(a_x,a_y,a_z)$ is projected onto the per-session gravity direction to
+obtain the signed vertical component $a_{\text{vert}}$, then smoothed
+with a centered rolling-mean filter of width
+\texttt{SMOOTH\_SEC}$\,=\,0.4$~s to obtain $a(t)$. Working in the
+smoothed signal is essential because the matched-filter sweep below
+would otherwise lock onto high-frequency noise.
+
+\paragraph{Template shape and its link to the kinematics.} We consider
+a grid of trapezoidal pulse templates $\tau_{W,f}(t)$ parameterised by a
+half-width $W\in\mathcal{W}$ and a flat fraction $f\in\mathcal{F}$,
+\begin{equation}
+  \tau_{W,f}(t) =
+  \begin{cases}
+    1 & |t| \le fW, \\
+    \dfrac{W - |t|}{(1-f)\,W} & fW < |t| \le W, \\
+    0 & |t| > W,
+  \end{cases}
+  \label{eq:trap-template}
+\end{equation}
+which is a deliberately simplified version of the first acceleration
+lobe of \eqref{eq:elevator-template}: the flat plateau stands in for
+the $a_{\max}$ cruise, and the two linear ramps for the jerk-limited
+onset and offset. The identification with the kinematic parameters
+$(j_{\max},\,a_{\max},\,v_{\max})$ is direct. The first lobe of
+\eqref{eq:elevator-template} lasts from $t=0$ to $t=2T_j+T_a$, so its
+half-width is
+\begin{equation}
+  W \;=\; T_j + \tfrac{1}{2}T_a
+        \;=\; \frac{a_{\max}}{2\,j_{\max}}
+              + \frac{1}{2}\,\max\!\Big(0,\;\tfrac{v_{\max}}{a_{\max}} - T_j\Big),
+  \label{eq:W-from-kinematics}
+\end{equation}
+with $T_j=a_{\max}/j_{\max}$ fixed by the jerk limit. The flat fraction
+is the ratio of the plateau to the whole lobe,
+\begin{equation}
+  f \;=\; \frac{T_a}{T_a + 2T_j}
+        \;=\; \frac{\max\!\big(0,\;v_{\max}/a_{\max} - T_j\big)}
+                   {\max\!\big(0,\;v_{\max}/a_{\max} - T_j\big) + 2T_j}.
+  \label{eq:f-from-kinematics}
+\end{equation}
+Two instructive corner cases of
+\eqref{eq:W-from-kinematics}--\eqref{eq:f-from-kinematics}:
+
+\begin{itemize}
+  \item A short hop that never reaches $v_{\max}$ has $T_a = 0$, so
+    $W = T_j = a_{\max}/j_{\max}$ and $f = 0$ --- a purely triangular
+    pulse.
+  \item A long ride that spends substantial time at $v_{\max}$ has
+    $T_a \gg T_j$, so $W \approx T_a/2$ scales with $H/v_{\max}$ while
+    $f \to 1 - 2T_j/T_a$ approaches one.
+\end{itemize}
+Concretely, for the commercial limits quoted in
+\eqref{eq:elevator-bounds} ($j_{\max}\!\approx\!1.3$~m/s$^3$,
+$a_{\max}\!\approx\!1.0$~m/s$^2$, $v_{\max}\!\approx\!1.5$~m/s) we have
+$T_j\!\approx\!0.77$~s, so $W$ in this dataset lives essentially in
+the range $[T_j,\,T_j+T_v/2] \approx [0.8,\,2.5]$~s and $f$ in
+roughly $[0,\,0.7]$. The grid is chosen to comfortably bracket that:
+$W \in [\texttt{W\_MIN\_S}, \texttt{W\_MAX\_S}] = [0.4,\,3.0]$~s with 30
+samples and $f \in [\texttt{F\_MIN}, \texttt{F\_MAX}] = [0.05,\,0.80]$
+with 15 samples --- $30 \times 15 = 450$ templates total. Both axes
+start at a \emph{positive} floor: $W_{\min}$ is a hair below the
+smallest physically plausible half-jerk-ramp $T_j$, and $f_{\min}=0.05$
+excludes the degenerate exactly-triangular pulse whose derivative is
+discontinuous (the matched filter's score for a pure triangular
+template is unstable under any smoothing).
+
+\paragraph{Whole-signal sweep.} For every $(W,f)$ we run a normalised
+matched filter over the entire smoothed stream, yielding per sample $i$
+the least-squares amplitude and coefficient of determination
+\begin{equation}
+  \hat A_{W,f}(i) =
+    \frac{\langle a_{[i]},\,\tau_{W,f}\rangle}{\|\tau_{W,f}\|^2},
+  \qquad
+  R^2_{W,f}(i) = 1 - \frac{\|a_{[i]} - \hat A_{W,f}(i)\,\tau_{W,f}\|^2}
+                                 {\|a_{[i]}\|^2},
+\end{equation}
+where $a_{[i]}$ denotes the length-$2W$ signal window centred at
+sample~$i$. We then collapse the grid to per-sample summaries:
+\begin{align}
+  R^2(i),\hat A(i)         &= \text{unsigned argmax across } (W,f), \\
+  R^2_{+}(i),\hat A_{+}(i) &= \text{argmax restricted to } \hat A_{W,f}(i) > 0, \\
+  R^2_{-}(i),\hat A_{-}(i) &= \text{argmax restricted to } \hat A_{W,f}(i) < 0.
+\end{align}
+The per-sign arrays are kept so that the diagnostic UI can show
+\emph{why} one sign lost even when the unsigned argmax picked the other.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.62\linewidth]{trapezoid_heatmap_example.png}
+\caption{Matched-filter $R^2(W,f)$ evaluated at the sample
+corresponding to the take-off lobe of one accepted ride (highest-score
+pair in \texttt{eyalyakir\_milleniumHotel\_SamsungSM-S911B\_15-04-2026\_exp3}).
+The bright ridge on the grid is where the template shape agrees with
+the physical pulse; the marked argmax is the $(W^\star, f^\star)$ the
+per-sample reduction would pick here. The ridge's orientation is
+diagnostic: widening $W$ at fixed $f$ trades lobe sharpness for
+integration window, so a clean elevator lobe produces a compact bright
+patch centred on its true $W$, while a walking bump smears horizontally
+across $f$ with a much lower peak $R^2$.}
+\label{fig:trapezoid-heatmap}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{trapezoid_signed_r2_example.png}
+\caption{Per-sign $R^2$ traces $R^2_{+}(t)$ (blue) and $R^2_{-}(t)$
+(red) on a twelve-second pad around the same accepted ride. The dashed
+horizontal line is \texttt{r2\_peak\_thresh}; vertical dotted lines
+mark the committed interval endpoints. Scatter dots are the local
+maxima of the signed traces, coloured by the first pipeline stage that
+kept or dropped each peak: green $=$ \texttt{accepted} (survived every
+stage and is one of the two committed lobes), orange $=$
+\texttt{unpaired (greedy)} (made \texttt{final\_peaks} but no pair
+involving it cleared \texttt{joint\_r2\_thresh}), purple $=$
+\texttt{same-sign NMS} / \texttt{NMS (local)} (suppressed by
+non-maximum-suppression), slate $=$ \texttt{lost to opp sign} (the
+signed $R^2$ was high, but the unsigned argmax elected the opposite
+sign), and the grey shades are the below-threshold drops. This is the
+same colour legend the live editor UI renders; it is the primary
+debugging view when a GT ride is missed.}
+\label{fig:trapezoid-signedr2}
+\end{figure}
+
+\paragraph{Peak-pick.} Candidates are strict interior local maxima of
+$R^2(i)$ gated by the amplitude floor
+$|\hat A(i)| \ge \texttt{min\_peak\_abs\_a}$ and the R² threshold
+$R^2(i) \ge \texttt{r2\_peak\_thresh}$, followed by a small-radius
+non-maximum suppression of \texttt{nms\_radius\_s} (default $0.5$~s).
+This first NMS kills duplicate peaks that a single physical pulse
+produces at neighbouring samples.
+
+\paragraph{Same-sign NMS.} A second, larger NMS is applied
+\emph{within each sign separately}: two candidates carrying the same
+sign $s_i = \operatorname{sign}\hat A(i)$ must be at least
+\texttt{same\_sign\_min\_gap\_s} apart (default $20$~s); the higher-R²
+candidate wins its window. Real elevator physics does not place two
+take-offs or two landings that close together, so this pass removes the
+secondary lobes the matched filter sometimes picks up around a true
+pulse.
+
+The output of stage~1--4 is \texttt{final\_peaks} --- a list of sample
+indices $\{i_k\}$, each tagged with a sign
+$s_k \in \{+1,-1\}$ from $\operatorname{sign}\hat A(i_k)$.
+
+\subsubsection{What Goes Wrong with Raw Peaks}
+\label{sec:trapezoid-problem}
+
+Running just stages 1--4 of Section~\ref{sec:trapezoid-detect} --- per-
+sample sweep plus two NMS passes --- produces a set of
+\emph{candidate lobes}, not rides. On our dataset this raw candidate
+list fails in three characteristic ways that we could see clearly in
+the editor's signed-$R^2$ panel (Figure~\ref{fig:trapezoid-signedr2}):
+
+\begin{enumerate}
+  \item \textbf{False positives on pedestrian motion.} A brisk step
+    sequence, a bag drop, or a door slam produces single-lobe
+    accelerometer bursts that clear both the $R^2$ and amplitude
+    thresholds. In isolation they look identical to an elevator
+    take-off. In Figure~\ref{fig:trapezoid-signedr2} these are the
+    orange / slate dots outside the committed interval.
+  \item \textbf{Mis-paired lobes.} Two unrelated high-$R^2$ peaks with
+    opposite signs can sit within the admissibility window, and on
+    template-per-peak arguments they would be happily paired. But
+    their individual best templates
+    $(W_{+}^\star, f_{+}^\star) \ne (W_{-}^\star, f_{-}^\star)$ disagree
+    ---the ``take-off'' lobe was actually a footstep with $W\!\approx\!0.5$~s
+    and the ``landing'' lobe was an elevator deceleration with
+    $W\!\approx\!1.5$~s. A real ride has a single cabin producing both
+    lobes with the \emph{same} underlying shape.
+  \item \textbf{Swallowed short rides.} A ``big'' candidate pair
+    stretching over a long pause between two physically distinct short
+    rides can out-score the two correct short-ride pairs if we rank
+    pairs only by mean $R^2$. The big pair claims the whole time
+    window, making the two real rides look like false positives on its
+    shoulders.
+\end{enumerate}
+
+Raising the per-peak thresholds does not fix (1): the false-positive
+peaks are not low-$R^2$, they are structurally identical to real lobes
+until we look at their \emph{partner}. Raising the pair-gap bounds
+does not fix (2): the gap itself is fine; it is the shape agreement
+that is off. And ranking pairs differently does not fix (3) unless we
+make the committed set mutually compatible.
+
+The clearing algorithm in Section~\ref{sec:trapezoid-pair} addresses
+all three at once: (1) a lone candidate without an opposite-sign
+partner never survives --- the filter is defined on pairs, not lobes;
+(2) the \emph{shared-shape} joint fit below collapses the two lobes
+onto a single $(W, f)$ template before scoring, so mismatched pairs
+score poorly and are rejected; (3) the greedy resolver enforces
+interval non-intersection, so two short-ride pairs with the same
+total score as one overlapping long pair always win as a pair.
+
+\subsubsection{Pair Filter: Lobe Pairing and Conflict Resolution}
+\label{sec:trapezoid-pair}
+
+A single lobe is not yet a ride. The clearing algorithm walks every
+admissible (take-off, landing) pair, refits a \emph{joint} template
+with a shared shape and shared amplitude, and then greedily commits a
+non-overlapping subset.
+
+\paragraph{Admissibility.} For a pair of candidates
+$(i_1, s_1=+1)$ and $(i_2, s_2=-1)$ --- or the mirror $(-1, +1)$
+for a downward ride --- with $i_1 < i_2$, we require the temporal gap
+\[
+  \texttt{min\_ride\_s} \;\le\; t(i_2) - t(i_1) \;\le\; \texttt{max\_ride\_s},
+\]
+where the upper bound ($2$~min by default) is a hard ceiling on
+realistic ride durations and the lower bound rejects a take-off
+misread as its own landing.
+
+\paragraph{Shared-shape joint fit.} For each template $\tau_{W,f}$ on
+the grid we centre one copy at $i_1$ and one at $i_2$ with the signs
+$s_1, s_2$ fixed externally, and fit a \emph{single} amplitude
+$A \ge 0$ to both lobes jointly. Writing $a_k = a_{[i_k]}$,
+$P_k = \|a_k\|^2$, $\tau = \tau_{W,f}$, $N = \|\tau\|^2$, and
+$u_k = s_k\,\langle a_k, \tau\rangle$, the least-squares solution is
+closed form:
+\begin{equation}
+  A^\star(W,f) = \frac{u_1 + u_2}{2N}, \qquad
+  R^2_k = 1 - \frac{P_k - 2 A^\star s_k\,\langle a_k,\tau\rangle
+                     + (A^\star)^2 N}{P_k},
+\end{equation}
+and we score the pair by the mean of the two per-lobe R²,
+\begin{equation}
+  \mathrm{score}(W,f) \;=\; \tfrac{1}{2}\bigl(R^2_1 + R^2_2\bigr).
+  \label{eq:pair-score}
+\end{equation}
+The pair's final score is the grid-max of \eqref{eq:pair-score}, with
+$(W^\star, f^\star)$ the template whose \emph{same} shape best
+explains both lobes simultaneously. This is what distinguishes the
+pair filter from two independent peak fits: a true ride has two lobes
+of the same shape --- same cabin, same drive --- and the shared-shape
+constraint suppresses pairs whose lobes happen to clear the per-lobe
+R² threshold but with incompatible templates (e.g.\ two unrelated
+walking spikes).
+
+\paragraph{Pair-level acceptance.} A pair is accepted iff
+\[
+  \mathrm{score}(W^\star, f^\star) \ge \texttt{joint\_r2\_thresh}
+  \quad\text{and}\quad
+  A^\star \ge \texttt{min\_pair\_abs\_a}.
+\]
+Both thresholds are genuinely pair-level: a pair whose individual lobes
+passed the single-peak thresholds of Section~\ref{sec:trapezoid-detect}
+can still be rejected here if the lobes refuse to agree on a common
+template.
+
+\paragraph{Greedy conflict resolution.} We sort the accepted pairs by
+$\mathrm{score}$ in descending order and walk the list, committing a
+pair only if
+\begin{enumerate}
+  \item neither of its lobes is already committed to another pair,
+    \emph{and}
+  \item its time interval $[t(i_1), t(i_2)]$ does not intersect any
+    already-committed interval.
+\end{enumerate}
+The second condition is the subtle one. Because a lobe can in
+principle participate in pairs with different partners at different
+gaps, simply enforcing ``no shared lobe'' still admits a ``big'' pair
+(covering many short rides) alongside the short rides it swallows.
+The interval non-intersection constraint gives the highest-scoring
+partition a veto over its territory, and in the dataset this almost
+always resolves in favour of the higher-R² short-ride fits, as
+expected.
+
+\subsubsection{Segment Endpoints}
+\label{sec:trapezoid-endpoints}
+
+For each committed pair the output interval is simply
+\[
+  [\,t_{\text{start}},\, t_{\text{end}}\,] \;=\; [\,t(i_1),\; t(i_2)\,],
+\]
+i.e.\ the start and end of the ride are taken directly from the sample
+times of the two committed lobe \emph{centres}, not from ramp-edge
+crossings or velocity thresholds. This is the natural choice given the
+kinematic model of Section~\ref{sec:elevator-kinematics}: $i_1$ is
+(approximately) the centroid of the first acceleration lobe and $i_2$
+the centroid of the second, so the gap $t(i_2) - t(i_1)$ is precisely
+the inter-pulse spacing whose proportionality to $H/v_{\max}$ is given
+by \eqref{eq:elevator-durations}. The ride type is read off from the
+first-lobe sign: \texttt{ride\_type}~$=$~\texttt{up} if $s_1 = +1$,
+else \texttt{down}.
+
+A useful consequence is that the predicted interval is \emph{contained}
+within the physical ride: it covers the cruise and the two cruise
+shoulders but not the brief door-open tail that the barometer-based GT
+labels (Section~\ref{sec:barometer-algorithm}) intentionally pad. The
+evaluator therefore scores overlap fractionally --- a GT and
+prediction ``match'' if either their absolute overlap is at least a
+second or their overlap covers at least $30\%$ of the shorter
+interval --- so that a correct-but-tight prediction is not penalised
+for missing the padding.
+
+\subsubsection{Tunables and How We Calibrated Them}
+\label{sec:trapezoid-tunables}
+
+Eight scalar thresholds control the whole detector. Four live in the
+detection stage and four in the pair filter. Every one of them has a
+direct physical interpretation in the kinematic model of
+Section~\ref{sec:elevator-kinematics}, and every one was tuned
+empirically via a grid sweep on the 22 training experiments. The
+chosen values, their physical meaning, and the failure mode they
+guard against are summarised in Table~\ref{tab:detect-config}; the
+methodology that produced those values is described below.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{l c p{0.62\linewidth}}
+\toprule
+\textbf{Parameter} & \textbf{Value} & \textbf{Physical meaning and failure mode guarded against} \\
+\midrule
+\multicolumn{3}{l}{\emph{Detection stage (\S\ref{sec:trapezoid-detect})}} \\
+\texttt{r2\_peak\_thresh}        & 0.75 &
+  Minimum shape-agreement of a candidate with its best trapezoid
+  template. Below this, the window isn't ``trapezoidal enough'' to
+  treat as a lobe. Guards against thresholding on low-$R^2$ noise. \\
+\texttt{min\_peak\_abs\_a}       & 0.5~m/s$^2$ &
+  Minimum LS-fit $|\hat A|$ for a peak. Pedestrian bumps are the
+  \emph{right shape} (small trapezoids) but the \emph{wrong size};
+  this floor separates them from the building's $a_{\max}$-scale
+  cruise lobes. This is the principal pedestrian-FP lever. \\
+\texttt{nms\_radius\_s}          & 0.5~s &
+  Duplicate-peak dedup radius. A single physical pulse produces
+  adjacent high-$R^2$ samples; this collapses them to one. Fixed by
+  the sampling rate ($\sim 100$~Hz) and cruise-onset duration $T_j$. \\
+\texttt{same\_sign\_min\_gap\_s} & 5.0~s &
+  Minimum gap between two same-sign candidates. Real elevator physics
+  doesn't place two take-offs (or two landings) closer than the
+  shortest plausible ride, so a low value here lets back-to-back
+  short rides survive while still killing in-pulse duplicates. \\
+\midrule
+\multicolumn{3}{l}{\emph{Pair-filter stage (\S\ref{sec:trapezoid-pair})}} \\
+\texttt{min\_ride\_s}            & 10~s &
+  Lower bound on the take-off$\to$landing gap of a pair. Shorter
+  gaps would be ``dwell pairs'' --- the landing of one ride matched
+  against the take-off of the next. \\
+\texttt{max\_ride\_s}            & 120~s &
+  Upper bound on the pair gap; a hard ceiling on ride duration. \\
+\texttt{joint\_r2\_thresh}       & 0.75 &
+  Minimum shared-shape joint $R^2$ for an accepted pair. This is the
+  pair-level analogue of \texttt{r2\_peak\_thresh} but harder to
+  clear: a pair's two lobes must agree on the \emph{same} $(W,f)$
+  template, so mismatched lobes (foot-step take-off plus lift
+  landing) fail here even if each lobe individually cleared the
+  peak-level $R^2$. \\
+\texttt{min\_pair\_abs\_a}       & 0.3~m/s$^2$ &
+  Minimum shared $|A|$ of the accepted pair. Acts as a secondary
+  amplitude floor at pair level. Lower than the peak-level floor
+  because joint fitting already implicitly averages the two lobes. \\
+\bottomrule
+\end{tabular}
+\caption{The detector's eight thresholds and the values we chose for
+them. Each threshold targets a distinct failure mode on the raw
+accelerometer signal; the values were picked by grid search (see
+below).}
+\label{tab:detect-config}
+\end{table}
+
+\paragraph{How the values were picked.} We ran a grid search over the
+six non-kinematic knobs while pinning \texttt{min\_ride\_s}~$=$~10~s
+(shortest plausible floor-to-floor ride) and
+\texttt{max\_ride\_s}~$=$~120~s (upper bound on realistic rides).
+The grid had $2 \times 4 \times 1 \times 3 \times 2 \times 3 = 144$
+combinations. Each combination was scored on all 22 training
+experiments (415 GT rides total) with the composite metric introduced
+in Section~\ref{sec:trapezoid-evaluation}. The winning configuration
+shown in Table~\ref{tab:detect-config} emerged at the top of that
+table and also produced the highest classical F1~@~IoU~$\ge$~0.5 on
+the pooled predictions. Lower thresholds than those listed tended to
+add false positives faster than recall; higher thresholds tipped the
+failure mix into misses. The picked values are at the ``recall
+cliff'' on each axis.
+
+\subsubsection{Calibrating the Pair Filter by Iteration}
+\label{sec:trapezoid-iterations}
+
+Choosing the eight threshold values addresses only half of the
+problem. The structure of the pair filter itself --- specifically,
+the rule by which the greedy conflict resolver ranks candidate
+pairs --- matters at least as much, and cannot be tuned by a scalar
+sweep. We therefore ran a second round of calibration in which the
+detection-stage thresholds were frozen at the values of
+Table~\ref{tab:detect-config} and \emph{only the pair-filter algorithm}
+changed. Ten variants were evaluated against the same 22-experiment
+set, each with a single targeted change versus the baseline.
+
+\paragraph{What the baseline looked like.}
+The baseline filter ranked accepted pairs by their mean joint $R^2$
+and applied the greedy conflict resolver described in
+Section~\ref{sec:trapezoid-pair}. On its own, that rule produced a
+specific pathology: take-offs from one ride and landings from a
+\emph{different} ride several rides later tended to score high joint
+$R^2$ simply because both lobes were genuine lift lobes (same
+building, same cabin, same shape). The resulting ``super pair''
+covered every GT ride in between and, by the
+interval-non-intersection rule, blocked the true short-ride pairs
+from committing. The failure mode dominated the error mix: 208 of
+415 GT rides were swallowed by a merged prediction.
+Figure~\ref{fig:pair-filter-baseline} shows the effect visually ---
+the long purple blocks of predictions cover many green/red GT
+intervals each.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{pair_filter_timeline_baseline.png}
+\caption{Baseline pair-filter output on the worst-merge experiment.
+Top row: GT rides (green $=$ up, red $=$ down). Bottom row: accepted
+predictions (blue $=$ up, purple $=$ down). Long purple bars span
+five or more consecutive GT rides each --- the super-pair failure
+mode. 50\,\% of all GT rides in the dataset land under a merged
+prediction like one of these.}
+\label{fig:pair-filter-baseline}
+\end{figure}
+
+\paragraph{Variants tried.} Each of the ten iterations swapped in a
+different acceptance or ranking rule and kept everything else
+identical:
+
+\begin{enumerate}
+  \item \textbf{Baseline} --- mean-$R^2$ greedy ranking.
+  \item \textbf{Duration penalty, light.} Rank by
+    $\mathrm{score} - \lambda \cdot \Delta t$ with $\lambda = 0.001$,
+    so that at similar scores the shorter pair wins.
+  \item \textbf{Duration penalty, medium} ($\lambda = 0.003$).
+  \item \textbf{Duration penalty, heavy} ($\lambda = 0.01$). A 100~s
+    pair now has to beat a 10~s pair by $\ge 0.9$ $R^2$ to outrank
+    it.
+  \item \textbf{Mutual nearest neighbour.} Accept a pair only if each
+    lobe is the other's nearest admissible opposite-sign peak.
+  \item \textbf{Quiet middle.} Reject a pair if the signal between
+    the two lobes is noisier than $0.5\,A^\star$ at any point.
+  \item \textbf{Min-$R^2$ acceptance.} Require $\min(R^2_1, R^2_2)
+    \ge$ \texttt{joint\_r2\_thresh} (rather than the mean).
+  \item \textbf{Mutual nearest + duration penalty (medium).}
+  \item \textbf{Quiet middle + min-$R^2$.}
+  \item \textbf{Kitchen sink.} All four above, stacked.
+\end{enumerate}
+
+The score progression across the ten iterations is plotted in
+Figure~\ref{fig:pair-filter-progress}.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{pair_filter_progress.png}
+\caption{Scores across the ten pair-filter variants. Blue: the
+four-mode composite of
+Section~\ref{sec:trapezoid-evaluation}. Orange: classical F1 at
+IoU~$\ge$~0.5. The duration-penalty family (iterations 2--4)
+monotonically improves both scores up to $\lambda = 0.01$, at which
+point the score more than doubles versus baseline. Stacking rules
+(iter 10) over-regularises the filter and costs recall.}
+\label{fig:pair-filter-progress}
+\end{figure}
+
+\paragraph{What worked: duration penalty.} The biggest gain came from
+the simplest change: subtracting $0.01 \cdot \Delta t$ from a pair's
+score before ranking. Intuitively, super pairs and genuine long
+rides both score the same joint $R^2$, but super pairs are
+arbitrarily long while genuine rides cluster around ten to thirty
+seconds; a linear cost in $\Delta t$ collapses that asymmetry.
+Empirically the composite score went from $0.097$ at baseline to
+$0.228$ at $\lambda = 0.01$, the number of merged GTs halved, and
+the number of clean one-to-one matches almost tripled.
+Figure~\ref{fig:pair-filter-winner} shows the same experiment as
+Figure~\ref{fig:pair-filter-baseline} after the fix: the super pairs
+are gone and predictions are of the correct length scale.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{pair_filter_timeline_winner.png}
+\caption{After adopting the duration-penalty rule ($\lambda = 0.01$)
+the super pairs of Figure~\ref{fig:pair-filter-baseline} are gone.
+Predictions are now individual $\sim$10~s bars. A residual failure
+mode is visible --- some bars are offset from their matching GTs,
+because duration penalty monotonically prefers shorter gaps, so the
+landing of one ride occasionally gets paired with the take-off of
+the next (a ``dwell pair''). A band penalty centred on typical ride
+length, or a higher \texttt{min\_ride\_s} floor, would close that
+remaining gap.}
+\label{fig:pair-filter-winner}
+\end{figure}
+
+\paragraph{What didn't work.} The three ``structural'' variants
+(mutual nearest, quiet middle, min-$R^2$) each improved a single
+failure axis but hurt another more:
+
+\begin{itemize}
+  \item \textbf{Mutual nearest neighbour} dropped false positives
+    sharply --- it refuses any pair where either lobe has a nearer
+    admissible opposite --- but missed more genuine rides whose
+    lobes happen not to be each other's nearest opposite.
+  \item \textbf{Quiet middle} worked on paper but rejected many
+    true rides whose cruise phase contained real signal (HVAC
+    ripples, cable oscillations, cabin vibration). Recall
+    collapsed.
+  \item \textbf{Min-$R^2$} barely moved the needle. Mismatched pairs
+    already had \emph{both} lobes scoring well individually (each is
+    a real lift lobe, just from a different ride); the mean-vs-min
+    distinction doesn't discriminate in that regime.
+\end{itemize}
+
+Stacking several of these constraints (iter 10) multiplied the
+recall hits. The lesson: constraints that prune entire families of
+candidates are expensive, while a soft ranking bias like the
+duration penalty can tilt the greedy in the right direction without
+categorically rejecting anyone.
+
+\subsubsection{Evaluation Metrics}
+\label{sec:trapezoid-evaluation}
+
+Reporting a single detection F1 on temporal intervals hides several
+distinct failure modes we genuinely want to distinguish. We therefore
+evaluate every configuration and every iteration with two
+complementary metric families.
+
+\paragraph{Four-mode composite.} Given a GT set and a prediction
+set, we compute a bipartite overlap graph. Two intervals count as
+``matching'' if their absolute overlap is at least one second or
+their overlap covers at least $30\%$ of the shorter interval. We
+then categorise every GT and every prediction:
+
+\begin{itemize}
+  \item \emph{Clean} --- one-to-one matches (good).
+  \item \emph{Missed} --- a GT with zero overlapping predictions.
+  \item \emph{GT-merged} --- a GT that shares its single overlapping
+    pred with at least one other GT; symmetrically
+    \emph{pred-merged} on the pred side (the failure mode of
+    Figure~\ref{fig:pair-filter-baseline}).
+  \item \emph{GT-split} --- a GT covered by two or more predictions,
+    and the corresponding \emph{pred-split-part} on the pred side.
+  \item \emph{False-positive} --- a prediction with zero overlapping
+    GTs (lands on ``outside'').
+\end{itemize}
+
+The aggregate score is
+\begin{equation}
+  \mathrm{F1}^\ast \;=\;
+  \frac{2 \cdot \mathrm{clean}}{2 \cdot \mathrm{clean} + \mathrm{bad}_{\rm GT} + \mathrm{bad}_{\rm pred}},
+  \label{eq:f1-like}
+\end{equation}
+where $\mathrm{bad}_{\rm GT} = \mathrm{missed} + \mathrm{GT\text{-}merged} + \mathrm{GT\text{-}split}$
+and $\mathrm{bad}_{\rm pred} = \mathrm{fp} + \mathrm{pred\text{-}merged} + \mathrm{pred\text{-}split\text{-}part}$.
+A perfect detector scores 1. Every failure category counts equally
+once, which is what makes the metric discriminating: a merge-heavy
+configuration and a miss-heavy configuration can score the same F1
+on a pooled IoU evaluation but score very differently on
+\eqref{eq:f1-like}, which is what we want when tuning the pair
+filter.
+
+\paragraph{Classical IoU-F1 @ 0.5.} For comparability with external
+temporal-detection work (PASCAL VOC, COCO temporal tracks,
+ActivityNet) we also report the standard F1 at intersection-over-
+union $\ge 0.5$: greedily assign each GT its highest-IoU pred, count
+a match if IoU $\ge 0.5$, and compute F1 over the pooled TP/FP/FN
+counts. This second number is directly comparable to any
+off-the-shelf interval-detection baseline; it is the orange curve in
+Figure~\ref{fig:pair-filter-progress}.
+
+\paragraph{Why both.} The composite score
+\eqref{eq:f1-like} tells us which failure mode dominates and guides
+algorithmic changes (it was what surfaced the super-pair problem);
+the IoU-F1 tells us whether the \emph{edges} of the intervals are
+well-placed once a match exists, and how the detector compares to
+generic temporal baselines. On our dataset the two curves track each
+other across iterations, which is a sanity check that the composite
+isn't gamed by quirks of the four-mode definition.
 
 \end{document}

@@ -1,0 +1,202 @@
+[
+  {
+    "index": 0,
+    "ride_type": "down",
+    "duration_s": 11.357999999999947,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 1,
+    "ride_type": "down",
+    "duration_s": 10.641999999999939,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 2,
+    "ride_type": "down",
+    "duration_s": 12.871999999999844,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 3,
+    "ride_type": "down",
+    "duration_s": 16.614000000000033,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 4,
+    "ride_type": "down",
+    "duration_s": 10.720000000000027,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 5,
+    "ride_type": "down",
+    "duration_s": 12.234000000000151,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 6,
+    "ride_type": "down",
+    "duration_s": 15.498000000000047,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 7,
+    "ride_type": "up",
+    "duration_s": 33.38599999999997,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 8,
+    "ride_type": "up",
+    "duration_s": 15.773999999999887,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 9,
+    "ride_type": "up",
+    "duration_s": 15.909000000000106,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  }
+]
