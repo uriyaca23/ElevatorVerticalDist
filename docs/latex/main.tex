@@ -8,7 +8,10 @@
 \usepackage{float}
 \usepackage{subcaption}
 \usepackage{booktabs}
-\usepackage{xcolor}
+\usepackage[table]{xcolor}
+\usepackage{array}
+\usepackage{tikz}
+\usetikzlibrary{decorations.pathreplacing,arrows.meta}
 \usepackage{hyperref}
 \usepackage[margin=1in]{geometry}
 
@@ -546,6 +549,149 @@ durations follow from \eqref{eq:elevator-bounds}:
 where $H$ is the floor-to-floor height. The total ride length is
 $T_{\text{ride}} = 4 T_j + 2 T_a + T_v$.
 
+\paragraph{What $T_j$, $T_a$, $T_v$ mean.} Each of the three durations
+in \eqref{eq:elevator-durations} labels a distinct \emph{kinematic
+regime} of the ride:
+\begin{itemize}
+  \item \textbf{$T_j$ -- jerk-limited ramp duration.} The time the
+    drive spends at a \emph{saturated} jerk $|\dddot h|=j_{\max}$. This
+    is the length of phases~1, 3, 5, and 7, during which the
+    acceleration $a(t)$ is a straight line with slope $\pm j_{\max}$
+    (linear ramp). Because the acceleration must grow from $0$ to
+    $a_{\max}$ at slope $j_{\max}$, the duration is fixed by the
+    machine: $T_j = a_{\max}/j_{\max}$. For typical commercial values
+    ($a_{\max}{\approx}1.0$~m/s$^2$, $j_{\max}{\approx}1.3$~m/s$^3$)
+    this is $T_j{\approx}0.77$~s.
+  \item \textbf{$T_a$ -- constant-acceleration plateau duration.} The
+    time the cabin spends at a \emph{saturated} acceleration
+    $|a|=a_{\max}$. This is the length of phases~2 and~6, the flat
+    tops (or bottoms) of the acceleration trace. $T_a$ is zero for
+    short hops that never reach $v_{\max}$ (``triangular'' rides) and
+    grows linearly with the peak velocity budget $v_{\max}/a_{\max}$
+    once $v_{\max}$ is hit.
+  \item \textbf{$T_v$ -- constant-velocity cruise duration.} The time
+    the cabin spends at a \emph{saturated} velocity $|\dot h|=v_{\max}$
+    with $a=0$. This is the length of phase~4, the flat top of the
+    velocity profile between the two acceleration lobes. $T_v$
+    vanishes on any ride where $H$ is too small for the cabin to
+    finish accelerating before it must begin decelerating; when it is
+    non-zero it scales linearly with the floor-to-floor height,
+    $T_v\approx H/v_{\max} - T_j - T_a$.
+\end{itemize}
+Figure~\ref{fig:scurve-durations} shows all three durations on a
+simulated S-curve for a representative trapezoidal ride.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[>=Stealth, font=\small]
+  \pgfmathsetmacro{\Tj}{0.8}
+  \pgfmathsetmacro{\Ta}{1.0}
+  \pgfmathsetmacro{\Tv}{2.4}
+  \pgfmathsetmacro{\amax}{1.0}
+  \pgfmathsetmacro{\Tend}{4*\Tj + 2*\Ta + \Tv}
+  \pgfmathsetmacro{\tA}{\Tj}
+  \pgfmathsetmacro{\tB}{\Tj+\Ta}
+  \pgfmathsetmacro{\tC}{2*\Tj+\Ta}
+  \pgfmathsetmacro{\tD}{2*\Tj+\Ta+\Tv}
+  \pgfmathsetmacro{\tE}{3*\Tj+\Ta+\Tv}
+  \pgfmathsetmacro{\tF}{3*\Tj+2*\Ta+\Tv}
+  \pgfmathsetmacro{\tG}{4*\Tj+2*\Ta+\Tv}
+
+  % ===== Acceleration panel =====
+  \begin{scope}[yshift=0cm]
+    \pgfmathsetmacro{\axscale}{1.0}
+    \pgfmathsetmacro{\tscale}{1.2}
+    % axes
+    \draw[->] (0,-1.4*\axscale) -- (0,1.6*\axscale) node[above] {$a(t)$};
+    \draw[->] (-0.2,0) -- ({\tscale*(\Tend+0.4)},0) node[right] {$t$};
+    % horizontal guides for +/- amax
+    \draw[dashed,gray!60] (0,{\axscale*\amax}) -- ({\tscale*\Tend},{\axscale*\amax});
+    \draw[dashed,gray!60] (0,{-\axscale*\amax}) -- ({\tscale*\Tend},{-\axscale*\amax});
+    \node[left] at (0,{\axscale*\amax}) {\small $+a_{\max}$};
+    \node[left] at (0,{-\axscale*\amax}) {\small $-a_{\max}$};
+    % acceleration profile
+    \draw[very thick, blue!70!black]
+      (0,0) --
+      ({\tscale*\tA},{\axscale*\amax}) --
+      ({\tscale*\tB},{\axscale*\amax}) --
+      ({\tscale*\tC},0) --
+      ({\tscale*\tD},0) --
+      ({\tscale*\tE},{-\axscale*\amax}) --
+      ({\tscale*\tF},{-\axscale*\amax}) --
+      ({\tscale*\tG},0);
+    % phase separators
+    \foreach \tt in {\tA,\tB,\tC,\tD,\tE,\tF,\tG} {
+      \draw[dotted,gray!55] ({\tscale*\tt},-1.3*\axscale) -- ({\tscale*\tt},1.5*\axscale);
+    }
+    % Phase labels 1..7
+    \foreach \i/\ta/\tb in {1/0/\tA, 2/\tA/\tB, 3/\tB/\tC, 4/\tC/\tD, 5/\tD/\tE, 6/\tE/\tF, 7/\tF/\tG} {
+      \pgfmathsetmacro{\mid}{0.5*(\ta+\tb)}
+      \node[font=\scriptsize,gray!55!black] at ({\tscale*\mid},1.4*\axscale) {\i};
+    }
+    % Tj bracket (phase 1)
+    \draw[decorate,decoration={brace,amplitude=4pt,mirror},thick,red!70!black]
+      (0,-1.05*\axscale) -- ({\tscale*\tA},-1.05*\axscale)
+      node[midway,below=3pt,red!70!black] {$T_j$};
+    % Ta bracket (phase 2)
+    \draw[decorate,decoration={brace,amplitude=4pt,mirror},thick,orange!80!black]
+      ({\tscale*\tA},-1.05*\axscale) -- ({\tscale*\tB},-1.05*\axscale)
+      node[midway,below=3pt,orange!80!black] {$T_a$};
+    % Tv bracket (phase 4)
+    \draw[decorate,decoration={brace,amplitude=4pt,mirror},thick,teal!70!black]
+      ({\tscale*\tC},-1.05*\axscale) -- ({\tscale*\tD},-1.05*\axscale)
+      node[midway,below=3pt,teal!70!black] {$T_v$};
+    \node[anchor=west,font=\footnotesize] at ({\tscale*(\Tend+0.1)},1.2*\axscale) {acceleration};
+  \end{scope}
+
+  % ===== Velocity panel (below acceleration) =====
+  \begin{scope}[yshift=-4.1cm]
+    \pgfmathsetmacro{\vscale}{1.2}
+    \pgfmathsetmacro{\tscale}{1.2}
+    \pgfmathsetmacro{\vpeak}{\amax*(\Tj+\Ta)}
+    % axes
+    \draw[->] (0,-0.3*\vscale) -- (0,1.8*\vscale) node[above] {$v(t)$};
+    \draw[->] (-0.2,0) -- ({\tscale*(\Tend+0.4)},0) node[right] {$t$};
+    \draw[dashed,gray!60] (0,{\vscale*\vpeak}) -- ({\tscale*\Tend},{\vscale*\vpeak});
+    \node[left] at (0,{\vscale*\vpeak}) {\small $v_{\max}$};
+    % velocity samples
+    \draw[very thick, blue!70!black]
+      plot[domain=0:\tA,samples=20,smooth] ({\tscale*\x},{\vscale*0.5*\amax/\Tj*\x*\x})
+      --
+      ({\tscale*\tB},{\vscale*(0.5*\amax*\Tj + \amax*\Ta)})
+      plot[domain=\tB:\tC,samples=20,smooth]
+        ({\tscale*\x},{\vscale*((0.5*\amax*\Tj + \amax*\Ta) + \amax*(\x-\tB) - 0.5*\amax/\Tj*(\x-\tB)*(\x-\tB))})
+      --
+      ({\tscale*\tD},{\vscale*\vpeak})
+      plot[domain=\tD:\tE,samples=20,smooth]
+        ({\tscale*\x},{\vscale*(\vpeak - 0.5*\amax/\Tj*(\x-\tD)*(\x-\tD))})
+      --
+      ({\tscale*\tF},{\vscale*(\vpeak - 0.5*\amax*\Tj - \amax*\Ta)})
+      plot[domain=\tF:\tG,samples=20,smooth]
+        ({\tscale*\x},{\vscale*((\vpeak - 0.5*\amax*\Tj - \amax*\Ta) - \amax*(\x-\tF) + 0.5*\amax/\Tj*(\x-\tF)*(\x-\tF))});
+    % phase separators
+    \foreach \tt in {\tA,\tB,\tC,\tD,\tE,\tF,\tG} {
+      \draw[dotted,gray!55] ({\tscale*\tt},0) -- ({\tscale*\tt},{\vscale*1.6});
+    }
+    % Tv bracket on cruise
+    \draw[decorate,decoration={brace,amplitude=4pt},thick,teal!70!black]
+      ({\tscale*\tC},{\vscale*1.65}) -- ({\tscale*\tD},{\vscale*1.65})
+      node[midway,above=3pt,teal!70!black] {$T_v$ (cruise)};
+    \node[anchor=west,font=\footnotesize] at ({\tscale*(\Tend+0.1)},1.2*\vscale) {velocity};
+  \end{scope}
+\end{tikzpicture}
+\caption{Simulated seven-segment S-curve (trapezoidal ride) with the
+three kinematic durations labelled. \textbf{Top:} acceleration
+$a(t)$. Phases~1 and~3 (also 5 and~7) are the linear jerk ramps of
+length $T_j$; phases~2 and~6 are the saturated $|a|=a_{\max}$
+plateaus of length $T_a$. \textbf{Bottom:} velocity $v(t)$, obtained
+by integrating $a(t)$. The flat top of length $T_v$ is phase~4, the
+cruise at $|\dot h|=v_{\max}$. Dotted verticals delimit the seven
+phases numbered above the acceleration panel; $T_j$ is fixed by the
+machine ($a_{\max}/j_{\max}$), $T_a$ grows with the $v_{\max}/a_{\max}$
+budget, and $T_v$ grows linearly with the floor-to-floor height $H$.}
+\label{fig:scurve-durations}
+\end{figure}
+
 \paragraph{What the phone measures.} The phone's gravity-projected
 linear acceleration $a(t)$ traces \emph{exactly} the bracketed
 acceleration in \eqref{eq:elevator-bounds}, modulo sensor noise and
@@ -663,9 +809,146 @@ opposite-sign acceleration pulse at landing. The algorithm is split
 into two stages that mirror the two halves of the problem. A
 \emph{detection} stage finds candidate lobes in the raw signal; a
 \emph{pair-filter} stage decides which pairs of lobes constitute
-genuine rides. Eight tunable parameters --- four in each stage ---
-are bundled in a single configuration object, so a sweep can move
-them all in lockstep.
+genuine rides. Eight scalar thresholds --- four in each stage ---
+plus four template-grid bounds are bundled in a single configuration
+object, so a sweep can move them all in lockstep.
+
+\subsubsection{Tunables and How We Calibrated Them}
+\label{sec:trapezoid-tunables}
+
+Before diving into the stages themselves it helps to have every
+tunable on one page. The detector exposes two kinds of knobs:
+
+\begin{enumerate}
+  \item \textbf{Template-grid bounds} that define the set of
+    trapezoidal templates $\tau_{W,f}$ swept over the signal
+    (Section~\ref{sec:trapezoid-detect}, Equation
+    \eqref{eq:trap-template}). These shape \emph{what} the matched
+    filter can match.
+  \item \textbf{Acceptance thresholds}, four in the detection stage
+    and four in the pair filter, that decide \emph{which} matches
+    survive. Each has a direct physical interpretation in the
+    kinematic model of Section~\ref{sec:elevator-kinematics} and
+    each guards against a distinct failure mode.
+\end{enumerate}
+
+Table~\ref{tab:detect-config} lists every knob, the value we use, and
+the failure mode it guards against. The two template-grid blocks come
+first because they constrain every later stage; the two acceptance
+blocks follow in pipeline order (detection, then pair filter).
+
+\newcommand{\paramcell}[1]{\texttt{\small #1}}
+
+\begin{table}[H]
+\centering
+\footnotesize
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.18\linewidth}
+                  >{\centering\arraybackslash}p{0.13\linewidth}
+                  >{\raggedright\arraybackslash}p{0.6\linewidth}@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} &
+\textbf{Meaning / failure mode guarded against} \\
+\midrule
+\rowcolor{gray!12}
+\multicolumn{3}{@{}l}{\textbf{A. Template grid -- half-width $W$
+  (\S\ref{sec:trapezoid-detect}, Eq.~\eqref{eq:trap-template})}} \\
+\paramcell{W\_MIN\_S}   & $0.4$~s  &
+  Lower bound on lobe half-width. A hair below the smallest physically
+  plausible $T_j$; excludes sub-jerk-ramp spikes that can only be
+  noise. \\
+\paramcell{W\_MAX\_S}   & $3.0$~s  &
+  Upper bound on lobe half-width. Comfortably brackets the largest
+  $T_j + T_v/2$ we see in commercial rides. \\
+\paramcell{W\_N}        & $30$     &
+  Number of log-spaced $W$ samples between \paramcell{W\_MIN\_S} and
+  \paramcell{W\_MAX\_S}. \\
+\midrule
+\rowcolor{gray!12}
+\multicolumn{3}{@{}l}{\textbf{B. Template grid -- flat fraction $f$
+  (\S\ref{sec:trapezoid-detect}, Eq.~\eqref{eq:trap-template})}} \\
+\paramcell{F\_MIN}      & $0.05$   &
+  Lower bound on plateau fraction. Excludes the degenerate
+  exactly-triangular pulse ($f=0$) whose discontinuous derivative
+  makes the matched filter score unstable under smoothing. \\
+\paramcell{F\_MAX}      & $0.80$   &
+  Upper bound on plateau fraction. Large enough to cover long rides
+  where $T_a \gg T_j$, small enough to reject the near-constant
+  plateau ($f\to 1$) that a pedestrian's slow drift produces. \\
+\paramcell{F\_N}        & $15$     &
+  Number of linearly spaced $f$ samples between \paramcell{F\_MIN}
+  and \paramcell{F\_MAX}. \\
+\midrule
+\rowcolor{blue!5}
+\multicolumn{3}{@{}l}{\textbf{C. Detection stage (\S\ref{sec:trapezoid-detect})}} \\
+\paramcell{r2\_peak\_thresh}     & $0.75$ &
+  Minimum shape-agreement of a candidate with its best template.
+  Below this, the window isn't ``trapezoidal enough'' to treat as a
+  lobe. Guards against low-$R^2$ noise. \\
+\paramcell{min\_peak\_abs\_a}    & $0.5$~m/s$^2$ &
+  Minimum LS-fit $|\hat A|$ for a peak. Pedestrian bumps are the
+  \emph{right shape} but the \emph{wrong size}; this floor separates
+  them from $a_{\max}$-scale cruise lobes. Principal pedestrian-FP
+  lever. \\
+\paramcell{nms\_radius\_s}       & $0.5$~s &
+  Duplicate-peak dedup radius. A single physical pulse produces
+  adjacent high-$R^2$ samples; this collapses them to one. \\
+\paramcell{same\_sign\_min\_gap\_s} & $5.0$~s &
+  Minimum gap between two same-sign candidates. Real elevator physics
+  doesn't place two take-offs (or two landings) closer than the
+  shortest plausible ride. \\
+\midrule
+\rowcolor{orange!7}
+\multicolumn{3}{@{}l}{\textbf{D. Pair-filter stage (\S\ref{sec:trapezoid-pair})}} \\
+\paramcell{min\_ride\_s}         & $10$~s &
+  Lower bound on take-off$\to$landing gap. Shorter gaps would be
+  ``dwell pairs'' -- one ride's landing matched against the next
+  ride's take-off. \\
+\paramcell{max\_ride\_s}         & $120$~s &
+  Upper bound on pair gap; a hard ceiling on ride duration. \\
+\paramcell{joint\_r2\_thresh}    & $0.75$ &
+  Minimum shared-shape joint $R^2$ for an accepted pair. Pair-level
+  analogue of \paramcell{r2\_peak\_thresh}, harder to clear because
+  both lobes must agree on the same $(W,f)$ template. \\
+\paramcell{min\_pair\_abs\_a}    & $0.3$~m/s$^2$ &
+  Minimum shared $|A|$ of the accepted pair. Secondary amplitude
+  floor; lower than the peak-level floor because joint fitting
+  already averages the two lobes. \\
+\bottomrule
+\end{tabular}
+\caption{Every tunable of the whole-signal trapezoid detector, grouped
+by role. Block~A/B define the trapezoid template grid
+$\tau_{W,f}$; block~C gates per-sample candidates; block~D gates
+pairs of candidates. All values were picked by grid search on the
+22 training experiments (see below).}
+\label{tab:detect-config}
+\end{table}
+
+\paragraph{How the values were picked.} The template-grid bounds
+$(W_{\min},\,W_{\max},\,f_{\min},\,f_{\max})$ were pinned first from
+the kinematic analysis in Section~\ref{sec:trapezoid-detect}: for
+commercial limits $j_{\max}\!\approx\!1.3$~m/s$^3$,
+$a_{\max}\!\approx\!1.0$~m/s$^2$, $v_{\max}\!\approx\!1.5$~m/s, the
+realistic ranges of $W$ and $f$ are approximately $[0.8,\,2.5]$~s and
+$[0,\,0.7]$ respectively (Equations
+\eqref{eq:W-from-kinematics}--\eqref{eq:f-from-kinematics}); the grid
+bounds $[0.4,\,3.0]$~s and $[0.05,\,0.80]$ pad these by a safety
+margin on each side and were then held fixed.
+
+With the template grid fixed, we ran a grid search over the six
+non-kinematic acceptance thresholds (blocks~C and~D above), pinning
+\paramcell{min\_ride\_s}~$=$~10~s (shortest plausible floor-to-floor
+ride) and \paramcell{max\_ride\_s}~$=$~120~s (upper bound on realistic
+rides). The grid had $2 \times 4 \times 1 \times 3 \times 2 \times 3
+= 144$ combinations. Each combination was scored on all 22 training
+experiments (415 GT rides total) with the composite metric introduced
+in Section~\ref{sec:trapezoid-evaluation}. The winning configuration
+shown in Table~\ref{tab:detect-config} emerged at the top of that
+table and also produced the highest classical F1~@~IoU~$\ge$~0.5 on
+the pooled predictions. Lower thresholds than those listed tended to
+add false positives faster than recall; higher thresholds tipped the
+failure mix into misses. The picked values are at the ``recall
+cliff'' on each axis.
 
 \subsubsection{Detection: Per-Sample Best Template}
 \label{sec:trapezoid-detect}
@@ -940,111 +1223,44 @@ expected.
 \subsubsection{Segment Endpoints}
 \label{sec:trapezoid-endpoints}
 
-For each committed pair the output interval is simply
-\[
-  [\,t_{\text{start}},\, t_{\text{end}}\,] \;=\; [\,t(i_1),\; t(i_2)\,],
-\]
-i.e.\ the start and end of the ride are taken directly from the sample
-times of the two committed lobe \emph{centres}, not from ramp-edge
-crossings or velocity thresholds. This is the natural choice given the
-kinematic model of Section~\ref{sec:elevator-kinematics}: $i_1$ is
-(approximately) the centroid of the first acceleration lobe and $i_2$
-the centroid of the second, so the gap $t(i_2) - t(i_1)$ is precisely
-the inter-pulse spacing whose proportionality to $H/v_{\max}$ is given
-by \eqref{eq:elevator-durations}. The ride type is read off from the
+Each committed pair supplies two things: a pair of lobe-\emph{centre}
+samples $(i_1, i_2)$ and the winning shared-shape template
+$(W^\star, f^\star)$ that explains both lobes simultaneously. The
+predicted ride interval is not the centre-to-centre span --- it is the
+union of the two trapezoidal lobes themselves, from the \emph{start of
+the first trapezoid} to the \emph{end of the second trapezoid}:
+\begin{equation}
+  [\,t_{\text{start}},\, t_{\text{end}}\,]
+  \;=\;
+  [\,t(i_1) - W^\star,\; t(i_2) + W^\star\,].
+  \label{eq:trap-endpoints}
+\end{equation}
+Recall from \eqref{eq:trap-template} that $W^\star$ is the
+\emph{half-width} of the winning template: a lobe centred at $t(i_k)$
+covers $[\,t(i_k) - W^\star,\; t(i_k) + W^\star\,]$. Equation
+\eqref{eq:trap-endpoints} therefore pushes $t_{\text{start}}$ back to
+the foot of the take-off ramp and $t_{\text{end}}$ forward to the foot
+of the landing ramp --- i.e.\ ``centre~$-$~width'' for the first lobe
+and ``centre~$+$~width'' for the second --- so the predicted interval
+encloses both jerk-limited ramps \emph{and} their plateaus.
+
+The gap between the two lobe centres, $t(i_2) - t(i_1)$, remains the
+physically meaningful quantity: it is the inter-pulse spacing whose
+proportionality to $H/v_{\max}$ is given by
+\eqref{eq:elevator-durations}. The ride type is read off from the
 first-lobe sign: \texttt{ride\_type}~$=$~\texttt{up} if $s_1 = +1$,
 else \texttt{down}.
 
-A useful consequence is that the predicted interval is \emph{contained}
-within the physical ride: it covers the cruise and the two cruise
-shoulders but not the brief door-open tail that the barometer-based GT
-labels (Section~\ref{sec:barometer-algorithm}) intentionally pad. The
-evaluator therefore scores overlap fractionally --- a GT and
-prediction ``match'' if either their absolute overlap is at least a
-second or their overlap covers at least $30\%$ of the shorter
-interval --- so that a correct-but-tight prediction is not penalised
-for missing the padding.
-
-\subsubsection{Tunables and How We Calibrated Them}
-\label{sec:trapezoid-tunables}
-
-Eight scalar thresholds control the whole detector. Four live in the
-detection stage and four in the pair filter. Every one of them has a
-direct physical interpretation in the kinematic model of
-Section~\ref{sec:elevator-kinematics}, and every one was tuned
-empirically via a grid sweep on the 22 training experiments. The
-chosen values, their physical meaning, and the failure mode they
-guard against are summarised in Table~\ref{tab:detect-config}; the
-methodology that produced those values is described below.
-
-\begin{table}[H]
-\centering
-\small
-\begin{tabular}{l c p{0.62\linewidth}}
-\toprule
-\textbf{Parameter} & \textbf{Value} & \textbf{Physical meaning and failure mode guarded against} \\
-\midrule
-\multicolumn{3}{l}{\emph{Detection stage (\S\ref{sec:trapezoid-detect})}} \\
-\texttt{r2\_peak\_thresh}        & 0.75 &
-  Minimum shape-agreement of a candidate with its best trapezoid
-  template. Below this, the window isn't ``trapezoidal enough'' to
-  treat as a lobe. Guards against thresholding on low-$R^2$ noise. \\
-\texttt{min\_peak\_abs\_a}       & 0.5~m/s$^2$ &
-  Minimum LS-fit $|\hat A|$ for a peak. Pedestrian bumps are the
-  \emph{right shape} (small trapezoids) but the \emph{wrong size};
-  this floor separates them from the building's $a_{\max}$-scale
-  cruise lobes. This is the principal pedestrian-FP lever. \\
-\texttt{nms\_radius\_s}          & 0.5~s &
-  Duplicate-peak dedup radius. A single physical pulse produces
-  adjacent high-$R^2$ samples; this collapses them to one. Fixed by
-  the sampling rate ($\sim 100$~Hz) and cruise-onset duration $T_j$. \\
-\texttt{same\_sign\_min\_gap\_s} & 5.0~s &
-  Minimum gap between two same-sign candidates. Real elevator physics
-  doesn't place two take-offs (or two landings) closer than the
-  shortest plausible ride, so a low value here lets back-to-back
-  short rides survive while still killing in-pulse duplicates. \\
-\midrule
-\multicolumn{3}{l}{\emph{Pair-filter stage (\S\ref{sec:trapezoid-pair})}} \\
-\texttt{min\_ride\_s}            & 10~s &
-  Lower bound on the take-off$\to$landing gap of a pair. Shorter
-  gaps would be ``dwell pairs'' --- the landing of one ride matched
-  against the take-off of the next. \\
-\texttt{max\_ride\_s}            & 120~s &
-  Upper bound on the pair gap; a hard ceiling on ride duration. \\
-\texttt{joint\_r2\_thresh}       & 0.75 &
-  Minimum shared-shape joint $R^2$ for an accepted pair. This is the
-  pair-level analogue of \texttt{r2\_peak\_thresh} but harder to
-  clear: a pair's two lobes must agree on the \emph{same} $(W,f)$
-  template, so mismatched lobes (foot-step take-off plus lift
-  landing) fail here even if each lobe individually cleared the
-  peak-level $R^2$. \\
-\texttt{min\_pair\_abs\_a}       & 0.3~m/s$^2$ &
-  Minimum shared $|A|$ of the accepted pair. Acts as a secondary
-  amplitude floor at pair level. Lower than the peak-level floor
-  because joint fitting already implicitly averages the two lobes. \\
-\bottomrule
-\end{tabular}
-\caption{The detector's eight thresholds and the values we chose for
-them. Each threshold targets a distinct failure mode on the raw
-accelerometer signal; the values were picked by grid search (see
-below).}
-\label{tab:detect-config}
-\end{table}
-
-\paragraph{How the values were picked.} We ran a grid search over the
-six non-kinematic knobs while pinning \texttt{min\_ride\_s}~$=$~10~s
-(shortest plausible floor-to-floor ride) and
-\texttt{max\_ride\_s}~$=$~120~s (upper bound on realistic rides).
-The grid had $2 \times 4 \times 1 \times 3 \times 2 \times 3 = 144$
-combinations. Each combination was scored on all 22 training
-experiments (415 GT rides total) with the composite metric introduced
-in Section~\ref{sec:trapezoid-evaluation}. The winning configuration
-shown in Table~\ref{tab:detect-config} emerged at the top of that
-table and also produced the highest classical F1~@~IoU~$\ge$~0.5 on
-the pooled predictions. Lower thresholds than those listed tended to
-add false positives faster than recall; higher thresholds tipped the
-failure mix into misses. The picked values are at the ``recall
-cliff'' on each axis.
+A useful consequence of widening the interval to
+\eqref{eq:trap-endpoints} is that it tracks the physical take-off and
+landing rather than an internal reference point, so the predicted
+interval aligns naturally with the barometer-based GT labels
+(Section~\ref{sec:barometer-algorithm}) up to the brief door-open tail
+the GT intentionally pads. The evaluator still scores overlap
+fractionally --- a GT and prediction ``match'' if either their absolute
+overlap is at least a second or their overlap covers at least $30\%$
+of the shorter interval --- so a correct-but-tight prediction is not
+penalised for missing the padding.
 
 \subsubsection{Calibrating the Pair Filter by Iteration}
 \label{sec:trapezoid-iterations}
