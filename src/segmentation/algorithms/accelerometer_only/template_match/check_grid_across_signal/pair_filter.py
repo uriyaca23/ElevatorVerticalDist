@@ -31,15 +31,24 @@ from ..fit_elevator_parameters.common import (
 def joint_pair_score(
     a: np.ndarray, t: np.ndarray,
     i1: int, i2: int, s1: float, s2: float,
-) -> tuple[float, float, float, float, float, float] | None:
+) -> tuple[float, float, float, float, float, float, float] | None:
     """Best shared-shape joint mean-R² across the full ``(W, f)`` grid
-    for one pair. Returns ``(score, W, f, A_abs, r2_1, r2_2)`` or
-    ``None`` if the window is unusable.
+    for one pair. Returns
+    ``(score, W, f, A_abs, r2_1, r2_2, heatmap_energy)`` or ``None``
+    if the window is unusable.
+
+    ``heatmap_energy`` is the mean of ``max(joint_R², 0)`` over every
+    valid ``(W, f)`` cell — i.e. how broadly the grid supports the
+    match. A true elevator ride lights up a wide band of templates; a
+    spurious spike matches only a narrow sliver, producing a mostly
+    dark heatmap and low energy.
     """
     n = a.size
     dt = float(np.median(np.diff(t))) if t.size > 1 else 0.01
     best: tuple[float, float, float, float, float, float] | None = None
     best_score = -np.inf
+    grid_score_sum = 0.0
+    grid_cell_count = 0
     for W in GRID_W_S:
         K = max(3, int(round(2 * W / dt)))
         if K % 2 == 0:
@@ -64,19 +73,32 @@ def joint_pair_score(
             u1 = s1 * inner_1
             u2 = s2 * inner_2
             if u1 <= 0 or u2 <= 0:
+                # Cell doesn't support the requested sign pattern —
+                # count it as zero energy, not "missing".
+                grid_score_sum += 0.0
+                grid_cell_count += 1
                 continue
             A_abs = (u1 + u2) / (2.0 * norm_t)
             if A_abs <= 0:
+                grid_score_sum += 0.0
+                grid_cell_count += 1
                 continue
             ss_1 = p1 - 2.0 * A_abs * u1 + A_abs * A_abs * norm_t
             ss_2 = p2 - 2.0 * A_abs * u2 + A_abs * A_abs * norm_t
             r2_1 = 1.0 - ss_1 / p1
             r2_2 = 1.0 - ss_2 / p2
             score = 0.5 * (r2_1 + r2_2)
+            grid_score_sum += score if score > 0.0 else 0.0
+            grid_cell_count += 1
             if score > best_score:
                 best_score = score
                 best = (score, float(W), float(f), A_abs, r2_1, r2_2)
-    return best
+    if best is None:
+        return None
+    heatmap_energy = (
+        grid_score_sum / grid_cell_count if grid_cell_count > 0 else 0.0
+    )
+    return (*best, float(heatmap_energy))
 
 
 def predict_pairs(state: dict, config) -> list[dict]:
@@ -95,7 +117,7 @@ def predict_pairs(state: dict, config) -> list[dict]:
     neg = [i for i in peaks if signs[i] < 0]
 
     candidates: list[
-        tuple[float, int, int, float, float, float, float, float, float]
+        tuple[float, int, int, float, float, float, float, float, float, float]
     ] = []
 
     def _try_pair(i1: int, i2: int, s1: float, s2: float) -> None:
@@ -107,12 +129,16 @@ def predict_pairs(state: dict, config) -> list[dict]:
         res = joint_pair_score(a_smooth, t, i1, i2, s1, s2)
         if res is None:
             return
-        score, W, f, A_abs, r2_1, r2_2 = res
+        score, W, f, A_abs, r2_1, r2_2, heatmap_energy = res
         if score < config.joint_r2_thresh:
             return
         if A_abs < config.min_pair_abs_a:
             return
-        candidates.append((score, i1, i2, s1, W, f, A_abs, r2_1, r2_2))
+        if heatmap_energy < config.heatmap_energy_thresh:
+            return
+        candidates.append(
+            (score, i1, i2, s1, W, f, A_abs, r2_1, r2_2, heatmap_energy)
+        )
 
     for i1 in pos:
         for i2 in neg:
@@ -121,14 +147,28 @@ def predict_pairs(state: dict, config) -> list[dict]:
         for i2 in pos:
             _try_pair(i1, i2, -1.0, +1.0)
 
-    # Greedy conflict resolution — accept pairs in descending score
-    # order, rejecting any that share a lobe with, or overlap in time
-    # with, an already-accepted pair.
-    candidates.sort(key=lambda x: x[0], reverse=True)
+    # Greedy conflict resolution — accept pairs in descending
+    # (score − duration-penalty) order, rejecting any that share a
+    # lobe with, or overlap in time with, an already-accepted pair.
+    #
+    # The duration penalty (λ = 0.01 per second) was chosen by the
+    # pair-filter iteration sweep under ``pair_filter_iterations/`` —
+    # see iter_04_dur_penalty_heavy. It broke the baseline's "super
+    # pair" failure mode, where a take-off from ride 1 and a landing
+    # from ride 6 paired at a high shared-shape R² and swallowed every
+    # GT ride between them. Cost: it biases toward short gaps too far,
+    # which brings in a smaller back-to-back-dwell failure mode (see
+    # the iteration log for next-step ideas — band penalty, min-gap
+    # floor, time-sorted greedy).
+    _DURATION_PENALTY_LAMBDA = 0.01
+    candidates.sort(
+        key=lambda c: c[0] - _DURATION_PENALTY_LAMBDA * float(t[c[2]] - t[c[1]]),
+        reverse=True,
+    )
     used: set[int] = set()
     accepted_ranges: list[tuple[float, float]] = []
     accepted: list[
-        tuple[float, int, int, float, float, float, float, float, float]
+        tuple[float, int, int, float, float, float, float, float, float, float]
     ] = []
     for cand in candidates:
         _score, i1, i2, *_ = cand
@@ -144,16 +184,21 @@ def predict_pairs(state: dict, config) -> list[dict]:
     accepted.sort(key=lambda x: x[1])  # chronological
 
     predictions: list[dict] = []
-    for idx, (score, i1, i2, s1, W, f, A_abs, r2_1, r2_2) in enumerate(accepted):
-        t_start = float(t[i1])
-        t_end = float(t[i2])
+    for idx, (score, i1, i2, s1, W, f, A_abs, r2_1, r2_2, heatmap_energy) in enumerate(accepted):
+        t_c1 = float(t[i1])
+        t_c2 = float(t[i2])
+        # Ride endpoints span the whole trapezoid pulse on each side:
+        # t_start = centre1 − W (take-off pulse left edge), t_end =
+        # centre2 + W (landing pulse right edge).
+        t_start = t_c1 - float(W)
+        t_end = t_c2 + float(W)
         ride_type = "up" if s1 > 0 else "down"
         lobe1 = LobeFit(
-            t_c=t_start, a_peak=float(s1 * A_abs),
+            t_c=t_c1, a_peak=float(s1 * A_abs),
             half_width_s=W, frac_flat=f, r2_local=r2_1,
         )
         lobe2 = LobeFit(
-            t_c=t_end, a_peak=float(-s1 * A_abs),
+            t_c=t_c2, a_peak=float(-s1 * A_abs),
             half_width_s=W, frac_flat=f, r2_local=r2_2,
         )
         predictions.append({
@@ -165,5 +210,6 @@ def predict_pairs(state: dict, config) -> list[dict]:
             "lobe1": asdict(lobe1),
             "lobe2": asdict(lobe2),
             "joint_r2_mean": float(score),
+            "heatmap_energy": float(heatmap_energy),
         })
     return predictions

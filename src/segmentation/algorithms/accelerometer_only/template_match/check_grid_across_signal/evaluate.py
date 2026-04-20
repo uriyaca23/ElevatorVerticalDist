@@ -5,15 +5,19 @@ runs the detector through :func:`detect.predict_intervals` with each
 :class:`~detect.DetectConfig`, and scores via
 :class:`~src.segmentation.algorithms.metrics.IntervalPredictionMetrics`.
 
-Two CLI modes:
+Three CLI modes:
 
     # single run with default config across all train exps
-    venv/bin/python src/.../check_grid_across_signal/evaluate.py
+    venv/bin/python -m src....check_grid_across_signal.evaluate
 
     # sweep — MIN/MAX ride length are pinned per user spec
-    venv/bin/python src/.../check_grid_across_signal/evaluate.py --sweep \\
+    venv/bin/python -m src....check_grid_across_signal.evaluate --sweep \\
         [--min-ride-s 10] [--max-ride-s 120] [--top 20] \\
         [--out results.csv]
+
+    # same, plus persist the winning config to JSON
+    venv/bin/python -m src....check_grid_across_signal.evaluate --sweep \\
+        --save-best elevator_reports/best_detect_config.json
 
 To keep the sweep tractable, we cache the expensive ``(W, f)`` grid
 sweep per experiment and re-run only the fast peak-pick + pair-filter
@@ -24,15 +28,17 @@ from __future__ import annotations
 
 import argparse
 import itertools
+import json
 import sys
 import time
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from src.data.loader import getExperimentData, list_experiments
+from src.data.loader import list_experiments
+from src.data.loader import getExperimentData
 from src.segmentation.algorithms.metrics import IntervalPredictionMetrics
 
 from . import detect, pair_filter
@@ -113,9 +119,17 @@ def _rerun_peaks(state: dict, cfg: DetectConfig) -> dict:
 
 def evaluate_config(
     exps: list[dict], cfg: DetectConfig,
-) -> tuple[IntervalPredictionMetrics, list[tuple[str, IntervalPredictionMetrics]]]:
-    """Score ``cfg`` over all cached experiments. Returns ``(total, per_exp)``."""
+) -> tuple[IntervalPredictionMetrics, list[tuple[str, IntervalPredictionMetrics]], dict[str, float]]:
+    """Score ``cfg`` over all cached experiments.
+
+    Returns ``(total, per_exp, iou_metrics)``. ``iou_metrics`` holds the
+    classical F1 @ IoU ≥ 0.5 computed over *all* GT/pred pairs pooled
+    across experiments — useful to compare the detector against external
+    temporal-detection baselines.
+    """
     per_exp: list[tuple[str, IntervalPredictionMetrics]] = []
+    pooled_gt: list[dict] = []
+    pooled_pred: list[dict] = []
     for e in exps:
         state = _rerun_peaks(e["state"], cfg)
         preds = pair_filter.predict_pairs(state, cfg)
@@ -123,20 +137,37 @@ def evaluate_config(
             e["name"],
             IntervalPredictionMetrics.from_intervals(e["gt_rides"], preds),
         ))
+        # Offset each exp's time axis so pairs from different exps can
+        # never accidentally match in the pooled IoU calculation.
+        offset = (len(pooled_gt) + len(pooled_pred)) * 1e6 + 1e9
+        pooled_gt.extend({**g, "t_start_s": g["t_start_s"] + offset,
+                          "t_end_s":   g["t_end_s"]   + offset} for g in e["gt_rides"])
+        pooled_pred.extend({"t_start_s": p["t_start_s"] + offset,
+                            "t_end_s":   p["t_end_s"]   + offset} for p in preds)
     total = IntervalPredictionMetrics.sum(m for _, m in per_exp)
-    return total, per_exp
+    iou_metrics = IntervalPredictionMetrics.iou_f1(pooled_gt, pooled_pred, iou_threshold=0.5)
+    return total, per_exp, iou_metrics
 
 
 # --------------------------------------------------------------------------
 # Sweep grid — MIN/MAX ride length are pinned; the rest vary.
 # --------------------------------------------------------------------------
+# Focused grid — 2 × 4 × 1 × 3 × 2 × 3 = 144 combos. We saw a wall-
+# clock cost of ~30 s per combo on 22 cached experiments (pair filter
+# over the full (W, f) template grid dominates), so the sweep finishes
+# in ~75 minutes. Values chosen to bracket the known-important knobs:
+#  - `min_peak_abs_a`     — principal FP lever for pedestrian motion.
+#  - `joint_r2_thresh`    — shape-agreement gate on pair side.
+#  - `same_sign_min_gap_s`— too short and the filter keeps doublet lobes,
+#                           too long and it kills back-to-back rides.
+# Coarser on the other three; NMS radius is fixed.
 DEFAULT_GRID: dict[str, list[float]] = {
-    "r2_peak_thresh":      [0.75, 0.80, 0.85],
-    "min_peak_abs_a":      [0.3, 0.5, 0.7],
+    "r2_peak_thresh":      [0.75, 0.85],
+    "min_peak_abs_a":      [0.3, 0.5, 0.7, 0.9],
     "nms_radius_s":        [0.5],
-    "same_sign_min_gap_s": [15.0, 20.0, 30.0],
-    "joint_r2_thresh":     [0.70, 0.75, 0.80, 0.85],
-    "min_pair_abs_a":      [0.3, 0.5],
+    "same_sign_min_gap_s": [5.0, 15.0, 25.0],
+    "joint_r2_thresh":     [0.75, 0.85],
+    "min_pair_abs_a":      [0.3, 0.5, 0.7],
 }
 
 
@@ -163,19 +194,20 @@ def run_sweep(
     rows: list[dict] = []
     t0 = time.time()
     for i, cfg in enumerate(configs):
-        total, _ = evaluate_config(exps, cfg)
-        rows.append({**cfg.__dict__, **total.as_dict()})
+        total, _, iou = evaluate_config(exps, cfg)
+        rows.append({**cfg.__dict__, **total.as_dict(), **iou})
         if (i + 1) % 10 == 0 or i == 0 or i == len(configs) - 1:
             r = total.rates()
             print(
-                f"  [{i + 1:4d}/{len(configs)}] "
-                f"f1={r['f1_like']:.3f}  clean={total.clean}  "
-                f"miss={total.missed}  merge={total.pred_merged}  "
-                f"fp={total.fp}  ({time.time() - t0:.1f}s)"
+                f"  [{i + 1:5d}/{len(configs)}] "
+                f"f1={r['f1_like']:.3f}  iou_f1={iou['iou_f1@0.5']:.3f}  "
+                f"clean={total.clean}  miss={total.missed}  "
+                f"merge={total.pred_merged}  fp={total.fp}  "
+                f"({time.time() - t0:.1f}s)", flush=True,
             )
     return (
         pd.DataFrame(rows)
-        .sort_values("f1_like", ascending=False)
+        .sort_values(["f1_like", "iou_f1@0.5"], ascending=[False, False])
         .reset_index(drop=True)
     )
 
@@ -232,6 +264,9 @@ def main() -> int:
                         help="print this many top configs at end of sweep")
     parser.add_argument("--out", type=Path,
                         help="optional CSV path for full sweep results")
+    parser.add_argument("--save-best", type=Path,
+                        help="write the winning DetectConfig + metrics as "
+                             "JSON so downstream code can load it")
     args = parser.parse_args()
 
     names = [args.only] if args.only else list_experiments(kind=args.kind)
@@ -251,9 +286,13 @@ def main() -> int:
             min_ride_s=args.min_ride_s, max_ride_s=args.max_ride_s,
         )
         print(f"\nrunning once with config = {cfg}")
-        total, per_exp = evaluate_config(exps, cfg)
+        total, per_exp, iou = evaluate_config(exps, cfg)
         _print_per_exp(per_exp)
         _print_totals(total)
+        print(f"IOU   : f1@0.5={iou['iou_f1@0.5']:.3f}  "
+              f"p@0.5={iou['iou_precision@0.5']:.3f}  "
+              f"r@0.5={iou['iou_recall@0.5']:.3f}  "
+              f"mean_iou={iou['iou_mean@0.5']:.3f}")
         return 0
 
     print(f"\nsweeping (min_ride_s={args.min_ride_s}, "
@@ -279,14 +318,30 @@ def main() -> int:
     })
     print(f"\nBest config: {best_cfg}")
     print("Per-exp breakdown:")
-    total, per_exp = evaluate_config(exps, best_cfg)
+    total, per_exp, iou = evaluate_config(exps, best_cfg)
     _print_per_exp(per_exp)
     _print_totals(total)
+    print(f"IOU   : f1@0.5={iou['iou_f1@0.5']:.3f}  "
+          f"p@0.5={iou['iou_precision@0.5']:.3f}  "
+          f"r@0.5={iou['iou_recall@0.5']:.3f}  "
+          f"mean_iou={iou['iou_mean@0.5']:.3f}")
 
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(args.out, index=False)
         print(f"\nwrote full sweep results → {args.out}")
+
+    if args.save_best:
+        args.save_best.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "config": asdict(best_cfg),
+            "metrics": {**total.as_dict(), **iou},
+            "grid": DEFAULT_GRID,
+            "n_experiments": len(exps),
+            "kind": args.kind,
+        }
+        args.save_best.write_text(json.dumps(payload, indent=2))
+        print(f"wrote best config → {args.save_best}")
 
     return 0
 

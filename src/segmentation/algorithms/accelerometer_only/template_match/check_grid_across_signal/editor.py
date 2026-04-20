@@ -160,6 +160,8 @@ class PredictionEditor(tk.Tk):
         self.exp_combo.pack(side=tk.LEFT, padx=6)
         ttk.Button(top, text="Load", command=self.load_experiment)\
             .pack(side=tk.LEFT)
+        ttk.Button(top, text="Copy name", command=self._copy_exp_name)\
+            .pack(side=tk.LEFT, padx=(4, 0))
 
         # Zoom / pan nav (same buttons as gt_editor.py).
         nav = ttk.Frame(top)
@@ -337,6 +339,16 @@ class PredictionEditor(tk.Tk):
 
     def _populate_experiments(self):
         self.exp_combo["values"] = list_experiments(RAW_DATA_ROOT)
+
+    def _copy_exp_name(self):
+        name = self.exp_var.get()
+        if not name:
+            self.status_var.set("No experiment name to copy.")
+            return
+        self.clipboard_clear()
+        self.clipboard_append(name)
+        self.update()
+        self.status_var.set(f"Copied: {name}")
 
     def load_experiment(self):
         name = self.exp_var.get()
@@ -773,7 +785,8 @@ class PredictionEditor(tk.Tk):
             f"R²={pred['lobe2']['r2_local']:.3f}\n"
             f"  shared W={W_star:.2f}s  f={f_star:.2f}  "
             f"|A|={abs(pred['lobe1']['a_peak']):.2f}\n"
-            f"  joint mean R²={pred['joint_r2_mean']:.3f}"
+            f"  joint mean R²={pred['joint_r2_mean']:.3f}  "
+            f"heatmap_energy={pred.get('heatmap_energy', float('nan')):.3f}"
         )
 
     def _render_detail_for_gt(self, t_lo: float, t_hi: float,

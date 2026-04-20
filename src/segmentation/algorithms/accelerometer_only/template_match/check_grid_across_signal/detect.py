@@ -57,10 +57,15 @@ class DetectConfig:
 
     Pair-filter (stages 5–6, :mod:`pair_filter`):
 
-    * ``min_ride_s``       min (take-off → landing) gap of a ride.
-    * ``max_ride_s``       max gap — any longer and we reject the pair.
-    * ``joint_r2_thresh``  min shared-shape joint R² to accept a pair.
-    * ``min_pair_abs_a``   min shared |A| of the accepted pair.
+    * ``min_ride_s``             min (take-off → landing) gap of a ride.
+    * ``max_ride_s``             max gap — any longer and we reject the pair.
+    * ``joint_r2_thresh``        min shared-shape joint R² to accept a pair.
+    * ``min_pair_abs_a``         min shared |A| of the accepted pair.
+    * ``heatmap_energy_thresh``  min pair heatmap energy — the mean of
+                                 clamped joint R² across the full (W, f)
+                                 grid. Rejects pairs where only a narrow
+                                 sliver of the grid supports the match
+                                 (mostly-dark heatmaps in the editor UI).
     """
     r2_peak_thresh: float = 0.80
 
@@ -68,14 +73,15 @@ class DetectConfig:
 
     nms_radius_s: float = 0.5
 
-    
+
     same_sign_min_gap_s: float = 3
     min_ride_s: float = 0.0
     max_ride_s: float = 120.0
-    
-    
+
+
     joint_r2_thresh: float = 0.75
     min_pair_abs_a: float = 0.5
+    heatmap_energy_thresh: float = 0.30
 
 
 DEFAULT_CONFIG = DetectConfig()
@@ -474,7 +480,7 @@ def diagnose_window(
                     "  pair: joint fit unavailable (window too short or no sign match)."
                 )
             else:
-                score, W, f, A_abs, r2_1, r2_2 = res
+                score, W, f, A_abs, r2_1, r2_2, heatmap_energy = res
                 flags = []
                 if not (cfg.min_ride_s <= gap <= cfg.max_ride_s):
                     flags.append(
@@ -489,11 +495,18 @@ def diagnose_window(
                     flags.append(
                         f"pair |A|={A_abs:.2f} < {cfg.min_pair_abs_a:.2f}"
                     )
+                if not (heatmap_energy >= cfg.heatmap_energy_thresh):
+                    flags.append(
+                        f"heatmap energy={heatmap_energy:.3f} < "
+                        f"{cfg.heatmap_energy_thresh:.3f}"
+                    )
                 ok = "accepted" if not flags else "rejected"
                 reasons = "; ".join(flags) if flags else "all thresholds pass"
                 lines.append(
                     f"  pair: gap={gap:.1f}s  W={W:.2f}  f={f:.2f}  "
-                    f"|A|={A_abs:.2f}  R²={score:.3f}  [{ok}: {reasons}]"
+                    f"|A|={A_abs:.2f}  R²={score:.3f}  "
+                    f"heatmap_energy={heatmap_energy:.3f}  "
+                    f"[{ok}: {reasons}]"
                 )
                 pair_info = {
                     "i1": int(i1), "i2": int(i2),
@@ -502,6 +515,7 @@ def diagnose_window(
                     "A_abs": float(A_abs),
                     "r2_1": float(r2_1), "r2_2": float(r2_2),
                     "joint_r2_mean": float(score),
+                    "heatmap_energy": float(heatmap_energy),
                     "gap_s": gap,
                     "reject_flags": flags,
                 }

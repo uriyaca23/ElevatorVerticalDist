@@ -1,12 +1,32 @@
 """Segmentation evaluation metrics.
 
-:class:`SegmentationMetrics` bundles the metrics used across training and
+Two classes, chosen by the caller's schema:
+
+:class:`SegmentationMetrics` — CI-based schema (``start_ci``, ``end_ci``
+DataFrame columns). Bundles the metrics used across training and
 evaluation so call sites don't reimplement them:
 
-- IoU matching between predicted and GT segments (with detection F1 @ IoU >= t)
-- Expected Calibration Error (Guo et al. 2017)
-- Brier score (Brier 1950)
-- Empirical coverage of probability-CI and edge-time-CI intervals
+- Containment and IoU matching between predicted and GT segments
+  (with detection F1 @ IoU >= t).
+- Expected Calibration Error (Guo et al. 2017).
+- Brier score (Brier 1950).
+- Empirical coverage of probability-CI and edge-time-CI intervals.
+
+:class:`IntervalPredictionMetrics` — dict schema (``t_start_s``,
+``t_end_s``). Consumed by the trapezoid detector's evaluator in
+``check_grid_across_signal/evaluate.py``. Counts four distinct failure
+modes so a sweep can tell a merge-driven regression apart from a
+false-positive-driven one:
+
+- ``missed``      / ``fp``           — lone unmatched GTs / preds.
+- ``pred_merged`` / ``gt_merged``    — one pred swallowing ≥2 GTs.
+- ``gt_split``    / ``pred_split_part`` — one GT covered by ≥2 preds.
+
+plus ``clean`` for one-to-one matches. Both an overlap-based score (see
+:meth:`IntervalPredictionMetrics.score`) and the classical
+IoU-threshold F1 (:meth:`IntervalPredictionMetrics.iou_f1`) are
+available so results are comparable with external temporal-detection
+work.
 """
 
 from __future__ import annotations
@@ -426,4 +446,65 @@ class IntervalPredictionMetrics:
             "fp": self.fp, "pred_merged": self.pred_merged,
             "pred_split_part": self.pred_split_part,
             **self.rates(),
+        }
+
+    # ---- IoU-threshold F1 — comparability with external work ----
+
+    @staticmethod
+    def iou_f1(
+        gt_rides: list[dict], predictions: list[dict],
+        iou_threshold: float = 0.5,
+    ) -> dict[str, float]:
+        """F1 at IoU ≥ ``iou_threshold`` — the PASCAL VOC / COCO /
+        ActivityNet standard detection metric.
+
+        Greedy best-IoU-per-GT matching: for each GT (processed in order
+        of its best-available IoU, descending), claim the unmatched
+        prediction with the highest IoU and accept the pair iff that
+        IoU ≥ threshold. Unmatched preds → FP; unmatched GTs → FN.
+
+        Returns precision / recall / F1 / mean-IoU-over-matched-pairs
+        (and the raw TP/FP/FN counts) at the requested threshold. This
+        is complementary to :meth:`score` — it tells you how well the
+        detector places interval edges, whereas :meth:`score` tells you
+        which categorical failure modes dominate.
+        """
+        p_iv = [(p["t_start_s"], p["t_end_s"]) for p in predictions]
+        g_iv = [(g["t_start_s"], g["t_end_s"]) for g in gt_rides]
+        used = [False] * len(p_iv)
+        order = sorted(
+            range(len(g_iv)),
+            key=lambda j: max((iou(p, g_iv[j]) for p in p_iv), default=0.0),
+            reverse=True,
+        )
+        tp = 0
+        fn = 0
+        matched_ious: list[float] = []
+        for j in order:
+            g = g_iv[j]
+            best_i, best_iou = -1, 0.0
+            for i, p in enumerate(p_iv):
+                if used[i]:
+                    continue
+                v = iou(p, g)
+                if v > best_iou:
+                    best_iou, best_i = v, i
+            if best_i >= 0 and best_iou >= iou_threshold:
+                used[best_i] = True
+                tp += 1
+                matched_ious.append(best_iou)
+            else:
+                fn += 1
+        fp = sum(1 for u in used if not u)
+        precision = tp / (tp + fp) if (tp + fp) else 0.0
+        recall = tp / (tp + fn) if (tp + fn) else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+        return {
+            f"iou_f1@{iou_threshold:g}":       f1,
+            f"iou_precision@{iou_threshold:g}":precision,
+            f"iou_recall@{iou_threshold:g}":   recall,
+            f"iou_mean@{iou_threshold:g}":     float(np.mean(matched_ious)) if matched_ious else 0.0,
+            f"iou_tp@{iou_threshold:g}":       tp,
+            f"iou_fp@{iou_threshold:g}":       fp,
+            f"iou_fn@{iou_threshold:g}":       fn,
         }

@@ -56,9 +56,18 @@ CONTEXT_PAD_MIN_S = 0.5
 SMOOTH_SEC = 0.4
 TYPE_COLORS = {"up": "#27ae60", "down": "#e74c3c"}
 
-# 30 × 15 = 450 templates. Ample vs. the signal's resolving power at 100 Hz.
-GRID_W_S = np.linspace(0.4, 3.0, 30)
-GRID_F = np.linspace(0.0, 0.80, 15)
+# (W, f) trapezoid-template grid — 30 × 15 = 450 templates, sampled
+# densely vs. the signal's resolving power at 100 Hz. Both axes start at
+# physically-motivated floors (not zero): W_MIN is just below the
+# half-jerk-ramp duration T_j for commercial lifts, and F_MIN excludes
+# the degenerate triangular-pulse case where the cabin never reaches
+# a_max cruise.
+W_MIN_S = 0.4
+W_MAX_S = 3.0
+F_MIN = 0.05
+F_MAX = 0.80
+GRID_W_S = np.linspace(W_MIN_S, W_MAX_S, 30)
+GRID_F = np.linspace(F_MIN, F_MAX, 15)
 
 # Each lobe's search region expressed as fractions of the GT ride duration
 # measured from ``gt_t0``. Small overlap so lobes near the midpoint are
