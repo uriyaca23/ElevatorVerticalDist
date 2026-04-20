@@ -61,7 +61,7 @@ from src.data.loader import (  # noqa: E402
     list_experiments,
 )
 from src.segmentation.algorithms.accelerometer_only.template_match.fit_elevator_parameters.common import (  # noqa: E402
-    GRID_W_S, GRID_F, SMOOTH_SEC, trapezoid_kernel,
+    SMOOTH_SEC, trapezoid_kernel,
     _estimate_fs_hz, _vertical_accel, _smooth,
 )
 from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E402
@@ -698,9 +698,11 @@ class PredictionEditor(tk.Tk):
 
     def _draw_heatmap(self, ax, heat: np.ndarray, title: str,
                       mark_W: float | None = None, mark_f: float | None = None):
+        grid_w_s = self._state["grid_w_s"] if self._state else _detect.DEFAULT_CONFIG.grid_w_s()
+        grid_f   = self._state["grid_f"]   if self._state else _detect.DEFAULT_CONFIG.grid_f()
         im = ax.imshow(
             heat, origin="lower", aspect="auto",
-            extent=(GRID_F[0], GRID_F[-1], GRID_W_S[0], GRID_W_S[-1]),
+            extent=(grid_f[0], grid_f[-1], grid_w_s[0], grid_w_s[-1]),
             cmap="viridis", vmin=0.0, vmax=1.0,
         )
         if mark_W is not None and mark_f is not None:
@@ -724,8 +726,10 @@ class PredictionEditor(tk.Tk):
         i1 = int(np.argmin(np.abs(t - t_c1)))
         i2 = int(np.argmin(np.abs(t - t_c2)))
 
-        heat1 = _detect.heatmap_at(a_smooth, t, i1)
-        heat2 = _detect.heatmap_at(a_smooth, t, i2)
+        grid_w_s = self._state["grid_w_s"]
+        grid_f = self._state["grid_f"]
+        heat1 = _detect.heatmap_at(a_smooth, t, i1, grid_w_s, grid_f)
+        heat2 = _detect.heatmap_at(a_smooth, t, i2, grid_w_s, grid_f)
 
         self.detail_fig.clear()
         gs = self.detail_fig.add_gridspec(
@@ -821,7 +825,10 @@ class PredictionEditor(tk.Tk):
                 ax.set_title(f"{label} lobe — n/a", fontsize=9)
                 return
             i, A, _r2 = peak
-            heat = _detect.heatmap_at(a_smooth, t, i)
+            heat = _detect.heatmap_at(
+                a_smooth, t, i,
+                self._state["grid_w_s"], self._state["grid_f"],
+            )
             self._draw_heatmap(ax, heat, f"{label} @ t={t[i]:.1f}s  A={A:+.2f}")
 
         _plot_for(ax_h1, pos, "+")

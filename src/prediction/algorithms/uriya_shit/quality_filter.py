@@ -22,25 +22,17 @@ def estimate_gravity_vector(ax, ay, az, fs=100, window_sec=0.5):
     win = max(10, int(fs * window_sec))
     n_windows = max(1, n // win)
 
-    gx_list, gy_list, gz_list, std_list = [], [], [], []
+    gx_list, gy_list, gz_list = [], [], []
     for i in range(n_windows):
         s = i * win
         e = min(s + win, n)
         gx_list.append(np.mean(ax[s:e]))
         gy_list.append(np.mean(ay[s:e]))
         gz_list.append(np.mean(az[s:e]))
-        std_list.append(np.std(ax[s:e]) + np.std(ay[s:e]) + np.std(az[s:e]))
 
-    # Per-axis median over all windows breaks when orientation changes
-    # mid-recording: medians drawn from different orientations compose
-    # into a non-gravity vector with |g| far from 9.81. Restrict to the
-    # most-stationary 20% of windows — they share the dominant resting
-    # orientation, so per-axis median on the subset recovers |g|.
-    std_arr = np.asarray(std_list)
-    keep = std_arr <= np.quantile(std_arr, 0.2)
-    gx = np.median(np.asarray(gx_list)[keep])
-    gy = np.median(np.asarray(gy_list)[keep])
-    gz = np.median(np.asarray(gz_list)[keep])
+    gx = np.median(gx_list)
+    gy = np.median(gy_list)
+    gz = np.median(gz_list)
     gvec = np.array([gx, gy, gz])
     g_mag = np.linalg.norm(gvec)
     

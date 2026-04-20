@@ -32,7 +32,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..fit_elevator_parameters.common import (
-    GRID_W_S, GRID_F, SMOOTH_SEC,
+    SMOOTH_SEC,
     match_one_template, trapezoid_kernel,
     _estimate_fs_hz, _vertical_accel, _smooth,
     getExperimentData, list_experiments,
@@ -66,6 +66,14 @@ class DetectConfig:
                                  grid. Rejects pairs where only a narrow
                                  sliver of the grid supports the match
                                  (mostly-dark heatmaps in the editor UI).
+
+    ``(W, f)`` trapezoid-template grid (used by detection, pair filter
+    and heatmap visualisation). ``grid_w_s()`` / ``grid_f()`` build the
+    linspaces on demand — sweep by overriding these on the config, not
+    by patching :mod:`..fit_elevator_parameters.common`.
+
+    * ``w_min_s`` / ``w_max_s`` / ``n_w``  bounds + count of the half-width axis.
+    * ``f_min`` / ``f_max`` / ``n_f``      bounds + count of the flat-fraction axis.
     """
     r2_peak_thresh: float = 0.80
 
@@ -83,6 +91,19 @@ class DetectConfig:
     min_pair_abs_a: float = 0.5
     heatmap_energy_thresh: float = 0.30
 
+    w_min_s: float = 0.4
+    w_max_s: float = 3.0
+    n_w: int = 30
+    f_min: float = 0.05
+    f_max: float = 0.80
+    n_f: int = 15
+
+    def grid_w_s(self) -> np.ndarray:
+        return np.linspace(self.w_min_s, self.w_max_s, self.n_w)
+
+    def grid_f(self) -> np.ndarray:
+        return np.linspace(self.f_min, self.f_max, self.n_f)
+
 
 DEFAULT_CONFIG = DetectConfig()
 
@@ -91,7 +112,10 @@ DEFAULT_CONFIG = DetectConfig()
 # Detection — stages 1–4
 # --------------------------------------------------------------------------
 
-def _sweep_best_template(a: np.ndarray, t: np.ndarray):
+def _sweep_best_template(
+    a: np.ndarray, t: np.ndarray,
+    grid_w_s: np.ndarray, grid_f: np.ndarray,
+):
     """Per-sample argmax over the full ``(W, f)`` grid.
 
     Returns ``(best_r2, best_A, best_W_idx, best_f_idx, best_pos_r2,
@@ -111,8 +135,8 @@ def _sweep_best_template(a: np.ndarray, t: np.ndarray):
     best_pos_A = np.zeros(n)
     best_neg_r2 = np.full(n, -np.inf)
     best_neg_A = np.zeros(n)
-    for wi, W in enumerate(GRID_W_S):
-        for fi, f in enumerate(GRID_F):
+    for wi, W in enumerate(grid_w_s):
+        for fi, f in enumerate(grid_f):
             scan = match_one_template(a, t, float(W), float(f))
             r2 = scan.r2_local
             A = scan.A_hat
@@ -208,9 +232,12 @@ def detect(acc, config: DetectConfig = DEFAULT_CONFIG) -> dict | None:
     a_vert = _vertical_accel(ax_, ay_, az_, fs)
     a_smooth = _smooth(a_vert, fs, SMOOTH_SEC)
 
+    grid_w_s = config.grid_w_s()
+    grid_f = config.grid_f()
+
     (best_r2, best_A, best_W_idx, best_f_idx,
      best_pos_r2, best_pos_A, best_neg_r2, best_neg_A) = _sweep_best_template(
-        a_smooth, t,
+        a_smooth, t, grid_w_s, grid_f,
     )
 
     nms_samples = max(1, int(round(config.nms_radius_s * fs)))
@@ -240,6 +267,8 @@ def detect(acc, config: DetectConfig = DEFAULT_CONFIG) -> dict | None:
         "signs": signs,
         "initial_peaks": initial_peaks,
         "final_peaks": final_peaks,
+        "grid_w_s": grid_w_s,
+        "grid_f": grid_f,
         "config": config,
     }
 
@@ -274,16 +303,29 @@ def predict_intervals(
 # numpy over :func:`detect` state; no Tk / matplotlib dependencies.
 # --------------------------------------------------------------------------
 
-def heatmap_at(a: np.ndarray, t: np.ndarray, i_center: int) -> np.ndarray:
+def heatmap_at(
+    a: np.ndarray, t: np.ndarray, i_center: int,
+    grid_w_s: np.ndarray | None = None,
+    grid_f: np.ndarray | None = None,
+) -> np.ndarray:
     """``(nW, nF)`` local R² of every ``(W, f)`` template at sample
     ``i_center``. NaN cells = template window falls off the signal or
     local signal power is zero. Used to render the detail-panel
-    heatmap in the editor."""
+    heatmap in the editor.
+
+    ``grid_w_s`` / ``grid_f`` default to :data:`DEFAULT_CONFIG`'s grid
+    so external callers without a config still work; the editor and
+    dump-mistakes pipelines pass the grid the detector actually used
+    (``state["grid_w_s"]`` / ``state["grid_f"]``)."""
+    if grid_w_s is None:
+        grid_w_s = DEFAULT_CONFIG.grid_w_s()
+    if grid_f is None:
+        grid_f = DEFAULT_CONFIG.grid_f()
     dt = float(np.median(np.diff(t))) if t.size > 1 else 0.01
     n = a.size
-    nW, nF = len(GRID_W_S), len(GRID_F)
+    nW, nF = len(grid_w_s), len(grid_f)
     out = np.full((nW, nF), np.nan)
-    for wi, W in enumerate(GRID_W_S):
+    for wi, W in enumerate(grid_w_s):
         K = max(3, int(round(2 * W / dt)))
         if K % 2 == 0:
             K += 1
@@ -295,7 +337,7 @@ def heatmap_at(a: np.ndarray, t: np.ndarray, i_center: int) -> np.ndarray:
         if p < 1e-9:
             continue
         t_k = (np.arange(K) - half) * dt
-        for fi, f in enumerate(GRID_F):
+        for fi, f in enumerate(grid_f):
             tpl = trapezoid_kernel(t_k, 0.0, float(W), float(f))
             norm_t = float(np.dot(tpl, tpl))
             if norm_t < 1e-9:
@@ -474,7 +516,11 @@ def diagnose_window(
             lines.append("  pair: requested lobes are not in chronological order.")
         else:
             gap = float(t[i2] - t[i1])
-            res = pair_filter.joint_pair_score(a_smooth, t, i1, i2, s1, s2)
+            res = pair_filter.joint_pair_score(
+                a_smooth, t, i1, i2, s1, s2,
+                state.get("grid_w_s", cfg.grid_w_s()),
+                state.get("grid_f", cfg.grid_f()),
+            )
             if res is None:
                 lines.append(
                     "  pair: joint fit unavailable (window too short or no sign match)."

@@ -62,10 +62,10 @@ TYPE_COLORS = {"up": "#27ae60", "down": "#e74c3c"}
 # half-jerk-ramp duration T_j for commercial lifts, and F_MIN excludes
 # the degenerate triangular-pulse case where the cabin never reaches
 # a_max cruise.
-W_MIN_S = 0.4
+W_MIN_S = 0
 W_MAX_S = 3.0
-F_MIN = 0.05
-F_MAX = 0.80
+F_MIN = 0.01
+F_MAX = 0.
 GRID_W_S = np.linspace(W_MIN_S, W_MAX_S, 30)
 GRID_F = np.linspace(F_MIN, F_MAX, 15)
 
@@ -114,10 +114,20 @@ def _estimate_fs_hz(ts_ms: np.ndarray, default: float = 100.0) -> float:
     return default if dt_ms <= 0 else 1000.0 / dt_ms
 
 
+_DETREND_SEC = 8.0
+
+
 def _vertical_accel(ax: np.ndarray, ay: np.ndarray, az: np.ndarray, fs: float) -> np.ndarray:
     gvec, g_mag, _stab = estimate_gravity_vector(ax, ay, az, fs=fs, window_sec=0.5)
     g_hat = gvec / (np.linalg.norm(gvec) + 1e-12)
-    return ax * g_hat[0] + ay * g_hat[1] + az * g_hat[2] - g_mag
+    a = ax * g_hat[0] + ay * g_hat[1] + az * g_hat[2] - g_mag
+    # DC-detrend: a single global ``g_hat`` can't cancel gravity when the
+    # phone's orientation during rides differs from the calibration window.
+    # Subtracting a slow rolling mean removes the residual bias without
+    # eating sub-second ride lobes.
+    w = max(3, int(round(_DETREND_SEC * fs)))
+    dc = pd.Series(a).rolling(w, center=True, min_periods=1).mean().to_numpy()
+    return a - dc
 
 
 def trapezoid_kernel(t: np.ndarray, t_c: float, W: float, frac_flat: float) -> np.ndarray:

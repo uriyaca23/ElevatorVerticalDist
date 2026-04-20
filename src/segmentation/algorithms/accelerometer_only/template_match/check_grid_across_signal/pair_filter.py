@@ -24,13 +24,15 @@ from dataclasses import asdict
 import numpy as np
 
 from ..fit_elevator_parameters.common import (
-    GRID_W_S, GRID_F, LobeFit, trapezoid_kernel,
+    LobeFit, trapezoid_kernel,
 )
 
 
 def joint_pair_score(
     a: np.ndarray, t: np.ndarray,
     i1: int, i2: int, s1: float, s2: float,
+    grid_w_s: np.ndarray | None = None,
+    grid_f: np.ndarray | None = None,
 ) -> tuple[float, float, float, float, float, float, float] | None:
     """Best shared-shape joint mean-R² across the full ``(W, f)`` grid
     for one pair. Returns
@@ -42,14 +44,25 @@ def joint_pair_score(
     match. A true elevator ride lights up a wide band of templates; a
     spurious spike matches only a narrow sliver, producing a mostly
     dark heatmap and low energy.
+
+    ``grid_w_s`` / ``grid_f`` default to :data:`detect.DEFAULT_CONFIG`'s
+    grid so external callers (dump-mistakes, editor, diagnose_window)
+    without a config still work. :func:`predict_pairs` passes the grid
+    the detector actually used.
     """
+    if grid_w_s is None or grid_f is None:
+        from .detect import DEFAULT_CONFIG
+        if grid_w_s is None:
+            grid_w_s = DEFAULT_CONFIG.grid_w_s()
+        if grid_f is None:
+            grid_f = DEFAULT_CONFIG.grid_f()
     n = a.size
     dt = float(np.median(np.diff(t))) if t.size > 1 else 0.01
     best: tuple[float, float, float, float, float, float] | None = None
     best_score = -np.inf
     grid_score_sum = 0.0
     grid_cell_count = 0
-    for W in GRID_W_S:
+    for W in grid_w_s:
         K = max(3, int(round(2 * W / dt)))
         if K % 2 == 0:
             K += 1
@@ -63,7 +76,7 @@ def joint_pair_score(
         if p1 < 1e-9 or p2 < 1e-9:
             continue
         t_k = (np.arange(K) - half) * dt
-        for f in GRID_F:
+        for f in grid_f:
             tpl = trapezoid_kernel(t_k, 0.0, float(W), float(f))
             norm_t = float(np.sum(tpl * tpl))
             if norm_t < 1e-9:
@@ -112,6 +125,14 @@ def predict_pairs(state: dict, config) -> list[dict]:
     a_smooth = state["a_smooth"]
     peaks = state["final_peaks"]
     signs = state["signs"]
+    # Reuse the grid the detector built; fall back to config if the
+    # state came from an older caller that didn't store it.
+    grid_w_s = state.get("grid_w_s")
+    if grid_w_s is None:
+        grid_w_s = config.grid_w_s()
+    grid_f = state.get("grid_f")
+    if grid_f is None:
+        grid_f = config.grid_f()
 
     pos = [i for i in peaks if signs[i] > 0]
     neg = [i for i in peaks if signs[i] < 0]
@@ -126,7 +147,7 @@ def predict_pairs(state: dict, config) -> list[dict]:
         gap = t[i2] - t[i1]
         if gap < config.min_ride_s or gap > config.max_ride_s:
             return
-        res = joint_pair_score(a_smooth, t, i1, i2, s1, s2)
+        res = joint_pair_score(a_smooth, t, i1, i2, s1, s2, grid_w_s, grid_f)
         if res is None:
             return
         score, W, f, A_abs, r2_1, r2_2, heatmap_energy = res

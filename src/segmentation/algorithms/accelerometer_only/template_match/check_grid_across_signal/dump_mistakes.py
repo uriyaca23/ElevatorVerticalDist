@@ -41,7 +41,7 @@ import pandas as pd
 
 from src.data.loader import list_experiments, getExperimentData
 from src.segmentation.algorithms.accelerometer_only.template_match.fit_elevator_parameters.common import (
-    GRID_W_S, GRID_F, trapezoid_kernel,
+    trapezoid_kernel,
 )
 from . import detect, pair_filter
 
@@ -140,10 +140,10 @@ _STATUS_COLORS = {
 }
 
 
-def _draw_heatmap(ax, heat, title, mark_W=None, mark_f=None):
+def _draw_heatmap(ax, heat, title, grid_w_s, grid_f, mark_W=None, mark_f=None):
     im = ax.imshow(
         heat, origin="lower", aspect="auto",
-        extent=(GRID_F[0], GRID_F[-1], GRID_W_S[0], GRID_W_S[-1]),
+        extent=(grid_f[0], grid_f[-1], grid_w_s[0], grid_w_s[-1]),
         cmap="viridis", vmin=0.0, vmax=1.0,
     )
     if mark_W is not None and mark_f is not None:
@@ -214,6 +214,8 @@ def render_mistake_figure(
     t = state["t"]
     a_vert = state["a_vert"]
     a_smooth = state["a_smooth"]
+    grid_w_s = state["grid_w_s"]
+    grid_f = state["grid_f"]
 
     fig = plt.figure(figsize=(12, 8.5))
     gs = fig.add_gridspec(
@@ -234,10 +236,11 @@ def render_mistake_figure(
             ax.set_title(f"{sign_label} lobe — n/a", fontsize=9)
             return
         i, A, r2 = peak
-        heat = detect.heatmap_at(a_smooth, t, i)
+        heat = detect.heatmap_at(a_smooth, t, i, grid_w_s, grid_f)
         _draw_heatmap(
             ax, heat,
             f"{sign_label} lobe @ t={t[i]:.1f}s  A={A:+.2f}  R²={r2:.2f}",
+            grid_w_s, grid_f,
             mark_W=pair_W, mark_f=pair_f,
         )
 
@@ -346,6 +349,7 @@ def dump_for_experiment(name, cfg, out_root):
                 res = pair_filter.joint_pair_score(
                     state["a_smooth"], state["t"],
                     first[0], second[0], s1, s2,
+                    state["grid_w_s"], state["grid_f"],
                 )
                 if res is not None:
                     _, pair_W, pair_f, *_ = res
