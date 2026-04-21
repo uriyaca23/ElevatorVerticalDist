@@ -90,21 +90,24 @@ class DetectConfig:
       unknown or noisier than expected — this is a tightening knob, not
       a loosening one.
     """
-    r2_peak_thresh: float = 0.80
+    # Defaults below are the combined-best 1-D sweep winners
+    # (see ``scripts/sweep_acc_segmentation.py`` +
+    # ``elevator_reports/seg_acc_sweep/summary.json``).
+    r2_peak_thresh: float = 0.55
 
-    min_peak_abs_a: float = 0.5
+    min_peak_abs_a: float = 0.4
 
-    nms_radius_s: float = 0.5
+    nms_radius_s: float = 2.0
 
 
-    same_sign_min_gap_s: float = 3
+    same_sign_min_gap_s: float = 10.0
     min_ride_s: float = 0.0
-    max_ride_s: float = 120.0
+    max_ride_s: float = 30.0
 
 
-    joint_r2_thresh: float = 0.75
+    joint_r2_thresh: float = 0.90
     min_pair_abs_a: float = 0.5
-    heatmap_energy_thresh: float = 0.30
+    heatmap_energy_thresh: float = 0.60
 
     w_min_s: float = 0.4
     w_max_s: float = 3.0
