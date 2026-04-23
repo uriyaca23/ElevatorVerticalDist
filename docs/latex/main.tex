@@ -1150,75 +1150,176 @@ total score as one overlapping long pair always win as a pair.
 \subsubsection{Pair Filter: Lobe Pairing and Conflict Resolution}
 \label{sec:trapezoid-pair}
 
-A single lobe is not yet a ride. The clearing algorithm walks every
-admissible (take-off, landing) pair, refits a \emph{joint} template
-with a shared shape and shared amplitude, and then greedily commits a
-non-overlapping subset.
+At this point the detector has produced a list of candidate lobes:
+single-template correlation peaks, each tagged with a sign
+($+$ for a take-off ramp, $-$ for a landing ramp), a fit amplitude $A$,
+and a per-sample correlation score $R^2$. A lobe on its own is not a
+ride. A ride is a \emph{pair}: a take-off followed by a landing, with
+compatible shape and amplitude. The pair filter is the six-gate
+decision procedure that turns the lobe list into final ride intervals.
 
-\paragraph{Admissibility.} For a pair of candidates
-$(i_1, s_1=+1)$ and $(i_2, s_2=-1)$ --- or the mirror $(-1, +1)$
-for a downward ride --- with $i_1 < i_2$, we require the temporal gap
+Think of every opposite-sign lobe pair $(i_1, i_2)$ with
+$i_1 < i_2$ as a \emph{hypothesis} that has to clear six gates in
+order. Any gate it fails, the hypothesis is discarded. Pairs that
+survive are then ranked and committed under a non-overlap rule.
+
+\paragraph{Gate 1 --- Temporal gap.}
+The take-off and landing must be separated by a realistic ride
+duration:
 \[
-  \texttt{min\_ride\_s} \;\le\; t(i_2) - t(i_1) \;\le\; \texttt{max\_ride\_s},
+  \texttt{min\_ride\_s} \;\le\; t(i_2) - t(i_1) \;\le\; \texttt{max\_ride\_s}
+  \qquad (\text{default } [0,\;30]\text{ s}).
 \]
-where the upper bound ($2$~min by default) is a hard ceiling on
-realistic ride durations and the lower bound rejects a take-off
-misread as its own landing.
+The lower bound rejects a single lobe from being paired with itself;
+the upper bound caps the brute-force ``super pair'' in which a
+take-off from one ride gets paired with a landing many rides later.
 
-\paragraph{Shared-shape joint fit.} For each template $\tau_{W,f}$ on
-the grid we centre one copy at $i_1$ and one at $i_2$ with the signs
-$s_1, s_2$ fixed externally, and fit a \emph{single} amplitude
-$A \ge 0$ to both lobes jointly. Writing $a_k = a_{[i_k]}$,
-$P_k = \|a_k\|^2$, $\tau = \tau_{W,f}$, $N = \|\tau\|^2$, and
-$u_k = s_k\,\langle a_k, \tau\rangle$, the least-squares solution is
-closed form:
+\paragraph{Gate 2 --- Shared-shape joint R².}
+This is the gate that tells a real ride (two lobes cut from the same
+cabin motion profile) apart from two unrelated spikes. For each grid
+template $\tau_{W,f}$ we place one copy at $i_1$ and one at $i_2$ and
+fit a \emph{single} amplitude $A$ to \emph{both} lobes simultaneously.
+Writing $a_k$ for the $k$th lobe window, $P_k = \|a_k\|^2$,
+$u_k = s_k\,\langle a_k, \tau_{W,f}\rangle$, and $N = \|\tau_{W,f}\|^2$,
+the closed-form least-squares solution is
 \begin{equation}
-  A^\star(W,f) = \frac{u_1 + u_2}{2N}, \qquad
-  R^2_k = 1 - \frac{P_k - 2 A^\star s_k\,\langle a_k,\tau\rangle
-                     + (A^\star)^2 N}{P_k},
+  A^\star(W,f) \;=\; \frac{u_1 + u_2}{2N},
+  \qquad
+  R^2_k(W,f) \;=\; 1 \;-\; \frac{P_k - 2 A^\star u_k + (A^\star)^2 N}{P_k},
 \end{equation}
-and we score the pair by the mean of the two per-lobe R²,
+and the pair's score is the mean of the two per-lobe $R^2$,
 \begin{equation}
-  \mathrm{score}(W,f) \;=\; \tfrac{1}{2}\bigl(R^2_1 + R^2_2\bigr).
+  \mathrm{score}(W,f) \;=\; \tfrac{1}{2}\bigl(R^2_1(W,f) + R^2_2(W,f)\bigr).
   \label{eq:pair-score}
 \end{equation}
-The pair's final score is the grid-max of \eqref{eq:pair-score}, with
-$(W^\star, f^\star)$ the template whose \emph{same} shape best
-explains both lobes simultaneously. This is what distinguishes the
-pair filter from two independent peak fits: a true ride has two lobes
-of the same shape --- same cabin, same drive --- and the shared-shape
-constraint suppresses pairs whose lobes happen to clear the per-lobe
-R² threshold but with incompatible templates (e.g.\ two unrelated
-walking spikes).
-
-\paragraph{Pair-level acceptance.} A pair is accepted iff
+We search the grid and keep the best cell $(W^\star, f^\star)$; the
+pair passes gate 2 iff
 \[
-  \mathrm{score}(W^\star, f^\star) \ge \texttt{joint\_r2\_thresh}
-  \quad\text{and}\quad
-  A^\star \ge \texttt{min\_pair\_abs\_a}.
+  \mathrm{score}(W^\star, f^\star)
+  \;\ge\; \texttt{joint\_r2\_thresh}
+  \qquad (\text{default } 0.90).
 \]
-Both thresholds are genuinely pair-level: a pair whose individual lobes
-passed the single-peak thresholds of Section~\ref{sec:trapezoid-detect}
-can still be rejected here if the lobes refuse to agree on a common
-template.
+The shared-shape constraint is the whole point: two unrelated walking
+spikes may each individually correlate well with \emph{some} template,
+but they rarely agree on the \emph{same} $(W, f)$. A genuine ride's
+lobes come from the same cabin profile and agree by construction.
 
-\paragraph{Greedy conflict resolution.} We sort the accepted pairs by
-$\mathrm{score}$ in descending order and walk the list, committing a
-pair only if
+\paragraph{Gate 3 --- Shared amplitude.}
+The jointly fit amplitude $A^\star$ must clear a noise floor:
+\[
+  A^\star \;\ge\; \texttt{min\_pair\_abs\_a}
+  \qquad (\text{default } 0.30\ \mathrm{m/s^2}).
+\]
+Low-amplitude matches are either noise that happened to align with the
+template, or rides so short that the velocity never saturated. The
+floor is intentionally below the single-lobe amplitude gate
+(\texttt{min\_peak\_abs\_a}~$= 0.25$): a shared-amplitude fit averages
+out per-lobe noise, so admitting slightly weaker candidates here is
+safe.
+
+\paragraph{Gate 4 --- Heatmap energy.}
+A genuine ride illuminates a \emph{broad band} of the $(W, f)$ grid
+because the lobes tolerate small template mismatch. A noisy accidental
+match scores high on only a tiny sliver of the grid and is near-zero
+everywhere else. We measure grid breadth with the \emph{heatmap
+energy},
+\[
+  E \;=\;
+  \frac{1}{|\text{grid}|} \sum_{(W,f)}
+    \max\bigl(\mathrm{score}(W,f),\; 0\bigr),
+\]
+i.e.\ the mean of clamped pair $R^2$ over every grid cell, and require
+\[
+  E \;\ge\; \texttt{heatmap\_energy\_thresh}
+  \qquad (\text{default } 0.40).
+\]
+This gate is the biggest source of FP rejections in practice: a
+walking-artefact pair can hit $R^2 = 0.95$ at the argmax cell while
+averaging $E \approx 0.05$ over the whole grid, whereas a real ride
+averages $E \approx 0.5$--$0.7$.
+
+\paragraph{Gate 5 --- Quiet middle.}
+Between the take-off and landing lobes the elevator cabin cruises at
+constant velocity, so $a_{\text{vert}}$ is close to zero. A walking
+pair has continuous motion in the same window. We compute the RMS of
+$a_{\text{smooth}}$ over the inter-lobe plateau
+$\bigl[\,t(i_1) + W^\star,\; t(i_2) - W^\star\,\bigr]$ and require
+\[
+  \mathrm{RMS}_{\text{middle}}
+  \;\le\; \texttt{quiet\_middle\_ratio} \cdot A^\star
+  \qquad (\text{default ratio } 0.5).
+\]
+The threshold is \emph{relative} to the pair's own amplitude so the
+gate scales automatically with ride strength: a $2\,\mathrm{m/s^2}$ ride
+is allowed $1\,\mathrm{m/s^2}$ of middle noise; a $0.5\,\mathrm{m/s^2}$
+ride only $0.25\,\mathrm{m/s^2}$. Adding this filter roughly halved the
+false-positive count in the tuning round (Section~\ref{sec:trapezoid-iterations})
+and was what enabled us to loosen the upstream amplitude gates without
+admitting walking artefacts.
+
+\paragraph{Gate 6 --- Greedy conflict resolution.}
+Pairs that clear gates 1--5 are \emph{candidates}, not yet final. A
+lobe can legitimately belong to only one ride, and two accepted rides
+should not overlap in time. We rank the candidate list by a score that
+slightly favours shorter pairs,
+\[
+  \mathrm{rank}(i_1, i_2)
+  \;=\;
+  \mathrm{score}(W^\star, f^\star)
+  \;-\; \lambda \cdot \bigl(t(i_2) - t(i_1)\bigr),
+  \qquad \lambda = 0.01\,\mathrm{s}^{-1},
+\]
+and walk it in descending order. A candidate is committed iff
 \begin{enumerate}
-  \item neither of its lobes is already committed to another pair,
-    \emph{and}
+  \item neither of its two lobes is already committed to an
+    earlier-accepted pair, \emph{and}
   \item its time interval $[t(i_1), t(i_2)]$ does not intersect any
     already-committed interval.
 \end{enumerate}
-The second condition is the subtle one. Because a lobe can in
-principle participate in pairs with different partners at different
-gaps, simply enforcing ``no shared lobe'' still admits a ``big'' pair
-(covering many short rides) alongside the short rides it swallows.
-The interval non-intersection constraint gives the highest-scoring
-partition a veto over its territory, and in the dataset this almost
-always resolves in favour of the higher-R² short-ride fits, as
-expected.
+The duration term is what defeats the ``super pair'': a pair spanning
+the take-off of ride 1 and the landing of ride 6 scores essentially
+the same joint $R^2$ as any single-ride pair (same cabin, same shape)
+but is many times longer, so $\lambda \cdot \Delta t$ drops it below
+the shorter, correct pairs. The second commit condition is the subtle
+one: ``no shared lobe'' alone would still admit a long pair alongside
+the short rides it swallows, because they share no endpoint; the
+interval non-intersection rule gives the higher-ranked partition a
+veto over its temporal territory.
+
+\paragraph{Output of the filter.}
+Every committed pair becomes one ride prediction. Its type is
+\texttt{up} when $s_1 = +1$ (the take-off came first) and
+\texttt{down} otherwise. Its endpoints are derived from the winning
+template half-width $W^\star$ as described in
+Section~\ref{sec:trapezoid-endpoints}. Its confidence is the joint
+score $\mathrm{score}(W^\star, f^\star)$. Lobes that never reached a
+committed pair are dropped.
+
+\paragraph{Hyperparameter summary.}
+Table~\ref{tab:pair-filter-knobs} collects the six thresholds introduced in
+this section.
+
+\begin{table}[H]
+  \centering
+  \small
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    \textbf{Knob} & \textbf{Default} & \textbf{What it gates} \\
+    \midrule
+    \texttt{min\_ride\_s}            & 0.0\,s                       & Gate 1: minimum take-off--landing gap \\
+    \texttt{max\_ride\_s}            & 30.0\,s                      & Gate 1: maximum gap (blocks brute-force super pairs) \\
+    \texttt{joint\_r2\_thresh}       & 0.90                         & Gate 2: mean per-lobe $R^2$ after shared-shape fit \\
+    \texttt{min\_pair\_abs\_a}       & 0.30\,m/s$^2$                & Gate 3: floor on jointly fit amplitude $A^\star$ \\
+    \texttt{heatmap\_energy\_thresh} & 0.40                         & Gate 4: mean pair $R^2$ over the $(W,f)$ grid \\
+    \texttt{quiet\_middle\_ratio}    & 0.5                          & Gate 5: $\mathrm{RMS_{middle}} / A^\star$ ceiling \\
+    $\lambda$ (duration penalty)     & 0.01\,s$^{-1}$               & Gate 6: ranking penalty in the greedy resolver \\
+    \bottomrule
+  \end{tabular}
+  \caption{Pair-filter gates in pipeline order. A candidate pair
+    $(i_1, i_2)$ must pass all six gates; gate 6 additionally enforces
+    non-intersection with previously committed pairs.}
+  \label{tab:pair-filter-knobs}
+\end{table}
 
 \subsubsection{Segment Endpoints}
 \label{sec:trapezoid-endpoints}
@@ -1261,6 +1362,120 @@ fractionally --- a GT and prediction ``match'' if either their absolute
 overlap is at least a second or their overlap covers at least $30\%$
 of the shorter interval --- so a correct-but-tight prediction is not
 penalised for missing the padding.
+
+\subsubsection{Segmentation--Prediction Improvement: the $\varepsilon$ pad}
+\label{sec:segment-pad-eps}
+
+\paragraph{Why the tight endpoints of
+\eqref{eq:trap-endpoints} are not quite right for the downstream
+integrators.}
+Both accelerometer-only Δh predictors --- ZUPT
+(\S\ref{sec:algo-zupt}) and trapezoid-pulse-pair
+(\S\ref{sec:algo-trapezoid}) --- consume the segmenter's
+emitted interval $[t_{\text{start}},\,t_{\text{end}}]$ and
+\emph{double-integrate} the vertical acceleration over it to
+estimate Δh. A tight interval whose left edge coincides exactly with
+the foot of the take-off ramp inevitably clips the leading few
+samples of acceleration (smoothed signals have finite rise time;
+gravity-subtraction residuals bleed slightly outside the ramp
+support; the jerk-limited profile doesn't truly reach zero at
+$\pm W^\star$). The symmetric story holds at the landing ramp.
+Clipped tails mean a systematically low $\int a\,\mathrm{d}t$ and
+therefore a systematically low Δh.
+
+\paragraph{Fix.} Widen the emitted interval by a small constant
+$\varepsilon$ on each side:
+\begin{equation}
+  [\,t_{\text{start}},\, t_{\text{end}}\,]
+  \;=\;
+  [\,t(i_1) - W^\star - \varepsilon,\;
+    t(i_2) + W^\star + \varepsilon\,].
+  \label{eq:trap-endpoints-eps}
+\end{equation}
+The pair filter exposes this as a single knob,
+\texttt{segment\_pad\_eps\_s}, with default $0.25\,\text{s}$. Setting
+$\varepsilon = 0$ reproduces \eqref{eq:trap-endpoints} exactly.
+
+\paragraph{Calibration.} We calibrated $\varepsilon$ by treating
+every GT ride as a noise-free segmentation output and measuring how
+the downstream predictors' accuracy depended on the pad width. For
+each GT ride $(t_{\text{GT-start}}, t_{\text{GT-end}})$ with known
+height-difference $\Delta h_{\text{GT}}$ (from the barometer label;
+see Section~\ref{sec:barometer-algorithm}) and for each
+$\varepsilon$ on the grid $\{0.00, 0.25, 0.50, \ldots, 3.00\}$\,s, we:
+\begin{enumerate}
+  \item extracted the ACC slice
+    $[\,t_{\text{GT-start}} - \varepsilon,\;
+      t_{\text{GT-end}}   + \varepsilon\,]$
+    as the ``ride'' input;
+  \item extracted $3\,\text{s}$ of ACC before and after as the
+    stationary \texttt{pre} / \texttt{post} windows used for
+    gravity estimation;
+  \item ran both \texttt{ZuptAccelEstimator} and
+    \texttt{TrapezoidAccelEstimator} on the triple and recorded
+    $|\widehat{\Delta h} - \Delta h_{\text{GT}}|$ per algorithm.
+\end{enumerate}
+The sweep covers every $(+,\,\text{up}/\text{down})$ ride in the
+26-experiment dataset for which the barometer supplied a ground-truth
+height. Optimum is the $\varepsilon$ that minimises the mean
+absolute error, averaged across accepted predictions from both
+algorithms.
+
+\paragraph{Result.}
+Table~\ref{tab:epsilon-sweep} shows the combined ranking. The optimum
+is $\varepsilon = 0.25\,\text{s}$, where the combined accepted MAE
+drops from $1.277\,\text{m}$ at $\varepsilon = 0$ (the pre-fix
+endpoints) to $1.194\,\text{m}$ --- a $6.5\%$ reduction. The two
+algorithms disagree slightly on the best $\varepsilon$
+(trapezoid: $0.25\,\text{s}$; ZUPT: $1.25\,\text{s}$), which is
+consistent with how they reach their estimates. The trapezoid fit
+localises the lobes explicitly from the matched filter so it already
+``knows'' where the integrable content lives and needs only a token
+pad; the raw ZUPT integrator has no such prior and benefits from
+wider context. $0.25\,\text{s}$ is simultaneously the trapezoid
+optimum and within noise of the ZUPT optimum, so it's the joint
+choice.
+
+\begin{table}[H]
+  \centering
+  \small
+  \begin{tabular}{@{}rrrr@{}}
+    \toprule
+    $\varepsilon$ (s) & Trapezoid MAE (m) & ZUPT MAE (m) & Combined (m) \\
+    \midrule
+    0.00 & 1.291 & 1.262 & 1.277 \\
+    \textbf{0.25} & \textbf{1.276} & \textbf{1.113} & \textbf{1.194} \\
+    0.50 & 1.367 & 1.230 & 1.298 \\
+    0.75 & 1.285 & 1.149 & 1.217 \\
+    1.00 & 1.367 & 1.104 & 1.236 \\
+    1.25 & 1.409 & 1.024 & 1.217 \\
+    1.50 & 1.546 & 1.137 & 1.341 \\
+    2.00 & 1.540 & 1.175 & 1.357 \\
+    2.50 & 1.758 & 1.191 & 1.475 \\
+    3.00 & 2.018 & 1.100 & 1.559 \\
+    \bottomrule
+  \end{tabular}
+  \caption{Mean absolute error in $\Delta h$ (on accepted predictions
+    only) across the pad-width grid. Combined column is the mean of
+    the two algorithm MAEs. $\varepsilon = 0.25\,\text{s}$ is the
+    joint optimum. Both algorithms degrade gently at large
+    $\varepsilon$ because the ever-wider integration window admits
+    out-of-ride noise (and in ZUPT's case, drops the accept rate as
+    more segments fail the quality filter: $0.88$ at $\varepsilon=0$
+    versus $0.67$ at $\varepsilon=3$).}
+  \label{tab:epsilon-sweep}
+\end{table}
+
+\paragraph{Impact on segmentation metrics.}
+Widening intervals by $0.25\,\text{s}$ on each side does not change
+the classification of any GT in the dataset: clean, missed, and
+merged counts remain exactly as in the iter\_07 baseline
+(Section~\ref{sec:trapezoid-iterations}). It does improve the
+$\mathrm{IoU}$-based F1 at threshold $0.5$ from $0.601$ to $0.705$,
+because the padded intervals overlap the GT windows more generously.
+In other words the $\varepsilon$ pad is a strict win: no detection
+decisions flip, predictors integrate cleaner signal, and the edge
+accuracy against barometer GT improves.
 
 \subsubsection{Calibrating the Pair Filter by Iteration}
 \label{sec:trapezoid-iterations}
@@ -1456,264 +1671,6 @@ generic temporal baselines. On our dataset the two curves track each
 other across iterations, which is a sanity check that the composite
 isn't gamed by quirks of the four-mode definition.
 
-\subsubsection{Hyperparameter Sweep Log}
-\label{sec:trapezoid-sweep}
-
-With the two-metric scoring in place we revisit the acceptance
-thresholds of Table~\ref{tab:detect-config} and re-derive them
-empirically, one knob at a time, on the full 22-experiment training
-pool (415 GT rides). The protocol is the cheapest sweep that still
-produces interpretable curves: fix every parameter at the
-hand-picked baseline of Table~\ref{tab:detect-config}, then move
-\emph{one} parameter at a time over a grid of plausible values and
-record $F_1^\ast$, IoU-$F_1$@$0.5$, recall, and precision. Eight
-parameters $\times$ 6--7 values = 53 configurations; each is scored
-across all 22 training experiments, and runs are executed with
-eight parallel workers. This gives one calibration curve per knob
-that we read off directly, then tests the ``combined-best''
-config -- every knob set to its own 1-D optimum -- as a sanity
-check that the 1-D optima compose at least roughly.
-
-\paragraph{Baseline.} With the hand-picked defaults of
-Table~\ref{tab:detect-config} the detector produces $F_1^\ast =
-0.558$, IoU-$F_1$@$0.5 = 0.298$, recall $= 0.554$, precision
-$= 0.561$ on the 22-experiment pool. Failure counts: 230 clean, 164
-missed, 167 FP, 18 GT-merged, 7 pred-merged. The sweep's job is to
-find which knob, if any, moves these numbers.
-
-\paragraph{Per-parameter 1-D curves.} Figures
-\ref{fig:sweep-r2-peak}--\ref{fig:sweep-max-ride} plot the four
-rates against each parameter's swept grid. The vertical dotted
-line marks the baseline value. Four of the eight curves are
-essentially monotonic, which is the cleanest possible situation:
-the parameter has one consistent effect and the baseline was on
-the wrong side of it.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.48\linewidth]{figures/seg_sweep/sweep_r2_peak_thresh.png}\hfill
-\includegraphics[width=0.48\linewidth]{figures/seg_sweep/sweep_min_peak_abs_a.png}
-\caption{Detection-stage per-peak gates.
-\textbf{Left:} \paramcell{r2\_peak\_thresh} is flat on $[0.55,\,0.80]$
-and falls off above $0.85$ -- the per-peak $R^2$ is saturated well
-before the baseline, so pair-level filters are doing the real work.
-\textbf{Right:} \paramcell{min\_peak\_abs\_a} has a narrow sweet
-spot at $0.4$~m/s$^2$: below $0.4$ nothing changes (pedestrian
-bumps already filtered by shape), above $0.5$ the detector falls
-off a cliff as real low-amplitude rides are eliminated.}
-\label{fig:sweep-r2-peak}
-\end{figure}
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.48\linewidth]{figures/seg_sweep/sweep_nms_radius_s.png}\hfill
-\includegraphics[width=0.48\linewidth]{figures/seg_sweep/sweep_same_sign_min_gap_s.png}
-\caption{Detection-stage dedup gates.
-\textbf{Left:} \paramcell{nms\_radius\_s} is roughly monotone --
-wider local-NMS windows (up to $2.0$~s) produce marginally more
-consistent peak picks without hurting recall.
-\textbf{Right:} \paramcell{same\_sign\_min\_gap\_s} is \emph{strongly}
-monotone: every extra second of forced separation between two
-same-sign peaks adds precision without costing recall, all the way
-to $10$~s ($+6$ pp precision at $\approx$ unchanged recall).
-This is the first lever that gives a large pure-precision win.}
-\label{fig:sweep-nms}
-\end{figure}
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.48\linewidth]{figures/seg_sweep/sweep_joint_r2_thresh.png}\hfill
-\includegraphics[width=0.48\linewidth]{figures/seg_sweep/sweep_min_pair_abs_a.png}
-\caption{Pair-filter $R^2$ and amplitude gates.
-\textbf{Left:} \paramcell{joint\_r2\_thresh} has a broad plateau
-around the baseline and a sharp lift at $0.9$: pairs that clear a
-$0.9$ joint $R^2$ are almost all correct, so precision rises and
-IoU-$F_1$ rises even faster than the composite.
-\textbf{Right:} \paramcell{min\_pair\_abs\_a} is \emph{hazardous}:
-it is flat on $[0.1,\,0.5]$, then -- just like
-\paramcell{min\_peak\_abs\_a} -- falls off a cliff at $0.7$. The
-sweep confirms the baseline $0.5$~m/s$^2$ is already on the edge
-of the safe region; do not move it.}
-\label{fig:sweep-pair}
-\end{figure}
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.48\linewidth]{figures/seg_sweep/sweep_heatmap_energy_thresh.png}\hfill
-\includegraphics[width=0.48\linewidth]{figures/seg_sweep/sweep_max_ride_s.png}
-\caption{Heatmap-energy gate and ride-duration ceiling.
-\textbf{Left:} \paramcell{heatmap\_energy\_thresh} is the single
-most powerful knob. Precision climbs from $0.36$ (at the permissive
-$0.05$) to $0.85$ (at $0.6$), and recall drops by only $8$ pp.
-Concretely: most FP pairs only match a narrow sliver of the
-$(W,f)$ grid; real rides look like a bright blob. Raising the
-energy gate excises the slivers without touching the blobs.
-\textbf{Right:} \paramcell{max\_ride\_s} is mildly monotone toward
-shorter caps -- tightening the ride-duration ceiling from $120$ to
-$30$ seconds drops only a handful of excessively long FPs and
-costs nothing in recall, because no training ride actually lasts
-$30$~s.}
-\label{fig:sweep-max-ride}
-\end{figure}
-
-\paragraph{1-D optima.}
-Table~\ref{tab:sweep-1d-optima} summarises the per-parameter
-winners from the four figures above, together with the baseline
-$F_1^\ast = 0.558$ on the same pool.
-
-\begin{table}[H]
-\centering
-\footnotesize
-\renewcommand{\arraystretch}{1.2}
-\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.25\linewidth}
-                  >{\centering\arraybackslash}p{0.10\linewidth}
-                  >{\centering\arraybackslash}p{0.10\linewidth}
-                  >{\centering\arraybackslash}p{0.12\linewidth}
-                  >{\centering\arraybackslash}p{0.12\linewidth}
-                  >{\centering\arraybackslash}p{0.12\linewidth}@{}}
-\toprule
-\textbf{Parameter} & \textbf{Baseline} & \textbf{Best} &
-\textbf{$F_1^\ast$} & \textbf{IoU-$F_1$} & \textbf{$\Delta F_1^\ast$} \\
-\midrule
-\paramcell{r2\_peak\_thresh}        & $0.80$   & $0.55$   & $0.559$ & $0.298$ & $+0.001$ \\
-\paramcell{min\_peak\_abs\_a}       & $0.50$   & $0.40$   & $0.571$ & $0.302$ & $+0.013$ \\
-\paramcell{nms\_radius\_s}          & $0.50$   & $2.00$   & $0.563$ & $0.303$ & $+0.005$ \\
-\paramcell{same\_sign\_min\_gap\_s} & $3.00$   & $10.00$  & $0.595$ & $0.320$ & $+0.037$ \\
-\paramcell{joint\_r2\_thresh}       & $0.75$   & $0.90$   & $0.573$ & $0.328$ & $+0.015$ \\
-\paramcell{min\_pair\_abs\_a}       & $0.50$   & $0.50$   & $0.558$ & $0.298$ & $0.000$ \\
-\paramcell{heatmap\_energy\_thresh} & $0.30$   & $0.60$   & $0.625$ & $0.375$ & $+0.067$ \\
-\paramcell{max\_ride\_s}            & $120.0$  & $30.0$   & $0.566$ & $0.302$ & $+0.008$ \\
-\bottomrule
-\end{tabular}
-\caption{One-dimensional sweep optima. Each row fixes every other
-knob at the hand-picked baseline of
-Table~\ref{tab:detect-config} and moves a single parameter over
-its grid. Column~3 is the best $F_1^\ast$ achieved along that
-axis; column~5 is the corresponding IoU-$F_1$@$0.5$; column~6 is
-the gain over the baseline $F_1^\ast = 0.558$. The two most
-impactful knobs, \paramcell{heatmap\_energy\_thresh}~$= 0.60$ and
-\paramcell{same\_sign\_min\_gap\_s}~$= 10$~s, together account for
-roughly two-thirds of the total reachable gain.}
-\label{tab:sweep-1d-optima}
-\end{table}
-
-\paragraph{Combined-best configuration.} Each 1-D winner targets a
-different failure mode, so we stack them. Applying all eight optima
-on top of the baseline (every non-tuned knob kept) gives
-\[
-  F_1^\ast = 0.640, \qquad
-  \mathrm{IoU\text{-}}F_1{@}0.5 = 0.390, \qquad
-  \text{recall} = 0.494, \qquad
-  \text{precision} = 0.907.
-\]
-Relative to the baseline that is $+0.082$ in $F_1^\ast$ and $+0.092$
-in IoU-$F_1$@$0.5$, on the \emph{same} 22-experiment pool. Failure
-counts collapse dramatically: 205 clean (was 230), 208 missed (was
-164), 20 FP (was 167), 1 pred-merged (was 7). In other words the
-tuned detector trades $\approx 6$ pp of recall for $\approx 35$ pp
-of precision, and -- because the composite metric penalises both
-missed GTs and FP preds equally -- the net is a large gain on
-both scoring families.
-
-\begin{table}[H]
-\centering
-\footnotesize
-\renewcommand{\arraystretch}{1.2}
-\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.30\linewidth}
-                  >{\centering\arraybackslash}p{0.18\linewidth}
-                  >{\centering\arraybackslash}p{0.18\linewidth}@{}}
-\toprule
-\textbf{Parameter} & \textbf{Baseline} & \textbf{Combined-best} \\
-\midrule
-\paramcell{r2\_peak\_thresh}        & $0.80$  & $0.55$  \\
-\paramcell{min\_peak\_abs\_a}       & $0.50$  & $0.40$  \\
-\paramcell{nms\_radius\_s}          & $0.50$  & $2.00$  \\
-\paramcell{same\_sign\_min\_gap\_s} & $3.00$  & $10.00$ \\
-\paramcell{joint\_r2\_thresh}       & $0.75$  & $0.90$  \\
-\paramcell{min\_pair\_abs\_a}       & $0.50$  & $0.50$  \\
-\paramcell{heatmap\_energy\_thresh} & $0.30$  & $0.60$  \\
-\paramcell{max\_ride\_s}            & $120.0$ & $30.0$  \\
-\midrule
-$F_1^\ast$                   & $0.558$ & $\mathbf{0.640}$ \\
-IoU-$F_1$@$0.5$              & $0.298$ & $\mathbf{0.390}$ \\
-recall                       & $0.554$ & $0.494$ \\
-precision                    & $0.561$ & $0.907$ \\
-\bottomrule
-\end{tabular}
-\caption{Combined-best configuration -- every 1-D winner stacked on
-top of the baseline. The detector becomes much more selective:
-precision jumps from $0.56$ to $0.91$ while recall dips by $6$~pp,
-and both composite and IoU-based scores rise substantially.}
-\label{tab:sweep-combined}
-\end{table}
-
-\paragraph{Why the winning values make physical sense.}
-The combined-best config is not just a lucky coincidence of
-numbers -- each winner has a direct reading in the kinematic
-model of Section~\ref{sec:elevator-kinematics}.
-\begin{itemize}
-  \item \paramcell{heatmap\_energy\_thresh}~$\boldsymbol{0.30 \to 0.60}$.
-    The heatmap energy is the mean of clamped joint $R^2$ across
-    the full $(W,f)$ grid. A real ride's shape agrees with a broad
-    swath of neighbouring templates (the heatmap is a bright blob
-    centred on the true $(W^\star, f^\star)$). Noise-driven
-    accidental correlations agree with a narrow sliver (the
-    heatmap is mostly dark). Lifting the gate to $0.6$ rejects
-    slivers almost losslessly -- precision climbs from $0.56$
-    to $0.85$ at a recall cost of only $6$ pp.
-  \item \paramcell{same\_sign\_min\_gap\_s}~$\boldsymbol{3 \to 10}$~s.
-    Elevator physics forbids two takeoffs (or two landings) closer
-    than the shortest realistic ride. The sweep simply says:
-    ``shortest realistic ride'' is $\gtrsim 10$ s on our data, not
-    $3$ s. Every additional second of enforced separation removes
-    a same-sign duplicate without touching a real lobe, so the
-    $\mathit{precision}$ curve slopes up monotonically while
-    recall stays flat.
-  \item \paramcell{joint\_r2\_thresh}~$\boldsymbol{0.75 \to 0.90}$.
-    A genuine pulse pair shares a single $(W,f)$ template in
-    which both lobes are very well-explained; the joint $R^2$ is
-    an estimate of the fraction of variance accounted for. Real
-    rides routinely reach $R^2 \ge 0.9$. At $0.75$ the gate lets
-    through ``mostly-shape-but-noisy'' pairs; at $0.9$ only
-    textbook trapezoids survive, and IoU-$F_1$ jumps the most of
-    any single knob change because edge placement also improves.
-  \item \paramcell{max\_ride\_s}~$\boldsymbol{120 \to 30}$~s.
-    The training set's longest real ride is well under $30$ s, so
-    the $120$~s cap was essentially inactive for true rides but
-    still allowed spurious long-gap pairs through. Tightening the
-    ceiling to $30$~s is a free precision gain.
-  \item \paramcell{min\_peak\_abs\_a}~$\boldsymbol{0.5 \to 0.4}$~m/s$^2$
-    and \paramcell{r2\_peak\_thresh}~$\boldsymbol{0.8 \to 0.55}$.
-    Once the pair-level gates (\paramcell{joint\_r2\_thresh},
-    \paramcell{heatmap\_energy\_thresh}) are aggressive, it pays
-    to be \emph{permissive} at the per-peak stage. Letting
-    slightly softer peaks through (lower $|A|$ floor, lower
-    $R^2$) recovers a few missed rides without spawning new FPs,
-    because the pair-level filters catch what the per-peak gates
-    used to catch.
-  \item \paramcell{nms\_radius\_s}~$\boldsymbol{0.5 \to 2.0}$~s.
-    The lobe of a trapezoid pulse is wider than $0.5$~s; a
-    $2.0$~s NMS window more reliably collapses same-lobe
-    duplicates into one peak, removing a small number of
-    pred-split-part contributions.
-  \item \paramcell{min\_pair\_abs\_a}~$\boldsymbol{0.5}$~unchanged.
-    Already on the safe edge of the cliff in
-    Figure~\ref{fig:sweep-pair} (right). Moving it down does
-    nothing; moving it up collapses recall. The 1-D sweep
-    confirms the baseline was correct on this axis.
-\end{itemize}
-
-\paragraph{Take-away.} The hand-picked baseline had two genuinely
-loose knobs (\paramcell{heatmap\_energy\_thresh} and
-\paramcell{same\_sign\_min\_gap\_s}) where a physically-motivated
-tightening pays off enormously; two knobs on cliff edges
-(\paramcell{min\_pair\_abs\_a}, \paramcell{min\_peak\_abs\_a}) that
-should be touched only with a matching shift elsewhere; and four
-knobs where small, monotone changes compound into the remaining
-gain. The final detector is much more selective -- precision
-nearly doubles -- and its errors shift away from false positives
-towards pure misses, which are easier to inspect and easier to
-recover downstream.
 
 % --- Accelerometer-based prediction, quality filter, CI, evaluation ---
 \IfFileExists{figures/prediction/results_macros.tex}

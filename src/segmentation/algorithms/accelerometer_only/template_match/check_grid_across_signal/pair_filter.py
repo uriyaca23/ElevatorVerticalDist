@@ -224,10 +224,14 @@ def predict_pairs(state: dict, config) -> list[dict]:
         t_c1 = float(t[i1])
         t_c2 = float(t[i2])
         # Ride endpoints span the whole trapezoid pulse on each side:
-        # t_start = centre1 − W (take-off pulse left edge), t_end =
-        # centre2 + W (landing pulse right edge).
-        t_start = t_c1 - float(W)
-        t_end = t_c2 + float(W)
+        # t_start = centre1 − W − ε (take-off pulse left edge, padded),
+        # t_end   = centre2 + W + ε (landing pulse right edge, padded).
+        # The ε padding prevents downstream integrators (ZUPT,
+        # trapezoid_accel) from clipping the acceleration tails. See the
+        # ε-sweep under improvement_iterations/_sweep_epsilon.py.
+        eps = float(getattr(config, "segment_pad_eps_s", 0.0))
+        t_start = t_c1 - float(W) - eps
+        t_end = t_c2 + float(W) + eps
         ride_type = "up" if s1 > 0 else "down"
         lobe1 = LobeFit(
             t_c=t_c1, a_peak=float(s1 * A_abs),

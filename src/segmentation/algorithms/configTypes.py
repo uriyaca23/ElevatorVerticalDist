@@ -65,6 +65,13 @@ class TemplateMatchConfig(BaseModel):
     # to disable.
     quiet_middle_ratio: float = 0.5
 
+    # Segment padding for downstream integrators (ZUPT / trapezoid_accel).
+    # Emitted ride interval is ``[t_c1 - W - ε, t_c2 + W + ε]``.
+    # Optimum chosen by predictor-MAE sweep (see
+    # ``improvement_iterations/_sweep_epsilon.py``). Set to 0.0 for the
+    # zero-padded behaviour.
+    segment_pad_eps_s: float = 0.25
+
     # (W, f) trapezoid-template grid
     w_min_s: float = 0.4
     w_max_s: float = 3.0

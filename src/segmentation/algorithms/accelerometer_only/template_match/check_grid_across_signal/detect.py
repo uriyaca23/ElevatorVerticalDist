@@ -117,6 +117,16 @@ class DetectConfig:
     # ratio >= 1.0 to disable.
     quiet_middle_ratio: float = 0.5
 
+    # Segment-padding epsilon (ε, seconds). The emitted ride interval is
+    # widened by ε on each side — ``t_start = t_c1 - W - ε``,
+    # ``t_end = t_c2 + W + ε`` — so downstream prediction algorithms that
+    # double-integrate over the segment (ZUPT, trapezoid_accel) catch the
+    # full acceleration tails instead of clipping them. Optimum found by
+    # sweeping the predictor MAE across the epsilon grid on all GT rides
+    # (see ``improvement_iterations/_sweep_epsilon.py`` and the
+    # "Segmentation–Prediction Improvement" section in docs/latex/main.tex).
+    segment_pad_eps_s: float = 0.25
+
     w_min_s: float = 0.4
     w_max_s: float = 3.0
     n_w: int = 30
