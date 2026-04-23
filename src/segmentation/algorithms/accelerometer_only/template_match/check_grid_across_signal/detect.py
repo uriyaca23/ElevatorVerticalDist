@@ -95,7 +95,7 @@ class DetectConfig:
     # ``elevator_reports/seg_acc_sweep/summary.json``).
     r2_peak_thresh: float = 0.40
 
-    min_peak_abs_a: float = 0.25
+    min_peak_abs_a: float = 0.20
 
     nms_radius_s: float = 1.0
 
@@ -127,12 +127,20 @@ class DetectConfig:
     # "Segmentation–Prediction Improvement" section in docs/latex/main.tex).
     segment_pad_eps_s: float = 0.25
 
-    w_min_s: float = 0.4
+    w_min_s: float = 0.3
     w_max_s: float = 3.0
     n_w: int = 30
     f_min: float = 0.05
     f_max: float = 0.80
     n_f: int = 15
+
+    # Triangle template (f=0) prepended to the trapezoid grid. A one-floor
+    # ride has no cruise phase, so each lobe collapses to a triangle: the
+    # trapezoid kernel at frac_flat=0 matches that shape exactly. The
+    # existing per-pair joint-R² argmax in pair_filter.joint_pair_score
+    # then picks trapezoid-vs-triangle based on whichever (W, f) cell
+    # gives the higher shared-shape R² — no separate branch needed.
+    include_triangle_row: bool = True
 
     noise_sigma_multiplier: float = 6.0
 
@@ -140,7 +148,10 @@ class DetectConfig:
         return np.linspace(self.w_min_s, self.w_max_s, self.n_w)
 
     def grid_f(self) -> np.ndarray:
-        return np.linspace(self.f_min, self.f_max, self.n_f)
+        trapezoid = np.linspace(self.f_min, self.f_max, self.n_f)
+        if self.include_triangle_row and self.f_min > 0.0:
+            return np.concatenate(([0.0], trapezoid))
+        return trapezoid
 
 
 DEFAULT_CONFIG = DetectConfig()
