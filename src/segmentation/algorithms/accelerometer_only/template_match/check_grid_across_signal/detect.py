@@ -106,8 +106,16 @@ class DetectConfig:
 
 
     joint_r2_thresh: float = 0.90
-    min_pair_abs_a: float = 0.40
+    min_pair_abs_a: float = 0.30
     heatmap_energy_thresh: float = 0.40
+
+    # Quiet-middle filter (iter_04): reject pairs whose plateau between the
+    # two lobes is not quiet. Real elevator rides cruise at constant
+    # velocity so a_vert ≈ 0 in the middle; walking FPs have continuous
+    # motion and their middle RMS is comparable to the lobe amplitude.
+    # Filter fires iff quiet_middle_rms(middle) > ratio * pair_A_abs. Set
+    # ratio >= 1.0 to disable.
+    quiet_middle_ratio: float = 0.5
 
     w_min_s: float = 0.4
     w_max_s: float = 3.0

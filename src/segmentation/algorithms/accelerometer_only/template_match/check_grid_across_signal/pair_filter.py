@@ -157,6 +157,21 @@ def predict_pairs(state: dict, config) -> list[dict]:
             return
         if heatmap_energy < config.heatmap_energy_thresh:
             return
+        # Quiet-middle check: between the two lobes the cabin cruises at
+        # constant velocity, so a_smooth should be close to zero. Walking
+        # FPs have continuous motion; their middle RMS is as large as the
+        # lobe amplitude. Reject pairs whose middle isn't quiet.
+        qmr = getattr(config, "quiet_middle_ratio", 1.0)
+        if qmr < 1.0:
+            mid_lo_t = t[i1] + W
+            mid_hi_t = t[i2] - W
+            if mid_hi_t > mid_lo_t:
+                mid_mask = (t >= mid_lo_t) & (t <= mid_hi_t)
+                if mid_mask.any():
+                    mid = a_smooth[mid_mask]
+                    mid_rms = float(np.sqrt(np.mean(mid * mid)))
+                    if mid_rms > qmr * A_abs:
+                        return
         candidates.append(
             (score, i1, i2, s1, W, f, A_abs, r2_1, r2_2, heatmap_energy)
         )
