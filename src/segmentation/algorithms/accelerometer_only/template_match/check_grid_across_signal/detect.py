@@ -97,7 +97,7 @@ class DetectConfig:
 
     min_peak_abs_a: float = 0.4
 
-    nms_radius_s: float = 2.0
+    nms_radius_s: float = 1.0
 
 
     same_sign_min_gap_s: float = 5.0
