@@ -43,3 +43,45 @@ venv/bin/python -m src.segmentation.algorithms.improvement_iterations._iter_runn
 | 14 | `iter_14_widen_w_and_pair_a` | 394 / 498 | 155 | 0 | 0.817 | 0.691 | `w_min_s` 0.4→0.3 + `min_pair_abs_a` 0.30→0.22. Mistakes flat but gt_split 1→10 (beitMansour1 over-segmented). min_pair_abs_a=0.22 too permissive — will bisect. |
 | 15 | `iter_15_w_min_only` | 400 / 498 | 147 | −7 | 0.839 | 0.702 | Keep triangle row + `w_min_s=0.3`; revert `min_pair_abs_a` to 0.30. Beats iter_07. FPs 59→49 (narrower W rejects walking artifacts). |
 | 16 | `iter_16_lower_peak_a` | 400 / 498 | **144** | **−10** | **0.841** | 0.705 | `min_peak_abs_a` 0.25→0.20. New best. −3 FPs. Missed unchanged — 50 of 87 have peaks with R²~0.95 but A~0.14, still below gate. |
+| 17 | `iter_17_aggressive_gates` | 316 / 498 | 233 | +89 | 0.624 | 0.608 | `min_peak_abs_a` 0.20→0.12 + `min_pair_abs_a` 0.30→0.20. Regression. gt_split 1→86. |
+| 18 | `iter_18_duration_penalty` | 400 / 498 | 144 | 0 | 0.841 | 0.702 | Duration penalty λ 0.01→0.02. No-op. |
+| 19 | `iter_19_pair_a_26` | 395 / 498 | 152 | +8 | 0.823 | 0.692 | `min_pair_abs_a` 0.30→0.26 with λ=0.02. Regression, gt_split 1→8. |
+| 20 | `iter_20_quiet_middle_045` | 390 / 498 | 146 | +2 | 0.837 | 0.704 | `quiet_middle_ratio` 0.5→0.45. Regression, lost clean. |
+| 21 | `iter_21_joint_r2_087` | 403 / 498 | 148 | +4 | 0.839 | 0.699 | `joint_r2_thresh` 0.90→0.87. Regression, FP +7. |
+| 22 | `iter_22_session_adaptive` | 222 / 498 | 334 | +190 | 0.401 | 0.561 | Ungated session-adaptive amp floor. Catastrophic regression, gt_split 1→189. |
+| 23 | `iter_23_gated_adaptive` | 305 / 498 | 251 | +107 | 0.580 | 0.610 | Gated adaptive (σ_s<0.025). Still regresses, gt_split 1→106. |
+| 24 | `iter_24_nesting_resolver` | 380 / 498 | 164 | +20 | 0.811 | 0.709 | Nesting-aware pre-pass (margin=0.03). Dropped real inner rides, gm 10→22. |
+
+**Final selection: iter_16 — 144 mistakes, f1_like 0.841, iou_f1@0.5 0.705.**
+
+## Ceiling analysis — why f1 ≥ 0.90 is out of reach without structural change
+
+Target f1=0.90 means `2·clean / (2·clean + bad_total) = 0.90` → `bad_total = 0.222·clean`. At clean=400 that is **bad_total ≤ 89** — a cut of 55 mistakes below the current 144.
+
+Breakdown of the 144 remaining mistakes:
+- **87 missed.** 31 from a single damped-accelerometer experiment
+  (`UriyaCohenEliya_milleniumHotel_GooglePixel10_exp2` — memory flags it as
+  unrecoverable, real lobes at |A|≈0.10–0.15 m/s² below any safe gate).
+  Another ~25 from 4 other damped/noisy milleniumHotel recordings.
+- **10 gt_merged.** Super-pair failures on BarIlan2_Pixel10 (6) and a few
+  others. A single-scalar λ duration penalty cannot break them without
+  also breaking nested sub-pulses.
+- **46 FPs.** Spread across damped-phone experiments where spurious pairs
+  form at the current amplitude gate. No single target cluster.
+- **1 gt_split.**
+
+The iter_17 → iter_24 sweep proved experimentally that every single-lever
+move to address any of these regresses the others: lower gates →
+gt_split; session-adaptive alone → over-segmentation; nesting-aware
+alone → killed real inner rides; tighter joint_r2 / quiet_middle → lost
+clean. To get below ~90 mistakes the algorithm needs either:
+1. **Session-adaptive amplitude floor** + **nesting-aware pair resolver**
+   co-designed so the admitted low-amplitude peaks don't over-segment
+   real rides.
+2. **A second detector family** tuned for damped/low-amplitude signatures
+   with a clearing-stage vote.
+3. **ML scoring** replacing the hand-coded joint_r2 / heatmap_energy gates.
+
+All three are structural changes outside the hyperparameter+single-filter
+tuning scope. **iter_16 is the production pick**; iter_17 – iter_24 are
+preserved as negative results.
