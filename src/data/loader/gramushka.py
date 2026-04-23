@@ -33,6 +33,7 @@ _GRAMUSHKA_ROOT = Path(__file__).resolve().parents[1] / "gramushka"
 # Keys are lowercased for case-insensitive lookup.
 _BUILDING_SLUG_TO_FOLDER: dict[str, str] = {
     "milleniumhotel":        "פרימה מילניום",
+    "milleniumoutside":      "פרימה מילניום",
     "acrobuilding":          "אקרו נדלן",
     "beitmansour1":          "בית_מנצור_1",
     "beityitzchakiraanana":  "בית יצחקי ב",
@@ -67,8 +68,9 @@ def _is_experiment_without_gramushka(exp_name: str) -> bool:
     """True when the experiment should skip gramushka snapping entirely
     (leaves baramoshka.csv empty, corrector falls back to pure barometer).
 
-    Rule: any experiment whose name ends in ``_exp3`` (the user's spoken
-    exception — they didn't record floor visits during exp3 in April 2026).
+    Rule: any experiment whose name ends in ``_exp3`` (the April 2026
+    ``milleniumOutside`` runs — the external elevator attached to the
+    Millenium hotel, where we didn't record floor visits).
     Extend :data:`_EXPERIMENTS_WITHOUT_GRAMUSHKA` for explicit overrides.
     """
     if exp_name in _EXPERIMENTS_WITHOUT_GRAMUSHKA:
@@ -153,6 +155,8 @@ def resolve_start_floor_default(exp_name: str) -> str:
       from the recording's first sample; only Floor 12 matches. The full
       table of per-phone end cumulatives lives in
       `memory/experiment_calibration_facts.md`.)
+    * ``milleniumOutside`` (the external hotel elevator, exp3) →
+      ``Ground Floor`` via the default branch below.
     * everything else → ``Ground Floor``.
 
     Returns the floor-name string — the corrector looks it up in the

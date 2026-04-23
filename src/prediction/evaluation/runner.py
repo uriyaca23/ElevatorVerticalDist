@@ -85,6 +85,9 @@ def collect_predictions(preds: list[RecordPrediction]) -> pd.DataFrame:
             "accepted": out.accepted,
             "quality_score": out.quality_score,
             "reject_reason": out.reject_reason,
+            "mode": (out.meta or {}).get("mode", ""),
+            "pair_r2": (out.meta or {}).get("pair_r2"),
+            "joined_r2": (out.meta or {}).get("joined_r2"),
             "abs_error": abs(out.height_diff - rec.true_dh),
             "covered": abs(out.height_diff - rec.true_dh) <= out.ci_half_width,
         })

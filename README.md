@@ -261,3 +261,88 @@ non-empty.
 - `src/data/README.md` — data schemas, folder layout, loader conventions.
 - `src/data/dataset_cleanup/README.md` — dataset curation workflow.
 - `src/segmentation/algorithms/metrics/METRICS.md` — metric definitions.
+
+---
+
+## Triangle vs Trapezoid rides — the short-ride extension
+
+The shared-shape pair-fit described above covers long rides, where the
+cabin reaches `v_max` and the acceleration trace has two clearly
+separated lobes. Short rides (typically `|Δh| ≲ 3 m`) never reach
+`v_max`, so the velocity profile is triangular and the two acceleration
+lobes **touch** at the peak-velocity instant. Fitting those rides with
+the unconstrained pair-fit is ill-posed (the centre-to-centre spacing
+`Δt_c` becomes degenerate at `Δt_c = 2W`), which historically showed up
+as either silent under-coverage in the 0-3 m bin or a blanket
+`lobes_overlapping` rejection that threw away legitimate data.
+
+### The fix: dual fit with a joined-pulse branch
+
+For every segment we run both of
+
+1. the **pair fit** (`fit_shared_shape_pair`, 5 free parameters,
+   `Δt_c` free),
+2. the **joined-pulse fit** (`fit_joined_pulse`, 4 free parameters,
+   `Δt_c = 2W` forced, bipolar template of width `4W`).
+
+and pick between them on joint R² with an Occam tiebreak in the
+overlap regime (`Δt_c / 2W < 1.15`). The joined regime has a
+constraint-aware height formula and σ — see
+[`trapezoid_accel/pulse_pair.py`](src/prediction/algorithms/accelerometer_only/trapezoid_accel/pulse_pair.py):
+
+```
+Δh = 2·s·A·W²·(1+f)
+
+σ_Δh² = (2W²(1+f))²·σ_A² + (4AW(1+f))²·σ_W² + (2AW²)²·σ_f²
+
+σ_A² = σ_a_eff² / ⟨τ_joined, τ_joined⟩   where ⟨τ_joined, τ_joined⟩ = 2·⟨τ, τ⟩
+```
+
+The time-of-arrival parameter `t_mid` drops out of the σ sum because
+`Δh` is shift-invariant in the joined model. No drift multiplier, no
+`k_rel|Δh|` term — same design decisions as the unconstrained pair
+σ model (see the "Why the trapezoid CI is not the ZUPT CI"
+subsection in the paper).
+
+When both fits end up with R² below `zupt_fallback_r2 = 0.20`, the
+estimator falls back to an inline ZUPT double-integration
+displacement with a `zupt_fallback_both_fits_failed` reject label —
+the segment is recorded but excluded from conformal calibration.
+
+Result on the 0-3 m bin: from 7 → **23 accepted segments at 100 %
+coverage** on train (18 of them fit via the joined branch). Test-set
+median CI half-width on filter-accepted segments drops from ±3.14 m
+to **±1.16 m**. See
+[`docs/latex/figures/triangle_vs_trapezoid.png`](docs/latex/figures/triangle_vs_trapezoid.png)
+for a juxtaposed pair of real rides; the per-segment dumps live in
+[`docs/examples/triangles/`](docs/examples/triangles/) and
+[`docs/examples/trapezoids/`](docs/examples/trapezoids/).
+
+### Generalising the distinction
+
+**Detection.** The whole-signal detector currently scans a single-lobe
+template bank and uses a pair-filter to assemble rides from detected
+lobes. A short-ride produces either zero or two noisy lobe hits that
+the pair-filter has to rescue. Extending the bank with a second
+family — the joined bipolar template
+`τ_{W,f}(t-W) − τ_{W,f}(t+W)` (already shipping as `joined_kernel`
+in `pulse_pair.py`) — lets the detector emit each short ride as a
+single candidate that doesn't need pair filtering. The two banks
+share the `(W,f)` grid, so runtime cost is one extra convolution
+per template pair; expected recall gain on short rides is significant.
+
+**Segmentation.** On sessions without a barometer, the segmenter has
+no notion of ride shape today. Running both a pair-fit score and a
+joined-fit score per candidate segment, and labelling each segment
+with its regime, gives
+
+* a physically-grounded duration floor `T_ride ≥ 4·W_min_physical`
+  for triangle rides (replacing the hand-tuned `min_duration_sec`),
+* a binary regime label that the prediction stage consumes directly
+  instead of re-deciding.
+
+The two-stage pipeline becomes regime-aware end-to-end rather than
+only at the prediction stage.
+
+All the code, derivations, evaluation numbers, and visual examples
+live alongside the main pipeline — no separate extension module.

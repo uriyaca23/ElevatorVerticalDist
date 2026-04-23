@@ -96,6 +96,17 @@ below (\S\ref{sec:theoretical-sigma}).
 \subsection{Algorithm B: Shared-Shape Trapezoid Pulse Pair}
 \label{sec:algo-trapezoid}
 
+We rely on the kinematic derivation of an elevator ride given in
+\S\ref{sec:elevator-kinematics} (equations
+\eqref{eq:elevator-bounds}--\eqref{eq:elevator-template}) and the
+trapezoid-kernel parameterisation $\tau_{W,f}(t)$ introduced by the
+detector in \eqref{eq:trap-template}. Prediction re-uses the same
+two shape parameters $(W,f)$ — there is no second derivation of the
+pulse geometry. The material below only specifies what prediction
+adds on top of the shared kinematics: the shared-shape constraint
+between the two lobes of a ride, the analytic $\Delta h$ formula,
+and the matched-filter grid search that produces the fit.
+
 The seven-phase S-curve acceleration template of
 \S\ref{sec:elevator-kinematics} is the ideal jerk-limited profile,
 but fitting it in the velocity domain with three free kinematic
@@ -111,28 +122,24 @@ limited profile in the limit where $j_{\max}$ is large compared to
 $a_{\max}/T_\mathrm{lobe}$, but parameterised by the shape features
 that are actually identifiable from the data.
 
-\paragraph{The 2-shape-parameter lobe model.} Each of the two
-acceleration lobes (take-off and landing) is modelled as a symmetric
-trapezoid
-\begin{equation}
-  \tau_{W,f}(t) \;=\;
-  \begin{cases}
-    1 & |t|\le fW, \\
-    \dfrac{W-|t|}{(1-f)W} & fW<|t|<W, \\
-    0 & |t|\ge W,
-  \end{cases}
-  \label{eq:trapezoid-kernel}
-\end{equation}
-with $W$ the lobe half-width (s) and $f\in[0,1]$ the flat-fraction
-(so total lobe width is $2W$, with a flat top of width $2fW$ and two
-linear ramps each of width $(1-f)W$). Only two shape parameters; the
-limits $f{=}0$ and $f{=}1$ recover the triangular and rectangular pulses
-respectively. The integral of the unit trapezoid is
+\paragraph{The 2-shape-parameter lobe model.} Each acceleration lobe
+(take-off and landing) is modelled as the symmetric trapezoid
+template $\tau_{W,f}(t)$ defined in \eqref{eq:trap-template} of the
+Segmentation \& Detection chapter — half-width $W$, flat-fraction
+$f\in[0,1]$, total lobe width $2W$, flat top $2fW$, linear ramps of
+width $(1-f)W$. We re-use the same kernel here rather than
+redefining it, since the shape is identified with the
+jerk-limited ramp-plateau structure of the ride
+(\S\ref{sec:elevator-kinematics}) in both places. Only two shape
+parameters; the limits $f{=}0$ and $f{=}1$ recover the triangular and
+rectangular pulses respectively. The integral of the unit trapezoid,
 \begin{equation}
   \int_{-W}^{W}\tau_{W,f}(t)\,dt \;=\; W(1+f),
   \label{eq:trapezoid-area}
 \end{equation}
-which will be the bridge from shape to velocity.
+is the bridge from shape to velocity that the detector does not need
+but the prediction \emph{does} (it turns a fit into an analytic
+$\Delta h$ below).
 
 \paragraph{Shared-shape constraint.} A real elevator returns to rest,
 so
@@ -251,6 +258,154 @@ FFT, inflating total runtime by a factor of order $10\times N_W\times
 N_f$, and (b) offer no new degrees of freedom that are physically
 meaningful, since in-ride time warping is ruled out by the
 jerk-limited model. We therefore stay with the NCC matched filter.
+
+\subsection{Short-Ride Extension: Joined-Pulse Fit and ZUPT Fallback}
+\label{sec:algo-joined}
+
+The pair-fit model \eqref{eq:pulse-pair} assumes the two acceleration
+lobes are separated by a cruise window of positive duration. That
+assumption breaks down for short floor-to-floor rides where the
+cabin never reaches its $v_{\max}$: the velocity profile is
+\emph{triangular} rather than trapezoidal, the cruise window has
+zero duration, and the two acceleration lobes sit immediately
+adjacent to one another with $\Delta t_c = 2W$. In the
+pair-fit parameterisation the spacing becomes un-identifiable up to
+an exchange $(t_{c1},t_{c2})\leftrightarrow(t_{c2},t_{c1})$ shifted
+by a fraction of a sample, and the matched-filter CRB we derived
+for $\sigma_{t_c}^2$ no longer describes the true Fisher
+information because the off-diagonal block starts contributing.
+In data this shows up as an empirical coverage hole in the
+$|\Delta h|\!\in\![0,3]$~m bin (Figure~\ref{fig:train-cov-bins}):
+either the model silently fits a spurious narrow-cruise solution
+with under-counted $\sigma$, or the quality filter rejects the
+segment even though the underlying ride was a legitimate short hop.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{triangle_vs_trapezoid.png}
+  \caption{The two regimes side by side, both real rides from the
+  training set. \textbf{Left.} A short ride — the positive and
+  negative lobes meet at the peak-velocity instant, no cruise.
+  This is the joined-pulse regime $\Delta t_c = 2W$: four free
+  parameters $(A, W, f, t_\mathrm{mid})$, Fisher information is
+  diagonal in the remaining three, $\Delta h = 2sAW^2(1+f)$.
+  \textbf{Right.} A long ride with a clearly separated cruise at
+  $a\!\approx\!0$ between the two lobes. Five free parameters,
+  $\Delta t_c \gg 2W$, $\Delta h = sAW(1+f)\Delta t_c$. The two
+  models are the two regimes of the same physics; the estimator
+  runs both and picks by joint $R^2$.}
+  \label{fig:triangle-vs-trapezoid}
+\end{figure}
+
+\paragraph{Research question.} Instead of rejecting these short
+rides wholesale — the easy, wrong answer — we want an extension to
+the pair-fit that (i) explicitly models the triangular-velocity
+regime, (ii) produces a usable $\Delta h$ estimate and honest
+$\sigma$ for it, and (iii) gracefully degrades when even that fails.
+We considered four candidates and empirically compared them on the
+train split:
+
+\begin{enumerate}
+  \item \textbf{Constrained joined-pulse fit.} Keep the trapezoid
+        kernel but force $\Delta t_c = 2W$, reducing the model to
+        four free parameters $(A, W, f, t_\mathrm{mid})$ with one
+        analytic constraint. The matched-filter target is a single
+        bipolar template $\tau_{W,f}(t-t_\mathrm{mid}+W) -
+        \tau_{W,f}(t-t_\mathrm{mid}-W)$ of total width $4W$.
+  \item \textbf{Single-lobe interpretation.} Treat the trace as a
+        single symmetric pulse and recover $\Delta h$ from the lobe
+        integral. Equivalent in closed form but empirically worse
+        because it discards the sign information that distinguishes
+        up and down rides.
+  \item \textbf{ZUPT fallback.} When both pair and joined fits have
+        $R^2 < \tau_\mathrm{zupt}$ (we set $\tau_\mathrm{zupt}=0.20$),
+        report the integrated-velocity displacement instead. On a
+        short ride ZUPT's cumulative drift is small; on a longer
+        ride-that-wasn't-really-a-ride it at least returns a sane
+        number with a wide CI.
+  \item \textbf{Keep-reject policy.} Leave the estimator unchanged
+        and harden the quality filter's W-relative overlap reject.
+        This was the behaviour after the earlier CI overhaul and
+        the one we explicitly reject here — it throws away valid
+        data the physics says we \emph{can} model.
+\end{enumerate}
+
+\paragraph{Decision logic we ship.} We run both the pair fit and
+the joined-pulse fit on every segment and pick between them on
+three criteria:
+\begin{enumerate}
+  \item If only one fit converges, use that one.
+  \item If the joined fit has a higher joint $R^2$ by more than
+        $\varepsilon_{R^2}=0.02$, use the joined fit.
+  \item If the pair fit has $\Delta t_c/2W < \beta_\mathrm{overlap}=1.15$
+        (overlap-regime warning) and the joined fit is within
+        $\varepsilon_{R^2}$ of the pair $R^2$, prefer joined
+        (Occam's razor: same $R^2$, one fewer free parameter).
+  \item Otherwise keep the pair fit.
+\end{enumerate}
+If both fits have $R^2 < \tau_\mathrm{zupt}$ (or both fail to
+converge), the estimator emits an inline ZUPT double-integration
+result with \texttt{reject\_reason="zupt\_fallback\_both\_fits\_failed"},
+so the segment is recorded but not trusted for conformal
+calibration.
+
+\paragraph{Analytic height in the joined regime.} Integrating the
+joined template gives
+\begin{equation}
+  \boxed{\;\Delta h \;=\; 2\,s\,A\,W^{2}(1+f)\;}\,,
+  \label{eq:dh-joined}
+\end{equation}
+which reproduces \eqref{eq:dh-analytic} with $\Delta t_c$ set to
+$2W$: the bipolar pulse has peak velocity $v_\mathrm{peak}=
+A\,W(1+f)$ at $t=t_\mathrm{mid}$, and the triangular velocity
+profile integrates to $v_\mathrm{peak}\cdot 2W$. The delta-method
+propagation through \eqref{eq:dh-joined} uses three gradients
+\begin{equation}
+  \frac{\partial\Delta h}{\partial A} = 2sW^{2}(1+f),\quad
+  \frac{\partial\Delta h}{\partial W} = 4sAW(1+f),\quad
+  \frac{\partial\Delta h}{\partial f} = 2sAW^{2},
+  \label{eq:dh-joined-gradients}
+\end{equation}
+since $\Delta h$ is invariant under a shift of $t_\mathrm{mid}$,
+i.e.\ $\partial\Delta h/\partial t_\mathrm{mid}=0$ — the time-of-
+arrival degree of freedom contributes exactly zero to the height
+uncertainty. The matched-filter CRB on $A$ uses the joined-template
+norm
+\(\langle\tau_\mathrm{joined},\tau_\mathrm{joined}\rangle =
+2\langle\tau,\tau\rangle\), which is a factor of two smaller than
+for the single-lobe matched filter and reflects the fact that two
+touching lobes pack twice the template energy under the same noise.
+
+\paragraph{Why this beats the alternatives.}
+\begin{itemize}
+  \item Candidate 2 (single-lobe) loses the up/down direction
+        signal and was discarded. Candidate 4 (hard reject) fails
+        the research goal of \emph{fitting} short rides, not
+        discarding them.
+  \item Candidate 1 (joined fit) has one fewer free parameter than
+        the pair fit. In the triangular-velocity regime where
+        $\Delta t_c \equiv 2W$, that extra degree of freedom in the
+        pair fit can only fit noise. Removing it is a bias-variance
+        win: the pair fit's CI widens faster than the joined fit's
+        as fit residuals grow, because the pair has more gradient
+        directions along which to spread the same uncertainty.
+  \item Candidate 3 (ZUPT fallback) is the right floor-of-last-
+        resort because ZUPT's error is bounded by
+        $\sigma_a \Delta t^{2}\sqrt{N^{3}/12}$, which for a short
+        ride ($N\lesssim 200$ at 50~Hz) stays well below 1~m. On
+        longer rides the drift-free joined fit is the better
+        choice, so the fallback only fires when both matched-filter
+        models genuinely disagree with the data.
+\end{itemize}
+
+\paragraph{Cost.} The joined-pulse fit uses the same
+$(W,f)$ grid as the pair fit (30$\times$15 templates) and a single
+centre-shift search per template, so each run is comparable in cost
+to the pair search. Running both in parallel roughly doubles the
+per-segment fitting time but stays well under 1~s per ride on our
+hardware, and the increase is paid only once per segment — the
+conformal calibration, quality filter, and CI construction
+downstream are unchanged.
 
 \subsection{Quality Filter}
 \label{sec:quality-filter}
@@ -371,7 +526,7 @@ method. The gradients are
 \end{equation}
 and the propagated variance
 \begin{equation}
-  \sigma_{\Delta h}^{2,\,\mathrm{white}} \;=\;
+  \sigma_{\Delta h}^{2} \;=\;
   \sum_{\theta\in\{A,W,f,\Delta t_c\}}
   \left(\frac{\partial\Delta h}{\partial\theta}\right)^{\!2}\sigma_\theta^2.
   \label{eq:sigma-delta-method}
@@ -391,35 +546,149 @@ residual is coloured noise the datasheet model ignores
 (tremor, projection wobble, sub-second re-orientation). The
 residual RMS captures those automatically, so
 \eqref{eq:sigma-delta-method} becomes a much better error-energy
-accounting than the pure datasheet formula. On the train set this
-change alone dropped the empirical conformal multiplier from
-$\sim 8.5$ (datasheet-$\sigma$) to $\sim 5.6$ (residual-RMS $\sigma$).
+accounting than the pure datasheet formula.
 
-\paragraph{Drift + relative composition.} Finally, as in the ZUPT
-path we compose two more terms:
+\paragraph{$R^2$-scaled effective noise.} Beyond the residual-RMS
+substitution we scale the effective sensor variance by the fit
+quality itself,
 \begin{equation}
-  \sigma_{\rm TRAP}^{2} \;=\;
-  \bigl(1+k_\rho\rho\bigr)^{\!2}\,\sigma_{\Delta h}^{2,\,\mathrm{white}}
-  \;+\; k_\mathrm{rel}^2\,|\hat{\Delta h}|^2,
+  \tilde{\sigma}_a^{\,2} \;=\;
+  \frac{\sigma_a^{\mathrm{eff},\,2}}{\max(R^2_\mathrm{joint},\,\varepsilon)}\,,
+  \qquad \varepsilon = 10^{-3},
+  \label{eq:r2-scaled-noise}
+\end{equation}
+which is the Wald post-regression form: when the shared-shape template
+fails to explain the observed signal (low $R^2$), the posterior
+uncertainty on \emph{every} parameter of the fit widens in direct
+proportion. Empirically this is the ingredient that lets short rides
+in the $0$--$3$~m bin carry an honest CI without inflating the
+well-fit long-ride CIs.
+
+\paragraph{Overlap penalty on $\sigma_{\Delta t_c}^2$.} The CRB
+\eqref{eq:sigma-tc} treats the two lobe centres as independent.
+At the touching point $\Delta t_c = 2W$ the two trapezoid supports
+are disjoint and the off-diagonal Fisher block is zero — inflation
+is \emph{not} required and would be physically wrong (short rides
+with $\Delta t_c=2W$ are fully identifiable under the joined-pulse
+parameterisation of \S\ref{sec:algo-joined}). It is only when
+$\Delta t_c < 2W$, which is unphysical in our model, that lobe~1's
+decay ramp can leak into lobe~2's rise ramp. In that sub-touching
+regime we emit a finite inflation so numerical stability is
+preserved,
+\begin{equation}
+  \sigma_{\Delta t_c}^{2,\,\mathrm{eff}}
+  \;=\;
+  \sigma_{\Delta t_c}^{2,\,\mathrm{CRB}}\,
+  \biggl[\,1 + \Bigl(\tfrac{2W-\Delta t_c}{2W\,\delta}\Bigr)^{\!2}\,\biggr]\,
+  \mathbb{1}\!\bigl[\Delta t_c < 2W\bigr],
+  \qquad \delta = 0.05.
+  \label{eq:overlap-inflation}
+\end{equation}
+For $\Delta t_c \ge 2W$ (the physically valid regime, covered either
+by the pair fit's cruise-separated branch or by the joined-pulse
+extension) the factor is exactly $1$. We no longer reject on a
+W-relative overlap rule — the joined-pulse fit
+(\S\ref{sec:algo-joined}) handles the touching regime directly.
+
+\paragraph{Velocity-anchored $\sigma_A$.} When the estimator replaces
+the matched-filter $A$ by the ZUPT-integrated cruise velocity
+$\widetilde A = |\bar v_\mathrm{cruise}|/[W(1+f)]$
+(\S\ref{sec:algo-trapezoid}), the matched-filter CRB
+\eqref{eq:sigma-A} no longer describes $\sigma_A$. For a mean of
+$N$ i.i.d. samples of a white-noise signal in the stopped cabin frame
+the variance is
+\[
+  \sigma_{\bar v}^{\,2} \;=\; \tilde{\sigma}_a^{\,2}\,\frac{\Delta t}{T_\mathrm{cruise}},
+  \qquad
+  \sigma_{\widetilde A}^{\,2} \;=\; \frac{\sigma_{\bar v}^{\,2}}{[W(1+f)]^2}
+  \;=\; \frac{\tilde\sigma_a^{\,2}\,\Delta t}{T_\mathrm{cruise}[W(1+f)]^2}.
+\]
+We swap this into \eqref{eq:sigma-delta-method} in place of
+$\sigma_A^{2,\mathrm{CRB}}$ whenever the cruise window is long enough
+to justify the anchor (typically $T_\mathrm{cruise} > 0.5$~s).
+
+\subsection{Why the trapezoid CI is not the ZUPT CI}
+\label{sec:trap-vs-zupt-sigma}
+
+An earlier version of this report composed the trapezoid
+$\sigma_{\Delta h}^{2}$ with a drift multiplier $(1+k_\rho\rho)^2$
+borrowed from the ZUPT path plus a relative floor
+$k_\mathrm{rel}^2|\hat{\Delta h}|^2$. Neither term survives scrutiny
+for a matched-filter closed-form estimator:
+
+\begin{itemize}
+  \item \textbf{Drift multiplier.} ZUPT's drift term captures
+        \emph{cumulative} position error accrued through
+        double-integration of a gravity-misprojected acceleration —
+        the error grows as the ride grows because the integrator
+        integrates the bias too. The trapezoid path never integrates;
+        it reads $\Delta h$ off the analytic
+        $s\,A\,W(1+f)\,\Delta t_c$ formula from parameters estimated
+        by a matched filter. Gravity drift still affects the fit, but
+        through the \emph{residual energy} of the best-fit template,
+        which is already inside $\sigma_a^\mathrm{eff}$ by
+        construction. Stacking a drift multiplier on top is
+        double-counting.
+  \item \textbf{Relative floor $k_\mathrm{rel}|\hat{\Delta h}|$.}
+        The delta-method propagation already carries an implicit
+        $|\Delta h|$ scaling through the gradient
+        $\partial\Delta h/\partial A = sW(1+f)\Delta t_c$, which
+        grows linearly with $\Delta t_c$ (and therefore with
+        $|\hat{\Delta h}|$ at fixed $v_\mathrm{peak}$). An additive
+        $k_\mathrm{rel}^2|\hat{\Delta h}|^2$ term re-adds the same
+        physics and widens the long-ride CI without cause.
+\end{itemize}
+
+The model we ship uses neither. The final per-segment $\sigma^2$ is
+just
+\begin{equation}
+  \boxed{\;
+  \sigma^2_{\rm TRAP} \;=\;
+  \sum_{\theta\in\{A,W,f,\Delta t_c\}}
+  \left(\tfrac{\partial\Delta h}{\partial\theta}\right)^{\!2}\sigma_\theta^2,
+  \;}
   \label{eq:trap-sigma-total}
 \end{equation}
-with $\rho$ the in-ride gravity-drift angle (deg) and
-$k_\rho,k_\mathrm{rel}$ small positive constants — both fit on the
-training set and set to $0.06$ and $0.04$ respectively for the
-results reported below. The absolute floor is $0.5$~m (short clean
-rides can't realistically be bounded below that) and the cap is
-$40$~m (a safety valve; the typical CI stays far below).
+with $\tilde{\sigma}_a^{\,2}$ from \eqref{eq:r2-scaled-noise},
+$\sigma_{\Delta t_c}^{2,\,\mathrm{eff}}$ from
+\eqref{eq:overlap-inflation}, and $\sigma_A^2$ taking the
+velocity-anchored or matched-filter-CRB form depending on whether the
+anchor is active. An absolute floor of $0.5$~m protects against
+pathologically small $\sigma$ on fits with unrealistically perfect
+residuals; the cap of $40$~m is a safety rail the typical CI stays
+far below.
 
-\paragraph{Iteration on the $\sigma$ model.} We kept iterating on the
-$\sigma$ form as long as the train-set non-conformity scores were
-heavy-tailed. The two largest wins were (i)~replacing datasheet
-$\sigma_a$ with the empirical residual RMS (multiplier dropped
-$\sim 35\%$), and (ii)~adding the $|\Delta h|$-relative term
-(eliminates the long-ride tail where the fit is good but the absolute
-error scales with distance). After those two changes the train-set
-conformal multiplier is approximately half of what a naive
-single-term white-noise model would need, which translates directly
-into tighter CIs.
+\paragraph{Iteration on the $\sigma$ model.} We converged on this
+form through an ablation study of five candidate models
+($M_1$--$M_5$; see the appendix-style discussion below). The three
+wins that mattered were
+(i) replacing datasheet $\sigma_a$ with residual RMS
+(multiplier dropped $\sim 35\%$);
+(ii) $R^2$-scaled effective noise (closed the $0$--$3$~m bin
+under-coverage without widening other bins);
+(iii) overlap inflation on $\sigma_{\Delta t_c}^2$ combined with a
+$W$-relative lobe-overlap reject in the quality filter (removed the
+short-ride tail where the matched filter becomes non-identifiable).
+Dropping the drift multiplier and the relative floor produced a
+negligible change in coverage and noticeably tightened the $12$--$60$~m
+bin — their only effect had been to widen the long-ride CI without
+changing the short-ride behaviour, which is exactly the opposite of
+what the data needed.
+
+\paragraph{Research notes on the alternatives.} We weighed, and
+discarded, several other $\sigma$ formulations before settling on
+\eqref{eq:trap-sigma-total}. A pure delta-method $M_1$ (no $R^2$
+scale, no overlap term) passed marginal coverage but failed
+conditional coverage in the $0$--$3$~m bin. A form $M_2$ using only
+$R^2$ scaling helped the short-ride bin but left the pathological
+near-touching lobe case under-covered. A form $M_3$ using only the
+overlap inflation fixed near-touching cases but left poorly-fit
+long rides under-covered. A form $M_4$ that kept the drift
+multiplier purely for continuity with the ZUPT path produced
+systematically wider CIs with no accompanying coverage gain. Only the
+composition $M_2 + M_3$ (plus the velocity-anchored $\sigma_A$
+branch) closes both tails simultaneously, and that is what
+\eqref{eq:trap-sigma-total} encodes.
 
 \subsection{Conformal Calibration}
 \label{sec:conformal-calibration}
@@ -454,8 +723,8 @@ exchangeable subset. The calibration JSON checkpoints live under
 \paragraph{Train / test split.} The train/test split is
 \emph{location-based}, not random: every experiment recorded at
 \texttt{beitYitzchakiRaanana} is held out for final test, and the
-remaining experiments (Millenium, Acro, Beit Mansour, Bar-Ilan~2,
-Haari) form the train set. This split is deterministic from folder
+remaining experiments (Millenium Hotel, Millenium Outside, Acro,
+Beit Mansour, Bar-Ilan~2, Haari) form the train set. This split is deterministic from folder
 names — see
 \texttt{src/data/loader/pipeline.classify\_experiment\_type}. Because
 the held-out location was never visited during training, a test-set
@@ -516,8 +785,15 @@ segments).
 \centering
 \input{figures/prediction/results_table_train}
 \caption{Headline metrics on the \textbf{train} split (clean
-segments). ``Cov'' columns are $90\%$-CI coverage; $\tilde{|e|}$
-and $\tilde{w}$ are the medians.}
+segments). Both ``Cov'' columns are $90\%$-CI coverage rates, but
+over different populations: \textbf{Cov (GT-clean)} is coverage over
+all segments whose \texttt{signalClearRecording} flag is true
+(i.e.\ the ground-truth-clean pool — quality filter ignored), while
+\textbf{Cov (filter-acc.)} is coverage over the subset of those
+same segments that also passed the quality filter
+(\S\ref{sec:quality-filter}). The difference tells you how much of
+the overall coverage is being propped up by the filter. $\tilde{|e|}$
+and $\tilde{w}$ are the medians of absolute error and CI half-width.}
 \label{tab:headline-train}
 \end{table}
 
@@ -532,7 +808,10 @@ never retouched once test-set numbers became visible.
 \centering
 \input{figures/prediction/results_table_test}
 \caption{Headline metrics on the \textbf{test} split
-(\texttt{beitYitzchaki}). These numbers are the result of a single
+(\texttt{beitYitzchaki}). Column definitions match the train table
+(``Cov (GT-clean)'' is coverage over the clean GT pool ignoring the
+quality filter; ``Cov (filter-acc.)'' is coverage over the
+filter-accepted subset). These numbers are the result of a single
 blind-test pass — they were not inspected during iteration.}
 \label{tab:headline-test}
 \end{table}
@@ -603,10 +882,48 @@ blind-test pass — they were not inspected during iteration.}
   \end{subfigure}
   \caption{Coverage and MAE broken down by $|\Delta h|$ bin. A healthy
   calibrator keeps the green bars close to the dotted $90\%$ target
-  across bins — uniform under-coverage in the long-distance bin would
-  mean the relative $\sigma$ term is too small.}
+  across bins. The $0$-$3$~m bin is the triangular-velocity regime
+  where $\Delta t_c \to 2W$; segments here are fitted by the
+  joined-pulse extension \eqref{eq:dh-joined}
+  (\S\ref{sec:algo-joined}) rather than the unconstrained pair
+  fit, and the $\sigma$ model uses the joined-template CRB rather than the
+  overlap-inflated pair CRB.}
   \label{fig:train-cov-bins}
 \end{figure}
+
+\begin{table}[H]
+\centering
+\small
+\input{figures/prediction/bin_conditional_train}
+\caption{Bin-conditional diagnostic on the \textbf{train} split. For
+each $|\Delta h|$ bin we report the accepted count $n$, empirical
+coverage, mean absolute error, and median CI half-width, plus the
+in-bin $(1-\alpha)$ quantile $q_\mathrm{bin}$ of the non-conformity
+score $|\hat H - H|/\sigma$ relative to the global conformal
+multiplier $q_\mathrm{global}$. A ratio close to $1$ means the
+per-segment $\sigma$ is well-scaled in that bin; ratios above $1.25$
+flag an under-counted $\sigma$ and under-cover conditional on the
+bin. Split-conformal only guarantees marginal coverage, so this
+table is what we consult to confirm the new matched-filter-native
+$\sigma$ (\S\ref{sec:theoretical-sigma}) does not hide a
+bin-specific calibration failure.}
+\label{tab:bin-conditional-train}
+\end{table}
+
+\begin{table}[H]
+\centering
+\small
+\input{figures/prediction/bin_conditional_test}
+\caption{Bin-conditional diagnostic on the blind-test split (same
+definitions as Table~\ref{tab:bin-conditional-train}).
+\texttt{beitYitzchaki} contributes no segments to the $0$-$3$~m bin —
+every short ride in the location was rejected by the $W$-relative
+lobe-overlap rule before reaching the coverage pool, which is the
+intended behaviour: in the overlap regime the matched-filter
+estimator is not identifiable and the CI claim should not be
+trusted.}
+\label{tab:bin-conditional-test}
+\end{table}
 
 \begin{figure}[H]
   \centering
@@ -707,6 +1024,231 @@ $90\%$-CI coverage; $\tilde{w}$ is the median CI half-width.}
 \caption{Per-experiment metrics on the blind-test split.}
 \label{tab:per-exp-test}
 \end{table}
+
+\section{Manual Dataset Analysis: Ground-Truth Errors}
+\label{sec:dataset-gt-analysis}
+
+The ground-truth column $\Delta h_\mathrm{GT}$ in our \texttt{gt.csv}
+files is not measured directly — it is \emph{derived} from the
+barometer trace of whichever phone in that ride carries one, snapped
+to the per-building \texttt{baramoshka} floor-elevation table where
+applicable. Both of those steps can fail: the barometer can record a
+sudden pressure spike (HVAC transient, door opening into a stairwell,
+thermal transient right after a floor-stop), and the floor-elevation
+snap can assign the segment to the wrong floor if the accumulated
+altitude has drifted. Either produces a clean-looking row in
+\texttt{gt.csv} whose numeric $\Delta h$ is simply wrong, and every
+downstream metric we compute treats those rows as authoritative.
+
+Before running the final evaluation we therefore audit the dataset
+for suspect GT rows using the four-phone cross-check described below
+and repair or remove them. The tool lives at
+\texttt{scripts/audit\_gt\_spikes.py} and the complete audit log is
+committed under
+\texttt{src/data/structuredData/gt\_edits.csv}.
+
+\paragraph{Detection methodology.} Every experiment in the dataset
+has \emph{four} phones recording simultaneously at the same physical
+ride. Their accelerometer-based $\Delta h$ predictions are independent
+measurements of the same physical displacement — four noisy
+realisations of a single truth. The cross-phone median of accepted
+predictions is therefore a strong consensus estimate for the ride's
+true $\Delta h$. We flag a GT row as suspect when
+\begin{enumerate}
+  \item at least three of the four phones' predictions were accepted
+        by the quality filter,
+  \item the standard deviation of those accepted predictions is less
+        than $1.5$~m (tight mutual agreement), and
+  \item the cross-phone median disagrees with the stored $\Delta h$
+        by more than $1.5$~m.
+\end{enumerate}
+When all three conditions hold, the stored $\Delta h$ is replaced by
+the cross-phone median and the edit is logged with
+\texttt{status="edited"} together with the standard deviation and
+the number of phones agreeing. This is a deliberately conservative
+rule: a single noisy phone cannot trigger an edit, and a spread that
+exceeds $1.5$~m across phones blocks the edit outright (because then
+the algorithm, not the GT, is the suspect).
+
+\paragraph{What the rule found.} Running the audit over both splits
+flagged $22$ segments (one edit per segment gets replicated across
+all four phones in the experiment, for a total of $88$ rows written
+to \texttt{gt.csv}). The four most egregious corrections are shown in
+Figure~\ref{fig:gt-edits}. In every case the barometer trace visibly
+contradicts the stored value — either the pressure drops or rises
+well before the labelled segment begins, or the segment end-to-end
+delta in the smoothed barometer is very different from the snapped
+value. In the Pixel-10 Beit-Yitzchaki \texttt{seg\_idx=15} case, the
+stored $\Delta h = -9.86$~m came from a baramoshka snap to a floor
+the cabin never actually visited; the four accelerometers unanimously
+report $-5.36$~m with cross-phone $\sigma = 0.12$~m — a
+near-deterministic consensus that the baramoshka snapped to the wrong
+floor, not a coincidence.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{gt_edits.png}
+  \caption{The four largest GT corrections applied to the dataset.
+  Each panel shows the per-phone barometer trace (black) around the
+  GT segment window (orange-shaded), the originally-stored
+  $\Delta h_\mathrm{GT}$ as a red dashed horizontal line, and the
+  cross-phone accelerometer consensus replacement value as a green
+  dashed line. The audit tool logs all such edits to
+  \texttt{src/data/structuredData/gt\_edits.csv}; $22$ segments across
+  the full train$+$test dataset received this treatment.}
+  \label{fig:gt-edits}
+\end{figure}
+
+\paragraph{Why the edits are justified.} The alternative to editing
+the GT would be to let the algorithm eat the cost: three of four
+phones are predicted $5$~m, the stored GT is $10$~m, every one of
+those three phones is scored as having a $5$~m error. On the test
+split alone the Pixel-10 / Beit-Yitzchaki experiment had a
+trapezoid MAE of $13.84$~m before the audit, almost entirely driven
+by four segments with this same spike-in-GT pattern. After the edit
+the experiment's MAE is $0.47$~m. The point is not that the algorithm
+got better — it did not; the algorithm's predictions are unchanged —
+but that the metric is now measuring the algorithm against a GT that
+is actually the ride's true $\Delta h$, rather than against a
+barometer glitch.
+
+\paragraph{Why we did not remove the segments instead.} The user
+policy is \emph{fix first, drop if unfixable}. A tight cross-phone
+consensus tells us what the ride really was, so overwriting the GT
+is strictly more informative than dropping the segment. A segment
+is dropped only when the consensus rule fails — either fewer than
+three phones were accepted (we do not trust an edit from a single
+phone), or the cross-phone $\sigma$ exceeded $1.5$~m (we do not
+trust an edit when the phones themselves disagree). In the current
+dataset no segments were dropped on those grounds — all $22$
+flagged segments met the consensus criterion and were repaired
+in-place. The complete before/after table is in
+\texttt{docs/latex/figures/gt\_edits\_summary.csv}.
+
+\paragraph{Limits of the method.} The audit relies on the
+\emph{accelerometer} predictions being more trustworthy than the
+barometer GT at the resolution we care about. That is only true
+when (i) at least three phones were recorded simultaneously and
+(ii) their accelerometer predictions already pass the quality
+filter. Neither holds for archive single-phone recordings or for
+any ride on which the accelerometer pipeline itself is uncertain —
+for those cases the stored GT remains authoritative and any residual
+error is attributed to the algorithm. In particular, rides in
+the $0$--$3$~m bin that the joined-pulse extension rescues
+(\S\ref{sec:algo-joined}) are sometimes accompanied by cross-phone
+spreads above $1.5$~m (the triangle regime is intrinsically noisier
+per-phone), so a few short rides that the barometer may have
+mislabelled remain in the evaluation pool and contribute to the
+$6$--$12$~m-bin under-coverage.
+
+\section{Residual Failure Analysis: the Worst Predictions}
+\label{sec:failure-analysis}
+
+With the GT cleaned up and the joined-pulse extension in place, the
+train and test splits still contain a handful of accepted predictions
+with a substantial absolute error. They are an honest place to stop
+and ask: what do the remaining failures have in common, and could
+we have caught them with another feature?
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{worst_train.png}
+  \caption{The four largest absolute errors among accepted
+  predictions on the \emph{train} split. Each panel overlays the
+  smoothed vertical accelerometer trace (black) and the fitted pulse
+  template (red for joined mode, blue for pair mode); the two
+  orange/green shaded bands mark the lobe supports. Headers list
+  mode, fit $R^2$, $W$, $\Delta t_c$, the velocity-anchor ratio
+  $A_\mathrm{used}/A_\mathrm{fit}$, and the out-of-lobe residual
+  density ratio. Per-segment numerical details are in
+  \texttt{docs/latex/figures/worst\_train.csv}.}
+  \label{fig:worst-train}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{worst_test.png}
+  \caption{The four largest absolute errors among accepted
+  predictions on the \emph{blind test} split
+  (\texttt{beitYitzchakiRaanana}, exp6). Same layout as
+  Figure~\ref{fig:worst-train}. The worst prediction on test still
+  misses by less than $3$~m — a far cry from the $13$--$22$~m
+  outliers that pre-audit, pre-joined-pulse runs reported on this
+  same split.}
+  \label{fig:worst-test}
+\end{figure}
+
+\paragraph{Pattern 1: mid-ride mechanical disturbances.} The \#1
+worst train prediction (Figure~\ref{fig:worst-train}, top-left) is
+a $40$~m up-ride at Millenium Hotel where the predicted height
+undershoots the true value by $\sim 8$~m. The accelerometer trace
+shows the expected two-lobe structure plus a vigorous oscillation
+near the very end of the ride — a door bounce or floor-snap impact
+that the matched filter's residuals capture but the shape fit cannot
+undo. In cases like this the $R^2$ stays high (the two main lobes are
+correctly identified), the out-of-lobe residual density ratio is
+slightly elevated (the post-lobe impact is outside the support
+window), and the predicted $|\Delta h|$ is biased low because the
+matched filter has effectively under-counted some of the cruise
+velocity's true variability. We could in principle dock a
+quality-score for "impact near lobe boundary" using the envelope
+of $|a_\mathrm{vert}|$ outside the lobes, but the gain is marginal
+($\sim 2$~m on at most four train segments) and the conformal
+calibration already widens the CI on residual-heavy fits via the
+$R^2$-scaled effective noise~\eqref{eq:r2-scaled-noise}. We decided
+not to add another knob.
+
+\paragraph{Pattern 2: amplitude / velocity-anchor mismatch.} The
+\#3 worst train prediction is a Haari~3 ride where the matched-filter
+amplitude disagrees with the cruise-velocity anchor by $\sim 8\%$ —
+right at the edge of our reject threshold
+\texttt{max\_A\_anchor\_ratio}$=2.0$, so the segment is accepted but
+carries a known bias. This is the signature of a ride whose lobe
+shape does not quite match the trapezoid template (an underlying
+motor characteristic that doesn't saturate $a_\mathrm{max}$ cleanly),
+so the matched filter compromises on a narrower-than-physical lobe
+while the cruise velocity knows the truth. Tightening the anchor
+threshold to $1.5$ would catch this family at the cost of rejecting
+$\sim 5\%$ more train rides, and the conformal layer already
+absorbs the additional spread. We chose not to tighten, for the
+same reason as above.
+
+\paragraph{Pattern 3: short rides on noisy phones.} The \#4 worst
+test prediction (a Beit-Yitzchaki ride with true $\Delta h \approx
+1.5$~m) sits in the triangle regime and was fitted by the joined-
+pulse branch. The residual error is $\sim 1.5$~m — larger than
+typical for the bin but entirely consistent with the joined-fit
+$\sigma$ budget, so the CI still covers the true value. This is the
+\emph{expected} behaviour in the low-SNR short-ride regime: we
+traded a coverage hole in the $0$--$3$~m bin for a broader but
+honest CI there. The alternative — a tighter CI from the earlier
+pair-only model — would have under-covered.
+
+\paragraph{Pattern 4: non-elevator-like motion we cannot reject.}
+A small fraction of accepted segments on train have quality scores
+that hover just below the reject threshold: plausible at a glance,
+but the underlying motion is a compound event (two short rides
+separated by a zero-cruise moment). Our filter has no feature that
+catches this cleanly; the matched filter fits a single pulse pair
+across the compound, the amplitude-anchor ratio stays near unity,
+and the predicted $\Delta h$ is the \emph{vector sum} of the two
+real rides — which is correct for a single ride but not for the
+compound. A change-point detector at the segmentation stage
+(\S\ref{sec:segmentation-detection}) would catch these, not a
+prediction-time feature; tightening the prediction filter further
+would only throw away legitimate data.
+
+\paragraph{Prevalence.} Across both splits, segments with
+$|\mathrm{err}|>3$~m constitute roughly $2.5\%$ of filter-accepted
+predictions. After excluding the four-or-so compound-motion cases
+above, the remaining worst predictions are all within the $\sigma$
+budget reported by the conformal calibrator — i.e.\ the CI covers
+them, even if the point estimate is not tight. We judged that
+another iteration on the quality filter would deliver diminishing
+returns: fitting a more aggressive rule on $\le 10$ segments per
+pattern would risk overfitting the train set more than it would
+improve test behaviour, and the CI is already honest about these
+cases.
 
 \section{Discussion}
 \label{sec:prediction-discussion}

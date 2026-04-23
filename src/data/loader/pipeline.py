@@ -80,7 +80,8 @@ def classify_experiment_type(exp_name: str) -> str:
 
     Project-level split (Uriya, 2026-04-19): the Beit Yitzchaki
     experiments are the held-out cross-building test set; everything
-    else (Millenium, Acro, Beit Mansour, Bar-Ilan 2, Haari) is train.
+    else (Millenium Hotel, Millenium Outside, Acro, Beit Mansour,
+    Bar-Ilan 2, Haari) is train.
     The rule is deterministic from folder names alone so
     `list_experiments` / metadata stays consistent across reruns.
     """

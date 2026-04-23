@@ -31,7 +31,7 @@
 \title{Elevator Vertical Distance Estimation \\
   {\large Accelerometer-only height-difference estimation with quality filtering
   and conformal confidence intervals}}
-\author{Eyal Yakir \and Uriya Cohen-Eliya \and Roy Turgeman}
+\author{Eyal Yakir \and Uriya Cohen-Eliya}
 \date{\today}
 
 \begin{document}
@@ -73,8 +73,9 @@ that turns these models into coverage-guaranteed confidence intervals on
 real field data. This report documents the end-to-end pipeline we built
 for all three, organised as follows.
 
-\S\ref{sec:data-collection} describes the data collection: the eight
-buildings, four phones per ride, and the Python loader that converts raw
+\S\ref{sec:data-collection} describes the data collection: seven
+elevators across six buildings, four phones per ride, and the Python
+loader that converts raw
 \texttt{sensorLog\_*.txt} files into tidy per-sensor CSVs with ground-
 truth intervals. \S\ref{sec:segmentation-detection} introduces the
 kinematics of an elevator ride -- the four-parameter
@@ -102,41 +103,50 @@ reading this section alongside \texttt{src/data/README.md}.
 \subsection{Experimental Design}
 \label{sec:experimental-design}
 
-We ran a controlled field campaign across \textbf{six different buildings}
-in central Israel, each with a different elevator, cabin geometry, motor
-characteristic, and floor-to-floor height. The campaign was concentrated
-in Ra'anana (four buildings), with one building each in Herzeliya and
-Ramat Gan, covering low-rise residential, mid-rise office, and hotel use
-cases so that any algorithm trained or evaluated on this data is not just
-fitted to a single elevator. Buildings are listed in
-Table~\ref{tab:buildings}; Figure~\ref{fig:building-heights} summarises
-their height distribution. Note that \texttt{milleniumHotel} was visited
-in three separate sessions covering two different elevators within the
-hotel (the internal one and the external elevator attached to the hotel
-body), which the metadata records as \texttt{exp1}, \texttt{exp2},
-\texttt{exp3}. We treat all three as the same ``building'' for purposes
-of the train/test split because the motor characteristic family is
-shared.
+We ran a controlled field campaign across \textbf{seven different
+elevators} in six buildings in central Israel, each with a different
+cabin geometry, motor characteristic, and floor-to-floor height. The
+campaign was concentrated in Ra'anana (four buildings, five elevators),
+with one building each in Herzeliya and Ramat Gan, covering low-rise
+residential, mid-rise office, and hotel use cases so that any algorithm
+trained or evaluated on this data is not just fitted to a single
+elevator. Buildings are listed in Table~\ref{tab:buildings};
+Figure~\ref{fig:building-heights} summarises their height distribution,
+and Figure~\ref{fig:building-heights-per-building} shows the
+floor-by-floor profile for each individual building. The
+\texttt{milleniumHotel} site is split into two logical ``buildings''
+because it hosts two physically distinct elevators — the internal
+hotel elevator (sessions \texttt{exp1} and \texttt{exp2}) and the
+external elevator attached to the hotel body
+(\texttt{milleniumOutside}, session \texttt{exp3}). The two elevators
+have different motor characteristics, cabin geometry, and stop
+patterns, so we treat them as separate elevators for evaluation
+purposes while keeping both on the train side of the split.
 
 \begin{table}[H]
 \centering
 \small
-\begin{tabular}{l l l}
+\begin{tabular}{l l l l}
 \toprule
-\textbf{Building (internal name)} & \textbf{Type} & \textbf{Location} \\
+\textbf{Building (internal name)} & \textbf{Elevator} & \textbf{Type} & \textbf{Location} \\
 \midrule
-\texttt{milleniumHotel}          & Hotel       & Ra'anana \\
-\texttt{acroBuilding}            & Office      & Ra'anana \\
-\texttt{beitMansour1}            & Residential & Ra'anana \\
-\texttt{beitYitzchakiRaanana}    & Residential & Ra'anana \\
-\texttt{BarIlan2Herzelia}        & Residential & Herzeliya \\
-\texttt{Haari3}                  & Residential & Ramat Gan \\
+\texttt{milleniumHotel}          & Internal    & Hotel       & Ra'anana \\
+\texttt{milleniumOutside}        & External    & Hotel       & Ra'anana \\
+\texttt{acroBuilding}            & --          & Office      & Ra'anana \\
+\texttt{beitMansour1}            & --          & Residential & Ra'anana \\
+\texttt{beitYitzchakiRaanana}    & --          & Residential & Ra'anana \\
+\texttt{BarIlan2Herzelia}        & --          & Residential & Herzeliya \\
+\texttt{Haari3}                  & --          & Residential & Ramat Gan \\
 \bottomrule
 \end{tabular}
-\caption{The six buildings used in the field campaign. Internal names match
-the \texttt{location} field in \texttt{rawData/} experiment folders.
-\texttt{milleniumHotel} was visited in multiple sessions covering two
-different elevators within the same hotel, and
+\caption{The seven elevators (across six buildings) used in the field
+campaign. Internal names match the experiment-folder slug in
+\texttt{rawData/}. The Millenium hotel contributes two entries because
+it hosts two physically distinct elevators — the internal one
+(\texttt{milleniumHotel}, sessions \texttt{exp1}, \texttt{exp2}) and the
+external one attached to the hotel body (\texttt{milleniumOutside},
+session \texttt{exp3}); the latter has no gramushka floor-anchor table
+and uses pure-barometer ground truth.
 \texttt{beitYitzchakiRaanana} is the held-out blind-test location
 (\S\ref{sec:evaluation-protocol}).}
 \label{tab:buildings}
@@ -144,10 +154,28 @@ different elevators within the same hotel, and
 
 \begin{figure}[ht]
 \centering
-\includegraphics[width=0.75\linewidth]{building_heights.png}
-\caption{Height distribution across the six sampled buildings. Each bar
-shows the highest floor reached in a ride sequence for that building.}
+\includegraphics[width=0.80\linewidth]{building_heights.png}
+\caption{Overview of vertical range covered by the seven elevators in
+the field campaign (Millenium Hotel internal and external elevators
+are listed separately). Each bar shows the difference between the
+highest and lowest floors the elevator can reach, as encoded in the
+central gramushka floor-elevation table for that building. Rendered
+by \texttt{scripts/figs/plot\_building\_heights.py}.}
 \label{fig:building-heights}
+\end{figure}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\linewidth]{building_heights_per_building.png}
+\caption{Per-elevator floor profile: each panel plots the stored
+elevation of every floor the elevator stops at, relative to ground.
+Panels highlight the geometric differences between the buildings
+(dense low-rise floors in Bar-Ilan and Beit Mansour, a sparse
+high-range office stack in Acro, a short external elevator at
+Millenium Outside). The dashed horizontal line marks the highest
+floor in each table. Source: \texttt{src/data/gramushka/<building>/
+gramushka.csv}.}
+\label{fig:building-heights-per-building}
 \end{figure}
 
 \paragraph{Phones.}

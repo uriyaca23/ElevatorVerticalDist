@@ -20,10 +20,13 @@ from src.utils.conformal import ConformalCalibrator
 from src.utils.sensor_noise import get_phone_accel_noise_sigma
 from .pulse_pair import (
     GRID_W_S,
+    fit_joined_pulse,
     fit_shared_shape_pair,
     height_from_fit,
+    joined_kernel,
     smooth_rolling_mean,
     theoretical_sigma_height,
+    theoretical_sigma_height_joined,
     trapezoid_kernel,
 )
 from ...common.types import CalibrationSample, PredictionOutput
@@ -52,9 +55,15 @@ class TrapezoidAccelEstimator:
       4. Fit shared-shape trapezoid-pulse pair (W, f, |A|, t_c1, t_c2)
          by matched-filter grid search (see ``.pulse_pair``).
       5. Analytic Δh = sign · |A| · W · (1+f) · (t_c2 − t_c1).
-      6. Theoretical σ via delta method on (A, W, f, Δt_c), scaled by
-         an empirical drift-factor + relative-|Δh| term that absorb
-         systematic deviations from the ideal trapezoid shape.
+      6. Theoretical σ by delta-method propagation of the matched-filter
+         CRB through Δh = s·A·W(1+f)·Δt_c. Three physics-grounded
+         enrichments: (i) σ_a is scaled by 1/max(R², r2_epsilon) to
+         widen the CI on poor-fit segments; (ii) σ_Δt_c² is inflated
+         by (2W/(Δt_c-2W))² in the lobe-overlap regime; (iii) when
+         velocity-anchoring is active, σ_A² uses the cruise-velocity
+         variance rather than the matched-filter CRB. No drift
+         multiplier or relative-|Δh| term — those were ZUPT-style
+         constructs unjustified for a matched-filter closed-form.
       7. Quality filter produces accept/reject + quality score.
       8. Conformal multiplier (fit at calibration time) converts the
          theoretical σ into a 90% CI half-width.
@@ -157,102 +166,212 @@ class TrapezoidAccelEstimator:
         a_smooth = smooth_rolling_mean(a_vert, inp.fs, c.smooth_sec)
 
         # ---- Shared-shape pulse-pair fit ----
-        # Ride-local time axis starts at 0. For prediction we let the
-        # fitter pick direction; the GT label isn't part of the
-        # inference contract. W floor adapts with ride duration to
-        # counter the narrow-W bias the matched filter has on long
-        # rides (see ``config.W_floor_alpha`` for the derivation).
+        # Two parallel fits are attempted: the unconstrained pair fit
+        # (5 free parameters, Δt_c free) and the joined-pulse fit
+        # (4 free parameters, Δt_c = 2W forced). The latter is the
+        # natural model for short rides where the cabin never reaches
+        # cruise velocity, in which case the accelerometer trace is a
+        # single bipolar pulse. We compare joint R² and keep whichever
+        # fit explains the signal better. When both fits fail (low
+        # R²) we fall back to an inline ZUPT displacement as a
+        # last-resort estimate so the segment is not silently dropped
+        # by the matched-filter stage.
         duration = float(inp.t_sec[-1])
         W_floor = max(c.W_floor_min_sec, c.W_floor_alpha * duration)
         grid_W = np.linspace(W_floor, GRID_W_S[-1], GRID_W_S.size)
-        fit = fit_shared_shape_pair(
+
+        pair_fit = fit_shared_shape_pair(
             a_smooth, inp.t_sec,
             gt_t0=0.0, gt_t1=duration,
             direction=None,
             grid_W=grid_W,
         )
-        if fit is None:
-            return PredictionOutput(
-                height_diff=0.0, ci_half_width=math.inf,
-                theoretical_sigma=math.inf, accepted=False,
-                quality_score=8.0, reject_reason="no_pulse_pair_fit",
-                meta={"vert_method": vert_method},
-            )
+        joined_fit = fit_joined_pulse(
+            a_smooth, inp.t_sec,
+            gt_t0=0.0, gt_t1=duration,
+            direction=None,
+            grid_W=grid_W,
+        )
 
-        # ---- Velocity-anchored amplitude ----
+        # Pick the better fit by joint R². Applies a small advantage
+        # threshold in favour of the joined model when it wins, since
+        # the joined model has fewer free parameters (Occam's razor —
+        # equivalent R² but with one less DOF should prefer joined).
+        def _pair_r2(f): return f.joint_r2 if f is not None else -np.inf
+        mode: str
+        if pair_fit is None and joined_fit is None:
+            # Both matched-filter fits failed. Fall through to ZUPT
+            # fallback below.
+            mode = "zupt_fallback"
+            fit = None
+        elif joined_fit is None:
+            mode = "pair"; fit = pair_fit
+        elif pair_fit is None:
+            mode = "joined"; fit = joined_fit
+        else:
+            pair_r2 = _pair_r2(pair_fit)
+            joined_r2 = _pair_r2(joined_fit)
+            # Prefer joined when its R² is at least as good AND the pair fit
+            # sits in the overlap regime (Δt_c close to 2W). Otherwise prefer
+            # whichever fits better outright.
+            pair_overlap_ratio = pair_fit.delta_t_c / (2.0 * max(pair_fit.W, 1e-6))
+            if joined_r2 > pair_r2 + c.joined_r2_advantage:
+                mode = "joined"; fit = joined_fit
+            elif pair_overlap_ratio < c.pair_overlap_handoff and joined_r2 > pair_r2 - c.joined_r2_advantage:
+                # Overlap regime — defer to joined if it's comparable.
+                mode = "joined"; fit = joined_fit
+            else:
+                mode = "pair"; fit = pair_fit
+
+        # ---- ZUPT fallback ----
+        # Kicks in when both matched-filter fits failed, OR when the
+        # kept fit has R² below ``zupt_fallback_r2`` — a sign that the
+        # signal doesn't look like an elevator ride at all, and
+        # integrating the vertical velocity is more honest than
+        # forcing a pulse model.
+        sigma_a_datasheet = get_phone_accel_noise_sigma(inp.phone, inp.fs)
+        dt_sec = float(np.median(np.diff(inp.t_sec))) if inp.t_sec.size > 1 else 1.0 / inp.fs
+
+        zupt_height = None
+        if mode == "zupt_fallback" or (fit is not None and fit.joint_r2 < c.zupt_fallback_r2):
+            pos, vel = zupt_integrate(a_smooth, inp.t_sec)
+            if pos.size >= 2:
+                zupt_height = float(pos[-1] - pos[0])
+                # When both matched-filter fits failed, this is the
+                # only estimate we have; σ uses a coarse ZUPT-style
+                # bound ``σ_a · Δt² · √(N³/12)``.
+                N = float(inp.ax.size)
+                sigma_zupt = max(
+                    sigma_a_datasheet * dt_sec ** 2 * math.sqrt(N ** 3 / 12.0),
+                    c.min_theoretical_sigma_m,
+                )
+                if mode == "zupt_fallback":
+                    theo_sigma = sigma_zupt
+                    height_diff = zupt_height
+                    ci = self.conformal.half_width(theo_sigma)
+                    ci = max(c.ci_absolute_floor_m, min(ci, c.ci_absolute_cap_m))
+                    return PredictionOutput(
+                        height_diff=float(height_diff),
+                        ci_half_width=float(ci),
+                        theoretical_sigma=float(theo_sigma),
+                        accepted=False,  # ZUPT fallback isn't trusted blindly
+                        quality_score=5.0,
+                        reject_reason="zupt_fallback_both_fits_failed",
+                        meta={
+                            "vert_method": vert_method,
+                            "mode": mode,
+                            "zupt_height": zupt_height,
+                        },
+                    )
+
+        # ---- Velocity-anchored amplitude (pair-mode only) ----
         # The matched filter underestimates |A| on long rides because
         # it picks a narrow high-R² template that doesn't capture the
         # full cruise velocity. We rescale |A| so that
         # ``A · W · (1 + f)`` matches the measured cruise velocity
-        # (ZUPT-integrated between the two lobes). For short rides
-        # with no cruise window we skip the correction.
+        # (ZUPT-integrated between the two lobes). The anchor is
+        # disabled in joined mode because a joined ride has no cruise
+        # window by construction.
         A_fit = fit.A
         A_used = A_fit
         v_peak_meas = math.nan
-        if c.velocity_anchor_A:
+        cruise_width = 0.0
+        cruise_v_std = 0.0
+        anchored = False
+        if mode == "pair" and c.velocity_anchor_A:
             _pos, vel = zupt_integrate(a_smooth, inp.t_sec)
-            # Cruise region: between the lobes, excluding the lobe
-            # support (±W around each centre).
             cruise_mask = (
                 (inp.t_sec > fit.t_c1 + fit.W)
                 & (inp.t_sec < fit.t_c2 - fit.W)
             )
-            cruise_width = float(
-                (inp.t_sec[cruise_mask][-1] - inp.t_sec[cruise_mask][0])
-                if cruise_mask.sum() >= 2 else 0.0
-            )
+            if cruise_mask.sum() >= 2:
+                cruise_width = float(
+                    inp.t_sec[cruise_mask][-1] - inp.t_sec[cruise_mask][0]
+                )
+                cruise_v_std = float(np.std(vel[cruise_mask]))
             if cruise_width >= c.velocity_anchor_min_cruise_sec:
-                # Signed cruise velocity; compare to sign of fit
                 v_peak_meas = float(np.mean(vel[cruise_mask]))
-                # A_corrected gives v_peak_meas directly:
-                #   v_peak = sign · A · W · (1+f)
-                #   => A = |v_peak_meas| / (W · (1+f))
                 denom = fit.W * (1.0 + fit.f)
                 if denom > 1e-6:
                     A_used = abs(v_peak_meas) / denom
+                    anchored = True
 
-        # Re-derive Δh with the corrected amplitude
-        if A_used != A_fit and A_used > 0:
+        # ---- Δh computation ----
+        if mode == "joined":
+            # Joined pulse: Δh = 2·s·A·W²·(1+f)
+            height_diff = float(
+                fit.sign * 2.0 * fit.A * fit.W * fit.W * (1.0 + fit.f)
+            )
+        elif A_used != A_fit and A_used > 0:
             v_peak_corrected = A_used * fit.W * (1.0 + fit.f)
             height_diff = float(fit.sign * v_peak_corrected * fit.delta_t_c)
         else:
             height_diff = height_from_fit(fit)
 
         # ---- Theoretical σ ----
-        # Use the *empirical* residual RMS as the effective σ_a instead
-        # of the datasheet white-noise σ. The residuals after the
-        # shared-shape template subtraction capture sensor noise plus
-        # whatever coloured noise (hand tremor, gravity-projection
-        # drift, sub-second rotational wobble) is actually present on
-        # this ride — so σ_a_emp is a full error-energy accounting,
-        # not just a datasheet promise. The datasheet σ is used only
-        # as a minimum floor so segments with an implausibly perfect
-        # fit don't end up with near-zero σ.
-        sigma_a_datasheet = get_phone_accel_noise_sigma(inp.phone, inp.fs)
+        # Pair mode: delta method on Δh = s·A·W(1+f)·Δt_c with R²-
+        # scaled effective noise, overlap inflation on σ_Δt_c (only
+        # when Δt_c < 2W), and optional velocity-anchored σ_A.
+        # Joined mode: delta method on Δh = 2·s·A·W²·(1+f); σ_A uses
+        # the joined-template CRB (norm 2·⟨τ,τ⟩) and the time-shift
+        # parameter t_mid drops out because Δh is shift-invariant.
         residual_rms = float(np.sqrt(np.mean(np.asarray(fit.residuals) ** 2)))
         sigma_a_eff = max(residual_rms, sigma_a_datasheet)
-        dt_sec = float(np.median(np.diff(inp.t_sec))) if inp.t_sec.size > 1 else 1.0 / inp.fs
-        sig = theoretical_sigma_height(fit, sigma_a=sigma_a_eff, dt_sec=dt_sec)
-        sigma_white = max(sig["sigma_dh"], c.min_theoretical_sigma_m)
-
-        # Ride-drift angle from the quality features (recomputed here so
-        # σ sees it whether the quality filter rejects or not).
-        from .quality import _ride_gravity_drift
-        max_drift, _ = _ride_gravity_drift(inp.ax, inp.ay, inp.az, inp.fs)
-        # Scale: small drift is fine, large drift blows up σ linearly.
-        drift_scale = 1.0 + c.drift_scale * max(0.0, max_drift)
-        sigma_drift_scaled = sigma_white * drift_scale
-
-        # Relative floor: gravity-projection errors scale with |Δh|.
-        sigma_rel = c.relative_sigma_factor * abs(height_diff)
-
-        # Combine independently-added terms in quadrature
-        theo_sigma = math.sqrt(sigma_drift_scaled ** 2 + sigma_rel ** 2)
-        theo_sigma = max(theo_sigma, c.min_theoretical_sigma_m)
+        if mode == "pair":
+            anchored_fit = fit
+            if A_used != A_fit and A_used > 0:
+                from dataclasses import replace as _replace
+                anchored_fit = _replace(fit, A=A_used)
+            sig = theoretical_sigma_height(
+                anchored_fit, sigma_a=sigma_a_eff, dt_sec=dt_sec,
+                joint_r2=fit.joint_r2, r2_epsilon=c.r2_epsilon,
+                cruise_sec=cruise_width, anchored=anchored,
+                overlap_delta=c.overlap_delta,
+            )
+        else:  # joined
+            sig = theoretical_sigma_height_joined(
+                fit, sigma_a=sigma_a_eff,
+                joint_r2=fit.joint_r2, r2_epsilon=c.r2_epsilon,
+            )
+        theo_sigma = max(sig["sigma_dh"], c.min_theoretical_sigma_m)
 
         # ---- Conformal half-width ----
         ci = self.conformal.half_width(theo_sigma)
         ci = max(c.ci_absolute_floor_m, min(ci, c.ci_absolute_cap_m))
+
+        # ---- Out-of-lobe residual concentration (quality feature) ----
+        # For a well-fit ride the residuals should be roughly uniform in
+        # time (just sensor noise). We flag rides where the residual
+        # energy density OUTSIDE the lobes is disproportionately
+        # larger than the density INSIDE the lobes — that pattern
+        # signals a mid-ride disturbance (door bounce, walking) the
+        # matched filter could not explain. In joined mode the two
+        # lobes share a boundary so the "inside" mask covers both
+        # halves of the bipolar pulse.
+        res = np.asarray(fit.residuals, dtype=float)
+        if res.size == inp.t_sec.size and res.size > 0:
+            inside_lobes = (
+                (np.abs(inp.t_sec - fit.t_c1) <= fit.W)
+                | (np.abs(inp.t_sec - fit.t_c2) <= fit.W)
+            )
+            n_in = int(inside_lobes.sum())
+            n_out = int((~inside_lobes).sum())
+            e_in = float(np.sum(res[inside_lobes] ** 2))
+            e_out = float(np.sum(res[~inside_lobes] ** 2))
+            density_in = e_in / max(n_in, 1)
+            density_out = e_out / max(n_out, 1)
+            out_of_lobe_frac = density_out / max(density_in, 1e-9)
+        else:
+            out_of_lobe_frac = 1.0
+
+        # ---- A anchor ratio (quality feature) ----
+        A_anchor_ratio = float(A_used / A_fit) if A_fit > 1e-6 else 1.0
+
+        # ---- Cruise velocity coefficient of variation ----
+        if abs(v_peak_meas) > 1e-6:
+            cruise_v_cv = cruise_v_std / abs(v_peak_meas)
+        else:
+            cruise_v_cv = 0.0
 
         # ---- Quality filter ----
         q = quality_assess(
@@ -265,19 +384,44 @@ class TrapezoidAccelEstimator:
             delta_tc_sec=fit.delta_t_c,
             W_fit=fit.W, A_fit=A_used,
             duration_s=float(inp.t_sec[-1]),
+            # Outlier-catcher features (new)
+            A_anchor_ratio=A_anchor_ratio,
+            out_of_lobe_residual_frac=out_of_lobe_frac,
+            cruise_v_cv=cruise_v_cv,
             min_segment_samples=c.min_segment_samples,
             grav_window_sec=c.grav_window_sec,
             grav_stability_max=c.grav_stability_max,
             quality_score_reject=c.quality_score_reject,
-            min_joint_r2=c.min_joint_r2,
+            min_r2_short=c.min_r2_short, min_r2_mid=c.min_r2_mid,
+            min_r2_long=c.min_r2_long,
+            overlap_delta=c.overlap_delta,
             min_delta_tc_sec=c.min_delta_tc_sec,
             min_distance_m=c.min_distance_m,
             max_distance_m=c.max_distance_m,
             min_active_fraction=c.min_active_fraction,
+            max_A_anchor_ratio=c.max_A_anchor_ratio,
+            min_A_anchor_ratio=c.min_A_anchor_ratio,
+            max_out_of_lobe_frac=c.max_out_of_lobe_frac,
+            max_cruise_v_cv=c.max_cruise_v_cv,
+            max_pre_post_angle_deg=c.max_pre_post_angle_deg,
         )
+
+        # Template reconstruction is mode-aware so downstream
+        # visualisation shows what the estimator actually fitted.
+        if mode == "joined":
+            t_mid = 0.5 * (fit.t_c1 + fit.t_c2)
+            a_template = fit.sign * A_used * joined_kernel(
+                inp.t_sec, t_mid, fit.W, fit.f,
+            )
+        else:
+            a_template = (
+                fit.sign * A_used * trapezoid_kernel(inp.t_sec, fit.t_c1, fit.W, fit.f)
+                - fit.sign * A_used * trapezoid_kernel(inp.t_sec, fit.t_c2, fit.W, fit.f)
+            )
 
         meta: dict[str, Any] = {
             "vert_method": vert_method,
+            "mode": mode,
             "params": {
                 "A_fit": fit.A, "A_used": A_used,
                 "W": fit.W, "f": fit.f,
@@ -285,19 +429,19 @@ class TrapezoidAccelEstimator:
                 "sign": fit.sign, "joint_r2": fit.joint_r2,
                 "v_peak_measured": v_peak_meas,
             },
+            "pair_r2": float(_pair_r2(pair_fit)),
+            "joined_r2": float(_pair_r2(joined_fit)),
             "fit_r2_1": fit.r2_1, "fit_r2_2": fit.r2_2,
             "delta_tc_sec": fit.delta_t_c,
             "sigma_breakdown": sig,
-            "sigma_white": sigma_white,
-            "sigma_drift_scaled": sigma_drift_scaled,
-            "sigma_rel": sigma_rel,
-            "ride_drift_deg": float(max_drift),
+            "A_anchor_ratio": A_anchor_ratio,
+            "out_of_lobe_residual_frac": out_of_lobe_frac,
+            "cruise_v_cv": cruise_v_cv,
+            "cruise_width_sec": cruise_width,
+            "zupt_height": zupt_height,
             "quality_features": q.features,
             "a_smooth": a_smooth,
-            "a_template": (
-                fit.sign * A_used * trapezoid_kernel(inp.t_sec, fit.t_c1, fit.W, fit.f)
-                - fit.sign * A_used * trapezoid_kernel(inp.t_sec, fit.t_c2, fit.W, fit.f)
-            ),
+            "a_template": a_template,
             "t_sec": inp.t_sec,
         }
         return PredictionOutput(
