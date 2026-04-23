@@ -106,7 +106,7 @@ class DetectConfig:
 
 
     joint_r2_thresh: float = 0.90
-    min_pair_abs_a: float = 0.30
+    min_pair_abs_a: float = 0.22
     heatmap_energy_thresh: float = 0.40
 
     # Quiet-middle filter (iter_04): reject pairs whose plateau between the
@@ -127,7 +127,7 @@ class DetectConfig:
     # "Segmentation–Prediction Improvement" section in docs/latex/main.tex).
     segment_pad_eps_s: float = 0.25
 
-    w_min_s: float = 0.4
+    w_min_s: float = 0.3
     w_max_s: float = 3.0
     n_w: int = 30
     f_min: float = 0.05

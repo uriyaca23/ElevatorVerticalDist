@@ -40,3 +40,4 @@ venv/bin/python -m src.segmentation.algorithms.improvement_iterations._iter_runn
 | 06 | `iter_06_per_sign_pick` | 334 / 498 | 218 | 0 | 0.747 | 0.508 | Per-sign peak-pick — no effect; root cause is upstream gates |
 | 07 | `iter_07_lower_peak_gates` | 403 / 498 | **154** | **−64** | **0.835** | **0.601** | `r2_peak_thresh` 0.55→0.40, `min_peak_abs_a` 0.4→0.25 |
 | 13 | `iter_13_triangle_shape_row` | 403 / 498 | 155 | +1 | 0.834 | **0.703** | Prepend f=0 (triangle) to grid_f(); big IoU win (+0.102) but mistake count flat. Misses are noisy-phone rides, not short rides. |
+| 14 | `iter_14_widen_w_and_pair_a` | 394 / 498 | 155 | 0 | 0.817 | 0.691 | `w_min_s` 0.4→0.3 + `min_pair_abs_a` 0.30→0.22. Mistakes flat but gt_split 1→10 (beitMansour1 over-segmented). min_pair_abs_a=0.22 too permissive — will bisect. |
