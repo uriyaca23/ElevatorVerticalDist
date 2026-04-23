@@ -59,7 +59,7 @@ class TemplateMatchConfig(BaseModel):
     min_ride_s: float = 0.0
     max_ride_s: float = 30.0
     joint_r2_thresh: float = 0.90
-    min_pair_abs_a: float = 0.30
+    min_pair_abs_a: float = 0.40
     heatmap_energy_thresh: float = 0.20
 
     # (W, f) trapezoid-template grid

@@ -16,7 +16,7 @@
     "min_ride_s": 0.0,
     "max_ride_s": 30.0,
     "joint_r2_thresh": 0.90,
-    "min_pair_abs_a": 0.30,
+    "min_pair_abs_a": 0.40,
     "heatmap_energy_thresh": 0.20,
     "w_min_s": 0.4,
     "w_max_s": 3.0,
