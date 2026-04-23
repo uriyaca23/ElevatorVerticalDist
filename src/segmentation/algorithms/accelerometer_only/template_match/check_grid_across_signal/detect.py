@@ -95,7 +95,7 @@ class DetectConfig:
     # ``elevator_reports/seg_acc_sweep/summary.json``).
     r2_peak_thresh: float = 0.40
 
-    min_peak_abs_a: float = 0.25
+    min_peak_abs_a: float = 0.20
 
     nms_radius_s: float = 1.0
 

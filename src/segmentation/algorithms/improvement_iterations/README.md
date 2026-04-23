@@ -41,4 +41,5 @@ venv/bin/python -m src.segmentation.algorithms.improvement_iterations._iter_runn
 | 07 | `iter_07_lower_peak_gates` | 403 / 498 | **154** | **−64** | **0.835** | **0.601** | `r2_peak_thresh` 0.55→0.40, `min_peak_abs_a` 0.4→0.25 |
 | 13 | `iter_13_triangle_shape_row` | 403 / 498 | 155 | +1 | 0.834 | **0.703** | Prepend f=0 (triangle) to grid_f(); big IoU win (+0.102) but mistake count flat. Misses are noisy-phone rides, not short rides. |
 | 14 | `iter_14_widen_w_and_pair_a` | 394 / 498 | 155 | 0 | 0.817 | 0.691 | `w_min_s` 0.4→0.3 + `min_pair_abs_a` 0.30→0.22. Mistakes flat but gt_split 1→10 (beitMansour1 over-segmented). min_pair_abs_a=0.22 too permissive — will bisect. |
-| 15 | `iter_15_w_min_only` | 400 / 498 | **147** | **−7** | **0.839** | 0.702 | Keep triangle row + `w_min_s=0.3`; revert `min_pair_abs_a` to 0.30. **New best — beats iter_07.** FPs 59→49 (narrower W rejects walking artifacts). |
+| 15 | `iter_15_w_min_only` | 400 / 498 | 147 | −7 | 0.839 | 0.702 | Keep triangle row + `w_min_s=0.3`; revert `min_pair_abs_a` to 0.30. Beats iter_07. FPs 59→49 (narrower W rejects walking artifacts). |
+| 16 | `iter_16_lower_peak_a` | 400 / 498 | **144** | **−10** | **0.841** | 0.705 | `min_peak_abs_a` 0.25→0.20. New best. −3 FPs. Missed unchanged — 50 of 87 have peaks with R²~0.95 but A~0.14, still below gate. |
