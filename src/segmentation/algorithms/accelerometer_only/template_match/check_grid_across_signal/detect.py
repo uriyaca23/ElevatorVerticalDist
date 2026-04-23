@@ -93,21 +93,29 @@ class DetectConfig:
     # Defaults below are the combined-best 1-D sweep winners
     # (see ``scripts/sweep_acc_segmentation.py`` +
     # ``elevator_reports/seg_acc_sweep/summary.json``).
-    r2_peak_thresh: float = 0.55
+    r2_peak_thresh: float = 0.40
 
-    min_peak_abs_a: float = 0.4
+    min_peak_abs_a: float = 0.25
 
-    nms_radius_s: float = 2.0
+    nms_radius_s: float = 1.0
 
 
-    same_sign_min_gap_s: float = 10.0
+    same_sign_min_gap_s: float = 5.0
     min_ride_s: float = 0.0
     max_ride_s: float = 30.0
 
 
     joint_r2_thresh: float = 0.90
-    min_pair_abs_a: float = 0.5
-    heatmap_energy_thresh: float = 0.60
+    min_pair_abs_a: float = 0.30
+    heatmap_energy_thresh: float = 0.40
+
+    # Quiet-middle filter (iter_04): reject pairs whose plateau between the
+    # two lobes is not quiet. Real elevator rides cruise at constant
+    # velocity so a_vert ≈ 0 in the middle; walking FPs have continuous
+    # motion and their middle RMS is comparable to the lobe amplitude.
+    # Filter fires iff quiet_middle_rms(middle) > ratio * pair_A_abs. Set
+    # ratio >= 1.0 to disable.
+    quiet_middle_ratio: float = 0.5
 
     w_min_s: float = 0.4
     w_max_s: float = 3.0
@@ -292,8 +300,17 @@ def detect(
     nms_samples = max(1, int(round(config.nms_radius_s * fs)))
     amp_gate = np.abs(best_A) >= config.min_peak_abs_a
     best_r2_gated = np.where(amp_gate, best_r2, -np.inf)
-    initial_peaks = _peak_pick(best_r2_gated, config.r2_peak_thresh, nms_samples)
+    # Per-sign peak picking: run local-NMS separately for + and − so that
+    # a nearby higher-R² opposite-sign peak doesn't suppress a valid
+    # same-sign peak. Previously _peak_pick ran on unsigned R² which
+    # dropped lots of lobes near high-R² peaks of the other sign (see
+    # iter_05/iter_06 notes in improvement_iterations/).
     signs = np.sign(best_A)
+    pos_r2_gated = np.where(signs > 0, best_r2_gated, -np.inf)
+    neg_r2_gated = np.where(signs < 0, best_r2_gated, -np.inf)
+    pos_peaks = _peak_pick(pos_r2_gated, config.r2_peak_thresh, nms_samples)
+    neg_peaks = _peak_pick(neg_r2_gated, config.r2_peak_thresh, nms_samples)
+    initial_peaks = sorted(set(pos_peaks) | set(neg_peaks))
     final_peaks = _same_sign_nms(
         initial_peaks, best_r2_gated, signs, t, config.same_sign_min_gap_s,
     )
