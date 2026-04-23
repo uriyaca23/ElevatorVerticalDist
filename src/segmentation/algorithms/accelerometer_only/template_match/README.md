@@ -99,9 +99,14 @@ each one (useful for template design / parameter calibration).
   pair-filter's joint fit).
 - `common.py` — **this is where the shared primitives live**:
   `trapezoid_kernel`, `_vertical_accel`, `_smooth`,
-  `match_one_template`, and the global `GRID_W_S` / `GRID_F` arrays and
-  their bounds `W_MIN_S=0.4`, `W_MAX_S=3.0`, `F_MIN=0.05`,
-  `F_MAX=0.80`. Any change to the grid must happen here.
+  `match_one_template`, and the global `GRID_W_S` / `GRID_F` arrays
+  used by the **offline fitters only**. The live detector reads its
+  grid from `DetectConfig.grid_f()` / `grid_w_s()` in
+  `check_grid_across_signal/detect.py` — which as of iter_16 is
+  `w_min_s=0.3`, `w_max_s=3.0`, `n_w=30`, `f_min=0.05`, `f_max=0.80`,
+  `n_f=15`, plus a prepended `f=0.0` triangle row when
+  `include_triangle_row=True` (the default). The offline
+  `GRID_W_S`/`GRID_F` here were updated to match.
 
 ### `metrics` package
 Lives one package up at `src/segmentation/algorithms/metrics/`.
@@ -124,24 +129,34 @@ still ships from here.
 
 ## 3. Configuration
 
-One dataclass, `DetectConfig`, holds all eight tunables and is the
-single object every caller passes. Defaults below are the "safe" ones
-in code; the sweep-winning values are in `labels/check_grid_across_signal/best_detect_config.json`.
+One dataclass, `DetectConfig`, holds all tunables and is the
+single object every caller passes. Current defaults reflect the
+iter_16 winner (144 mistakes / 498 GT).
 
 | field | default | meaning |
 |---|---|---|
-| `r2_peak_thresh` | 0.80 | minimum R² at peak pick |
-| `min_peak_abs_a` | 0.5 | amplitude floor for a peak candidate (m/s²) |
-| `nms_radius_s` | 0.5 | small NMS dedup radius (s) |
-| `same_sign_min_gap_s` | 20 | min gap between same-sign candidates (s) |
-| `min_ride_s` | 0 | min (take-off → landing) gap of a ride (s) |
-| `max_ride_s` | 120 | max gap before we reject the pair (s) |
-| `joint_r2_thresh` | 0.75 | min shared-shape joint R² |
-| `min_pair_abs_a` | 0.5 | min shared \|A\| of the accepted pair (m/s²) |
+| `r2_peak_thresh` | 0.40 | minimum R² at peak pick |
+| `min_peak_abs_a` | 0.20 | amplitude floor for a peak candidate (m/s²) |
+| `nms_radius_s` | 1.0 | small NMS dedup radius (s) |
+| `same_sign_min_gap_s` | 5.0 | min gap between same-sign candidates (s) |
+| `min_ride_s` | 0.0 | min (take-off → landing) gap of a ride (s) |
+| `max_ride_s` | 30.0 | max gap before we reject the pair (s) |
+| `joint_r2_thresh` | 0.90 | min shared-shape joint R² |
+| `min_pair_abs_a` | 0.30 | min shared \|A\| of the accepted pair (m/s²) |
+| `heatmap_energy_thresh` | 0.40 | min mean of clamped joint-R² across the (W, f) grid |
+| `quiet_middle_ratio` | 0.5 | reject a pair if `mid_rms > ratio · pair_A_abs` |
+| `segment_pad_eps_s` | 0.25 | pad emitted ride interval by ε on each side |
+| `w_min_s` / `w_max_s` / `n_w` | 0.3 / 3.0 / 30 | half-width axis of the (W, f) grid |
+| `f_min` / `f_max` / `n_f` | 0.05 / 0.80 / 15 | flat-fraction axis (trapezoid templates) |
+| `include_triangle_row` | True | prepends `f=0` (pure triangle) as an extra row in `grid_f()`; `joint_pair_score` argmax picks trapezoid-vs-triangle per pair |
 
-The eight fields split cleanly into "detection-stage" (first four) and
-"pair-filter-stage" (last four). The sweep pins `min_ride_s = 10` and
-`max_ride_s = 120` by user constraint and grid-searches the other six.
+The fields split into "detection-stage" (first four), "pair-filter-stage"
+(middle group), and "grid" (bottom group). `min_ride_s = 0` permits
+joined-pulse / triangle / one-floor rides whose lobes touch; `max_ride_s = 30`
+rules out the "super-pair" failure mode where a take-off from ride 1 pairs
+with a landing from ride N. The triangle-row addition in iter_13 means
+the argmax in `pair_filter.joint_pair_score` can pick `f=0` for a pair
+whose lobes are unresolved triangles — no separate detector branch needed.
 
 ---
 
