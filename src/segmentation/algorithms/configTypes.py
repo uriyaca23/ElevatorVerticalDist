@@ -45,22 +45,25 @@ class TemplateMatchConfig(BaseModel):
     ``x``, ``y``, ``z`` columns — the detector reads these names
     directly.
     """
-    # Peak-pick / same-sample NMS (detect stages 3–4). Defaults are the
-    # combined-best 1-D sweep winners from
-    # ``scripts/sweep_acc_segmentation.py`` (see
-    # ``elevator_reports/seg_acc_sweep/summary.json``): +0.082 F1* over
-    # the earlier hand-picked defaults on the 22-experiment training pool.
-    r2_peak_thresh: float = 0.55
-    min_peak_abs_a: float = 0.4
-    nms_radius_s: float = 2.0
+    # Peak-pick / same-sample NMS (detect stages 3–4). Defaults updated
+    # in the iter_07 tuning round — see
+    # ``src/segmentation/README.md`` ("Tuning round — 2026-04") for the
+    # before/after table and rationale.
+    r2_peak_thresh: float = 0.40
+    min_peak_abs_a: float = 0.25
+    nms_radius_s: float = 1.0
     same_sign_min_gap_s: float = 5.0
 
     # Pair filter (stages 5–6)
     min_ride_s: float = 0.0
     max_ride_s: float = 30.0
     joint_r2_thresh: float = 0.90
-    min_pair_abs_a: float = 0.40
-    heatmap_energy_thresh: float = 0.20
+    min_pair_abs_a: float = 0.30
+    heatmap_energy_thresh: float = 0.40
+    # Quiet-middle filter added in iter_04. Reject pairs whose inter-lobe
+    # plateau RMS exceeds ``quiet_middle_ratio × pair_A_abs``. Set ≥ 1.0
+    # to disable.
+    quiet_middle_ratio: float = 0.5
 
     # (W, f) trapezoid-template grid
     w_min_s: float = 0.4
