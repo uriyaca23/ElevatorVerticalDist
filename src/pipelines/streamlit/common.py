@@ -1,0 +1,551 @@
+"""Shared scaffolding for the Boutique-Pipeline Streamlit wizard.
+
+Holds everything that more than one step touches: imports of the core
+project modules, palette / step constants, the custom CSS, session-state
+helpers, and the cross-step UI fragments (segment sidebar, trapezoid
+parameter cards, peak-status legend, helpers for picking and validating
+detector predictions).
+
+Single-step helpers stay in their own ``stepN_*.py`` module to keep this
+file focused on truly shared scaffolding.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import numpy as np
+import pandas as pd
+import streamlit as st
+
+from src.data.loadFromDB import LoadedSignal, PhoneType, loadDataFromS3
+from src.prediction.algorithms import (
+    PREDICT_ALGORITHM_CONFIG, PredictAlgorithm, Predictor,
+)
+from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (
+    detect as _detect,
+)
+from src.segmentation.algorithms.accelerometer_only.template_match.fit_elevator_parameters.common import (
+    trapezoid_kernel,
+)
+
+# Re-export detector internals — the figure builders in step3 / step5
+# need them, and importing through `common` keeps each step file from
+# duplicating the long module path.
+predict_intervals = _detect.predict_intervals
+heatmap_at = _detect.heatmap_at
+classify_peak = _detect.classify_peak
+find_local_maxima = _detect.find_local_maxima
+
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+APP_TITLE = "Elevator Vertical Distance — Boutique Pipeline"
+GRAVITY_MS2 = 9.80665
+RIDE_COLORS = {"up": "#1f6feb", "down": "#b54a9b", "outside": "#9aa0a6"}
+SELECTED_COLOR = "#e67e22"
+
+# Accelerometer-only prediction algorithms run side-by-side on the Predict
+# step. The first entry is the "primary" — its rows feed the sidebar, the
+# single-Δh column, and the PDF report (so existing paths keep working).
+ACCEL_ALGOS: list[tuple[PredictAlgorithm, str, str, str]] = [
+    # (enum, short id, human label, colour)
+    (PredictAlgorithm.TRAPEZOID_ACCEL, "trap",
+     "Trapezoid pulse-pair",          "#1f6feb"),
+    (PredictAlgorithm.ZUPT_ACCEL,      "zupt",
+     "ZUPT (zero-velocity update)",   "#27ae60"),
+]
+PRIMARY_ALGO_ID = ACCEL_ALGOS[0][1]
+
+# Peak-status palette — matches the editor's legend so the visuals the
+# user sees in the desktop tool and in the app are 1-to-1.
+PEAK_STATUS_COLORS: dict[str, str] = {
+    "accepted":          "#27ae60",
+    "unpaired (greedy)": "#f39c12",
+    "same-sign NMS":     "#9b59b6",
+    "NMS (local)":       "#8e44ad",
+    "lost to opp sign":  "#34495e",
+    "R²<thr":            "#7f8c8d",
+    "|A|<thr":           "#95a5a6",
+}
+
+STEP_HOWTO = 1
+STEP_DATA = 2
+STEP_SEGMENT = 3
+STEP_PREDICT = 4
+STEP_REPORT = 5
+STEP_LABELS = {
+    STEP_HOWTO:   "1 · How to use",
+    STEP_DATA:    "2 · Data",
+    STEP_SEGMENT: "3 · Segmentation",
+    STEP_PREDICT: "4 · Prediction",
+    STEP_REPORT:  "5 · Report",
+}
+
+
+# ---------------------------------------------------------------------------
+# Styling
+# ---------------------------------------------------------------------------
+
+CUSTOM_CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+html, body, [class*="css"]  {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+code, pre, kbd { font-family: 'JetBrains Mono', monospace; }
+
+section.main > div.block-container {
+    padding-top: 2.2rem; padding-bottom: 4rem; max-width: 1200px;
+}
+
+h1, h2, h3 { letter-spacing: -0.01em; }
+h1 { font-weight: 700; }
+h2 { font-weight: 600; margin-top: 1.6rem; }
+h3 { font-weight: 600; color: #2c3e50; }
+
+.hero {
+    background: linear-gradient(135deg, #0f2a4a 0%, #1f6feb 100%);
+    color: #fff; padding: 1.6rem 1.8rem; border-radius: 14px;
+    margin-bottom: 1.4rem; box-shadow: 0 10px 30px rgba(31,111,235,0.18);
+}
+.hero h1 { color: #fff; margin: 0; font-size: 1.55rem; }
+.hero p  { margin: 0.35rem 0 0 0; opacity: 0.9; font-size: 0.95rem; }
+
+.step-pill {
+    display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px;
+    font-size: 0.72rem; font-weight: 600;
+    background: rgba(255,255,255,0.2); margin-right: 0.4rem;
+}
+
+.limitation {
+    background: #fff8e6; border-left: 3px solid #f0b429;
+    padding: 0.7rem 1rem; border-radius: 6px; margin: 0.4rem 0;
+    font-size: 0.93rem;
+}
+.info-block {
+    background: #ffffff; border: 1px solid #d6e1f5;
+    border-left: 3px solid #1f6feb;
+    padding: 0.85rem 1.1rem; border-radius: 8px; margin: 0.4rem 0;
+    font-size: 0.93rem; color: #1a2436; line-height: 1.55;
+    box-shadow: 0 1px 2px rgba(16,24,40,0.04);
+}
+.info-block b   { color: #0f2a4a; }
+.info-block i   { color: #233044; }
+.info-block code {
+    background: #eef2f7; color: #0f2a4a;
+    padding: 0.05rem 0.32rem; border-radius: 4px;
+    font-size: 0.85em;
+}
+.info-block ul  { color: #1a2436; }
+.info-block li  { margin: 0.18rem 0; }
+
+.status-legend {
+    display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 0.5rem 0 0.8rem 0;
+    font-size: 0.78rem;
+}
+.status-legend .chip {
+    display: inline-flex; align-items: center;
+    padding: 0.12rem 0.55rem; border-radius: 999px;
+    background: #fafbfc; border: 1px solid #e6e9ef; color: #233044;
+}
+.status-legend .dot {
+    width: 0.6rem; height: 0.6rem; border-radius: 50%;
+    margin-right: 0.35rem; border: 1px solid rgba(0,0,0,0.2);
+}
+
+div[data-testid="stSidebar"] { background: #0f1b2d; }
+div[data-testid="stSidebar"] * { color: #eef2f7; }
+section[data-testid="stSidebar"] {
+    width: 360px !important;
+    min-width: 360px !important;
+}
+section[data-testid="stSidebar"] > div:first-child { width: 360px !important; }
+
+.stButton > button {
+    border-radius: 8px; font-weight: 500; padding: 0.45rem 1.1rem;
+}
+.stDownloadButton > button {
+    border-radius: 8px; font-weight: 600;
+    background: #1f6feb; color: #fff; border: none;
+    padding: 0.6rem 1.3rem;
+}
+.stDownloadButton > button:hover { background: #1559c7; }
+
+/* Fitted-trapezoid parameter card */
+.trap-params {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem;
+    margin: 0.3rem 0 0.4rem 0;
+}
+.trap-card {
+    border: 1px solid #e6e9ef; border-radius: 12px; padding: 0.85rem 1rem;
+    background: #ffffff; box-shadow: 0 1px 2px rgba(16,24,40,0.04);
+}
+.trap-card.lobe1 { border-top: 3px solid #c0392b; }
+.trap-card.lobe2 { border-top: 3px solid #8e44ad; }
+.trap-card.joint {
+    grid-column: 1 / -1;
+    border-top: 3px solid #1f6feb;
+    background: linear-gradient(135deg, #f7faff 0%, #ffffff 100%);
+}
+.trap-card .card-title {
+    font-size: 0.72rem; color: #6b7280; text-transform: uppercase;
+    letter-spacing: 0.09em; font-weight: 700; margin-bottom: 0.55rem;
+}
+.trap-card.lobe1 .card-title { color: #c0392b; }
+.trap-card.lobe2 .card-title { color: #8e44ad; }
+.trap-card.joint .card-title { color: #1f6feb; }
+.trap-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
+    gap: 0.55rem 0.8rem;
+}
+.trap-item .k {
+    font-size: 0.65rem; color: #6b7280; text-transform: uppercase;
+    letter-spacing: 0.06em; font-weight: 600;
+}
+.trap-item .v {
+    font-size: 1rem; font-weight: 700; color: #0f2a4a;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Sidebar segment list */
+.sb-seg-label {
+    font-size: 0.78rem; color: #eef2f7;
+    font-family: 'JetBrains Mono', monospace;
+}
+</style>
+"""
+
+
+# ---------------------------------------------------------------------------
+# Session helpers
+# ---------------------------------------------------------------------------
+
+def init_state() -> None:
+    defaults = {
+        "step":              STEP_HOWTO,
+        "loaded":             None,
+        "detector_state":     None,
+        "predictions":        [],
+        "segments_df":        None,
+        "selected_segment":   0,
+        "prediction_rows":    None,   # primary-algo rows (Trapezoid)
+        "prediction_rows_by_algo": None,  # {algo_id: list[dict]}
+        "predict_selected":   None,
+        "data_input_mode":    None,   # "phone" | "file" | None (= picker)
+    }
+    for k, v in defaults.items():
+        st.session_state.setdefault(k, v)
+
+
+def goto(step: int) -> None:
+    st.session_state["step"] = step
+    st.rerun()
+
+
+def utcnow_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def reset_downstream_state() -> None:
+    st.session_state["detector_state"] = None
+    st.session_state["predictions"] = []
+    st.session_state["segments_df"] = None
+    st.session_state["selected_segment"] = 0
+    st.session_state["prediction_rows"] = None
+    st.session_state["prediction_rows_by_algo"] = None
+    st.session_state["predict_selected"] = None
+
+
+# ---------------------------------------------------------------------------
+# Cross-step segment / prediction helpers
+# ---------------------------------------------------------------------------
+
+def valid_segments(df: pd.DataFrame | None) -> pd.DataFrame:
+    cols = ["type", "start_s", "end_s", "joint_r2"]
+    if df is None or df.empty:
+        return pd.DataFrame(columns=cols)
+    out = df.copy()
+    out["start_s"] = pd.to_numeric(out["start_s"], errors="coerce")
+    out["end_s"] = pd.to_numeric(out["end_s"], errors="coerce")
+    out = out.dropna(subset=["start_s", "end_s"])
+    out = out[out["end_s"] > out["start_s"]]
+    out["type"] = out["type"].astype(str).str.lower().where(
+        out["type"].isin(["up", "down"]), "up",
+    )
+    for c in cols:
+        if c not in out.columns:
+            out[c] = np.nan
+    return out[cols].reset_index(drop=True)
+
+
+def find_matching_prediction(
+    predictions: list[dict], t_lo: float, t_hi: float,
+) -> dict | None:
+    """Best-overlap detector prediction for a user-edited segment.
+
+    Returns ``None`` if there's no overlap — happens when the user
+    adds a segment that the detector never proposed. The UI then
+    falls back to a raw-signal view (no trapezoid overlay).
+    """
+    best = None
+    best_overlap = 0.0
+    for p in predictions:
+        s = float(p["t_start_s"])
+        e = float(p["t_end_s"])
+        overlap = max(0.0, min(e, t_hi) - max(s, t_lo))
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best = p
+    return best
+
+
+# ---------------------------------------------------------------------------
+# Cross-step UI fragments (sidebar lists, legend, trapezoid cards)
+# ---------------------------------------------------------------------------
+
+def peak_status_legend_html() -> str:
+    chips = []
+    for tag, color in PEAK_STATUS_COLORS.items():
+        chips.append(
+            f'<span class="chip"><span class="dot" '
+            f'style="background:{color}"></span>{tag}</span>'
+        )
+    return '<div class="status-legend">' + "".join(chips) + "</div>"
+
+
+def _trap_item(key: str, val: str) -> str:
+    return (
+        f'<div class="trap-item">'
+        f'<div class="k">{key}</div>'
+        f'<div class="v">{val}</div>'
+        f'</div>'
+    )
+
+
+def render_trapezoid_params(prediction: dict | None) -> None:
+    """Three cards: lobe 1, lobe 2, and the joint fit.
+
+    Per-lobe (``half_width_s`` ``W``, ``frac_flat`` ``f``, ``a_peak``
+    ``A``, ``r2_local``, ``t_c``) — shown per lobe as requested. The
+    joint-fit values (``W*``, ``f*``, ``|A*|``, ``joint_r2_mean``,
+    ``heatmap_energy``) are the shared-shape parameters from the pair
+    filter; for a confirmed detector match the per-lobe W/f collapse
+    onto these shared values.
+    """
+    if prediction is None:
+        st.caption("No detector-matched prediction for this segment — "
+                   "parameters unavailable.")
+        return
+
+    def _vals(lobe: dict) -> tuple[str, str, str, str, str, str]:
+        t_c = float(lobe.get("t_c", float("nan")))
+        A = float(lobe.get("a_peak", float("nan")))
+        W = float(lobe.get("half_width_s", float("nan")))
+        f = float(lobe.get("frac_flat", float("nan")))
+        r2 = float(lobe.get("r2_local", float("nan")))
+        return (
+            f"{t_c:.2f} s"      if np.isfinite(t_c) else "—",
+            f"{A:+.2f}"          if np.isfinite(A)  else "—",
+            f"{W:.2f} s"         if np.isfinite(W)  else "—",
+            f"{f:.2f}"           if np.isfinite(f)  else "—",
+            f"{r2:.3f}"          if np.isfinite(r2) else "—",
+            f"{abs(A):.2f}"      if np.isfinite(A)  else "—",
+        )
+
+    l1 = prediction.get("lobe1") or {}
+    l2 = prediction.get("lobe2") or {}
+    tc1, A1, W1, f1, r2_1, _ = _vals(l1)
+    tc2, A2, W2, f2, r2_2, _ = _vals(l2)
+
+    W_star = float(l1.get("half_width_s", float("nan")))
+    f_star = float(l1.get("frac_flat",    float("nan")))
+    a1_val = float(l1.get("a_peak",       float("nan")))
+    A_star = abs(a1_val) if np.isfinite(a1_val) else float("nan")
+    joint_r2 = float(prediction.get("joint_r2_mean",   float("nan")))
+    heat_e   = float(prediction.get("heatmap_energy", float("nan")))
+
+    def _card(cls: str, title: str, items: list[tuple[str, str]]) -> str:
+        inner = "".join(_trap_item(k, v) for k, v in items)
+        return (
+            f'<div class="trap-card {cls}">'
+            f'<div class="card-title">{title}</div>'
+            f'<div class="trap-grid">{inner}</div>'
+            f'</div>'
+        )
+
+    html = (
+        '<div class="trap-params">'
+        + _card("lobe1", "Lobe 1 · take-off", [
+            ("t_c", tc1), ("A", f"{A1} m/s²"), ("W", W1),
+            ("f", f1), ("R²", r2_1),
+        ])
+        + _card("lobe2", "Lobe 2 · landing", [
+            ("t_c", tc2), ("A", f"{A2} m/s²"), ("W", W2),
+            ("f", f2), ("R²", r2_2),
+        ])
+        + _card("joint", "Joint fit · shared shape", [
+            ("W*", f"{W_star:.2f} s" if np.isfinite(W_star) else "—"),
+            ("f*", f"{f_star:.2f}"   if np.isfinite(f_star) else "—"),
+            ("|A*|", f"{A_star:.2f}" if np.isfinite(A_star) else "—"),
+            ("R² joint", f"{joint_r2:.3f}" if np.isfinite(joint_r2) else "—"),
+            ("heat E",   f"{heat_e:.3f}"   if np.isfinite(heat_e)   else "—"),
+        ])
+        + '</div>'
+    )
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def _segment_label(i: int, row: pd.Series) -> str:
+    rt = str(row.get("type", "up"))
+    s = float(row["start_s"]); e = float(row["end_s"])
+    return f"#{i:<2} {rt:<4}  {s:6.1f}–{e:6.1f} s"
+
+
+def render_segment_sidebar(segments_df: pd.DataFrame, sel: int | None) -> None:
+    """Segmentation-step sidebar panel.
+
+    Uses :func:`st.radio` for selection — the widget gives arrow-key
+    navigation (↑ / ↓) for free once the list has keyboard focus.
+    Edit / delete / add controls for the selected segment sit below the
+    radio so they don't steal focus away from the arrow-key nav.
+    """
+    st.sidebar.markdown("### Segments")
+    st.sidebar.caption(
+        "Click a row or focus the list and use ↑ / ↓ arrow keys. "
+        "Edit / delete apply to the currently selected segment."
+    )
+
+    if len(segments_df) == 0:
+        st.sidebar.info("No segments yet.")
+    else:
+        options = list(range(len(segments_df)))
+        cur_index = int(sel) if (sel is not None and sel < len(options)) else 0
+        new_sel = st.sidebar.radio(
+            "Segments", options=options,
+            index=cur_index,
+            format_func=lambda i: _segment_label(i, segments_df.iloc[i]),
+            label_visibility="collapsed",
+            key="sb_seg_radio",
+        )
+        if int(new_sel) != int(sel or 0):
+            st.session_state["selected_segment"] = int(new_sel)
+            st.rerun()
+        sel = int(new_sel)
+
+        # Edit / delete act on the currently selected segment.
+        row = segments_df.iloc[sel]
+        col_edit, col_del = st.sidebar.columns([2, 1])
+        with col_edit:
+            with st.popover("✎  Edit selected", use_container_width=True):
+                new_lo = st.number_input(
+                    "Start (s)", value=float(row["start_s"]), step=0.05,
+                    format="%.2f", key=f"sb_edit_lo_{sel}",
+                )
+                new_hi = st.number_input(
+                    "End (s)", value=float(row["end_s"]), step=0.05,
+                    format="%.2f", key=f"sb_edit_hi_{sel}",
+                )
+                new_type = st.selectbox(
+                    "Type", options=["up", "down"],
+                    index=0 if str(row["type"]) == "up" else 1,
+                    key=f"sb_edit_type_{sel}",
+                )
+                if st.button("Save", key=f"sb_edit_save_{sel}",
+                             use_container_width=True, type="primary"):
+                    if new_hi <= new_lo:
+                        st.error("End must be greater than start.")
+                    else:
+                        df = st.session_state["segments_df"]
+                        df.loc[df.index[sel], "start_s"] = float(new_lo)
+                        df.loc[df.index[sel], "end_s"] = float(new_hi)
+                        df.loc[df.index[sel], "type"] = new_type
+                        df.loc[df.index[sel], "joint_r2"] = np.nan
+                        st.rerun()
+        with col_del:
+            if st.button("🗑", key=f"sb_del_{sel}",
+                         use_container_width=True,
+                         help="Delete the currently selected segment"):
+                df = st.session_state["segments_df"]
+                df = df.drop(df.index[sel]).reset_index(drop=True)
+                st.session_state["segments_df"] = df
+                new = max(0, sel - 1) if len(df) else None
+                st.session_state["selected_segment"] = new
+                st.rerun()
+
+    st.sidebar.markdown("")
+    if st.sidebar.button("+  Add segment", use_container_width=True,
+                         key="sb_add_segment"):
+        df = st.session_state.get("segments_df")
+        if df is None:
+            df = pd.DataFrame(columns=["type", "start_s", "end_s", "joint_r2"])
+        # Default: 5-second segment at the current selection's tail, or at
+        # the start of the signal when the list is empty.
+        if len(df):
+            last = df.iloc[-1]
+            new_lo = float(last["end_s"]) + 0.5
+        else:
+            new_lo = 0.0
+        new_row = {"type": "up", "start_s": new_lo,
+                   "end_s": new_lo + 5.0, "joint_r2": np.nan}
+        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+        st.session_state["segments_df"] = df
+        st.session_state["selected_segment"] = len(df) - 1
+        st.rerun()
+
+    # Footer — source info + a reset button, since the main sidebar's
+    # step indicator was collapsed to make room for the segment list.
+    st.sidebar.markdown("---")
+    loaded = st.session_state.get("loaded")
+    if loaded is not None:
+        st.sidebar.caption(f"Loaded: {loaded.source}")
+    if st.sidebar.button("Reset session", key="sb_reset_session",
+                         use_container_width=True):
+        for k in list(st.session_state.keys()):
+            del st.session_state[k]
+        st.rerun()
+
+
+def render_predict_segment_sidebar(rows: list[dict], selected: int) -> None:
+    """Prediction-step sidebar — same arrow-key-navigable list as the
+    segmentation step, minus the edit / delete / add controls.
+    Prediction is read-only w.r.t. the segment layout.
+    """
+    st.sidebar.markdown("### Segments")
+    st.sidebar.caption(
+        "Click a row or focus the list and use ↑ / ↓ arrow keys."
+    )
+
+    options = [int(r["segment"]) for r in rows]
+    by_id = {int(r["segment"]): r for r in rows}
+
+    def _label(seg_id: int) -> str:
+        r = by_id[seg_id]
+        dh = r["delta_height_m"]
+        dh_str = f"Δh={dh:+.2f}m" if np.isfinite(dh) else "Δh=—"
+        return (f"#{r['segment']:<2} {r['type']:<4}  "
+                f"{r['start_s']:5.1f}–{r['end_s']:5.1f}s  {dh_str}")
+
+    new_sel = st.sidebar.radio(
+        "Segments", options=options,
+        index=options.index(selected) if selected in options else 0,
+        format_func=_label,
+        label_visibility="collapsed",
+        key="sb_pred_radio",
+    )
+    if int(new_sel) != selected:
+        st.session_state["predict_selected"] = int(new_sel)
+        st.rerun()
+
+    # Footer mirroring the segment-step sidebar.
+    st.sidebar.markdown("---")
+    loaded = st.session_state.get("loaded")
+    if loaded is not None:
+        st.sidebar.caption(f"Loaded: {loaded.source}")
+    if st.sidebar.button("Reset session", key="sb_pred_reset",
+                         use_container_width=True):
+        for k in list(st.session_state.keys()):
+            del st.session_state[k]
+        st.rerun()
