@@ -93,9 +93,9 @@ class DetectConfig:
     # Defaults below are the combined-best 1-D sweep winners
     # (see ``scripts/sweep_acc_segmentation.py`` +
     # ``elevator_reports/seg_acc_sweep/summary.json``).
-    r2_peak_thresh: float = 0.55
+    r2_peak_thresh: float = 0.40
 
-    min_peak_abs_a: float = 0.4
+    min_peak_abs_a: float = 0.25
 
     nms_radius_s: float = 1.0
 
