@@ -106,7 +106,7 @@ class DetectConfig:
 
 
     joint_r2_thresh: float = 0.90
-    min_pair_abs_a: float = 0.22
+    min_pair_abs_a: float = 0.30
     heatmap_energy_thresh: float = 0.40
 
     # Quiet-middle filter (iter_04): reject pairs whose plateau between the
