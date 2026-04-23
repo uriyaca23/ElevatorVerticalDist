@@ -65,12 +65,16 @@ TYPE_COLORS = {"up": "#27ae60", "down": "#e74c3c"}
 # half-jerk-ramp duration T_j for commercial lifts, and F_MIN excludes
 # the degenerate triangular-pulse case where the cabin never reaches
 # a_max cruise.
-W_MIN_S = 0
+W_MIN_S = 0.4
 W_MAX_S = 3.0
-F_MIN = 0.01
-F_MAX = 0.
+F_MIN = 0.0
+F_MAX = 0.80
 GRID_W_S = np.linspace(W_MIN_S, W_MAX_S, 30)
-GRID_F = np.linspace(F_MIN, F_MAX, 15)
+# Grid includes f=0 (pure triangle) so the offline fitters match the
+# one-floor / joined-pulse shape family used by the live detector's
+# triangle row. See DetectConfig.include_triangle_row in
+# check_grid_across_signal/detect.py.
+GRID_F = np.concatenate(([0.0], np.linspace(0.05, F_MAX, 15)))
 
 # Each lobe's search region expressed as fractions of the GT ride duration
 # measured from ``gt_t0``. Small overlap so lobes near the midpoint are

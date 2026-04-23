@@ -39,3 +39,4 @@ venv/bin/python -m src.segmentation.algorithms.improvement_iterations._iter_runn
 | 05 | `iter_05_narrow_nms` | 334 / 498 | 218 | +4 | 0.747 | 0.508 | `nms_radius_s` 2.0→1.0 — no effect (wrong hypothesis) |
 | 06 | `iter_06_per_sign_pick` | 334 / 498 | 218 | 0 | 0.747 | 0.508 | Per-sign peak-pick — no effect; root cause is upstream gates |
 | 07 | `iter_07_lower_peak_gates` | 403 / 498 | **154** | **−64** | **0.835** | **0.601** | `r2_peak_thresh` 0.55→0.40, `min_peak_abs_a` 0.4→0.25 |
+| 13 | `iter_13_triangle_shape_row` | 403 / 498 | 155 | +1 | 0.834 | **0.703** | Prepend f=0 (triangle) to grid_f(); big IoU win (+0.102) but mistake count flat. Misses are noisy-phone rides, not short rides. |

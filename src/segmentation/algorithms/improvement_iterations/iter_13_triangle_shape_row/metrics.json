@@ -1,0 +1,576 @@
+{
+  "description": "Add f=0 (triangle) row to DetectConfig.grid_f(): joint_pair_score argmax now picks trapezoid-vs-triangle per pair based on shared-shape joint R\u00b2.",
+  "n_experiments": 26,
+  "elapsed_s": 348.09199357032776,
+  "config": {
+    "r2_peak_thresh": 0.4,
+    "min_peak_abs_a": 0.25,
+    "nms_radius_s": 1.0,
+    "same_sign_min_gap_s": 5.0,
+    "min_ride_s": 0.0,
+    "max_ride_s": 30.0,
+    "joint_r2_thresh": 0.9,
+    "min_pair_abs_a": 0.3,
+    "heatmap_energy_thresh": 0.4,
+    "quiet_middle_ratio": 0.5,
+    "segment_pad_eps_s": 0.25,
+    "w_min_s": 0.4,
+    "w_max_s": 3.0,
+    "n_w": 30,
+    "f_min": 0.05,
+    "f_max": 0.8,
+    "n_f": 15,
+    "include_triangle_row": true,
+    "noise_sigma_multiplier": 6.0
+  },
+  "total": {
+    "n_gt": 498,
+    "n_pred": 469,
+    "clean": 403,
+    "missed": 86,
+    "gt_merged": 8,
+    "gt_split": 1,
+    "fp": 60,
+    "pred_merged": 4,
+    "pred_split_part": 2,
+    "f1_like": 0.8335056876938987,
+    "recall": 0.8092369477911646,
+    "precision": 0.8592750533049041,
+    "miss_rate": 0.17269076305220885,
+    "merge_rate": 0.008528784648187633,
+    "fp_rate": 0.1279317697228145
+  },
+  "iou": {
+    "iou_f1@0.5": 0.7032057911065149,
+    "iou_precision@0.5": 0.7249466950959488,
+    "iou_recall@0.5": 0.6827309236947792,
+    "iou_mean@0.5": 0.6326431297231508,
+    "iou_tp@0.5": 340,
+    "iou_fp@0.5": 129,
+    "iou_fn@0.5": 158
+  },
+  "per_exp": [
+    [
+      "eyalyakir_acroBuilding_SamsungSM-S911B_15-04-2026_exp4",
+      {
+        "n_gt": 12,
+        "n_pred": 12,
+        "clean": 12,
+        "missed": 0,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 0,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 1.0,
+        "recall": 1.0,
+        "precision": 1.0,
+        "miss_rate": 0.0,
+        "merge_rate": 0.0,
+        "fp_rate": 0.0
+      }
+    ],
+    [
+      "eyalyakir_acroBuilding_Xiaomi22101320I_15-04-2026_exp4",
+      {
+        "n_gt": 12,
+        "n_pred": 13,
+        "clean": 12,
+        "missed": 0,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 1,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.96,
+        "recall": 1.0,
+        "precision": 0.9230769230769231,
+        "miss_rate": 0.0,
+        "merge_rate": 0.0,
+        "fp_rate": 0.07692307692307693
+      }
+    ],
+    [
+      "eyalyakir_beitMansour1_SamsungSM-S911B_15-04-2026_exp5",
+      {
+        "n_gt": 18,
+        "n_pred": 19,
+        "clean": 18,
+        "missed": 0,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 1,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.972972972972973,
+        "recall": 1.0,
+        "precision": 0.9473684210526315,
+        "miss_rate": 0.0,
+        "merge_rate": 0.0,
+        "fp_rate": 0.05263157894736842
+      }
+    ],
+    [
+      "eyalyakir_beitMansour1_Xiaomi22101320I_15-04-2026_exp5",
+      {
+        "n_gt": 18,
+        "n_pred": 19,
+        "clean": 18,
+        "missed": 0,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 1,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.972972972972973,
+        "recall": 1.0,
+        "precision": 0.9473684210526315,
+        "miss_rate": 0.0,
+        "merge_rate": 0.0,
+        "fp_rate": 0.05263157894736842
+      }
+    ],
+    [
+      "eyalyakir_beitYitzchakiRaanana_SamsungSM-S911B_15-04-2026_exp6",
+      {
+        "n_gt": 29,
+        "n_pred": 30,
+        "clean": 28,
+        "missed": 1,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 2,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.9491525423728814,
+        "recall": 0.9655172413793104,
+        "precision": 0.9333333333333333,
+        "miss_rate": 0.034482758620689655,
+        "merge_rate": 0.0,
+        "fp_rate": 0.06666666666666667
+      }
+    ],
+    [
+      "eyalyakir_beitYitzchakiRaanana_Xiaomi22101320I_15-04-2026_exp6",
+      {
+        "n_gt": 29,
+        "n_pred": 21,
+        "clean": 19,
+        "missed": 10,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 2,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.76,
+        "recall": 0.6551724137931034,
+        "precision": 0.9047619047619048,
+        "miss_rate": 0.3448275862068966,
+        "merge_rate": 0.0,
+        "fp_rate": 0.09523809523809523
+      }
+    ],
+    [
+      "eyalyakir_milleniumHotel_SamsungSM-A235F_15-04-2026_exp1",
+      {
+        "n_gt": 10,
+        "n_pred": 7,
+        "clean": 0,
+        "missed": 10,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 7,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.0,
+        "recall": 0.0,
+        "precision": 0.0,
+        "miss_rate": 1.0,
+        "merge_rate": 0.0,
+        "fp_rate": 1.0
+      }
+    ],
+    [
+      "eyalyakir_milleniumHotel_SamsungSM-S911B_15-04-2026_exp1",
+      {
+        "n_gt": 10,
+        "n_pred": 4,
+        "clean": 3,
+        "missed": 7,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 1,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.42857142857142855,
+        "recall": 0.3,
+        "precision": 0.75,
+        "miss_rate": 0.7,
+        "merge_rate": 0.0,
+        "fp_rate": 0.25
+      }
+    ],
+    [
+      "eyalyakir_milleniumHotel_SamsungSM-S911B_15-04-2026_exp2",
+      {
+        "n_gt": 31,
+        "n_pred": 32,
+        "clean": 31,
+        "missed": 0,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 1,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.9841269841269841,
+        "recall": 1.0,
+        "precision": 0.96875,
+        "miss_rate": 0.0,
+        "merge_rate": 0.0,
+        "fp_rate": 0.03125
+      }
+    ],
+    [
+      "eyalyakir_milleniumHotel_Xiaomi22101320I_15-04-2026_exp2",
+      {
+        "n_gt": 31,
+        "n_pred": 32,
+        "clean": 31,
+        "missed": 0,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 1,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.9841269841269841,
+        "recall": 1.0,
+        "precision": 0.96875,
+        "miss_rate": 0.0,
+        "merge_rate": 0.0,
+        "fp_rate": 0.03125
+      }
+    ],
+    [
+      "eyalyakir_milleniumOutside_SamsungSM-S911B_15-04-2026_exp3",
+      {
+        "n_gt": 12,
+        "n_pred": 13,
+        "clean": 12,
+        "missed": 0,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 1,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.96,
+        "recall": 1.0,
+        "precision": 0.9230769230769231,
+        "miss_rate": 0.0,
+        "merge_rate": 0.0,
+        "fp_rate": 0.07692307692307693
+      }
+    ],
+    [
+      "eyalyakir_milleniumOutside_Xiaomi22101320I_15-04-2026_exp3",
+      {
+        "n_gt": 12,
+        "n_pred": 12,
+        "clean": 12,
+        "missed": 0,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 0,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 1.0,
+        "recall": 1.0,
+        "precision": 1.0,
+        "miss_rate": 0.0,
+        "merge_rate": 0.0,
+        "fp_rate": 0.0
+      }
+    ],
+    [
+      "RoyTurgeman_Haari3_SamsungGalaxyZFlip6_10-4-2026",
+      {
+        "n_gt": 30,
+        "n_pred": 41,
+        "clean": 28,
+        "missed": 1,
+        "gt_merged": 0,
+        "gt_split": 1,
+        "fp": 11,
+        "pred_merged": 0,
+        "pred_split_part": 2,
+        "f1_like": 0.7887323943661971,
+        "recall": 0.9333333333333333,
+        "precision": 0.6829268292682927,
+        "miss_rate": 0.03333333333333333,
+        "merge_rate": 0.0,
+        "fp_rate": 0.2682926829268293
+      }
+    ],
+    [
+      "UriyaCohenEliya_acroBuilding_GooglePixel10_15-04-2026_exp4",
+      {
+        "n_gt": 12,
+        "n_pred": 14,
+        "clean": 12,
+        "missed": 0,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 2,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.9230769230769231,
+        "recall": 1.0,
+        "precision": 0.8571428571428571,
+        "miss_rate": 0.0,
+        "merge_rate": 0.0,
+        "fp_rate": 0.14285714285714285
+      }
+    ],
+    [
+      "UriyaCohenEliya_acroBuilding_SamsungSM-A235F_15-04-2026_exp4",
+      {
+        "n_gt": 12,
+        "n_pred": 13,
+        "clean": 12,
+        "missed": 0,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 1,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.96,
+        "recall": 1.0,
+        "precision": 0.9230769230769231,
+        "miss_rate": 0.0,
+        "merge_rate": 0.0,
+        "fp_rate": 0.07692307692307693
+      }
+    ],
+    [
+      "UriyaCohenEliya_BarIlan2Herzelia_Pixel10_24-3-2026",
+      {
+        "n_gt": 20,
+        "n_pred": 10,
+        "clean": 4,
+        "missed": 12,
+        "gt_merged": 4,
+        "gt_split": 0,
+        "fp": 4,
+        "pred_merged": 2,
+        "pred_split_part": 0,
+        "f1_like": 0.26666666666666666,
+        "recall": 0.2,
+        "precision": 0.4,
+        "miss_rate": 0.6,
+        "merge_rate": 0.2,
+        "fp_rate": 0.4
+      }
+    ],
+    [
+      "UriyaCohenEliya_beitMansour1_GooglePixel10_15-04-2026_exp5",
+      {
+        "n_gt": 18,
+        "n_pred": 19,
+        "clean": 18,
+        "missed": 0,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 1,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.972972972972973,
+        "recall": 1.0,
+        "precision": 0.9473684210526315,
+        "miss_rate": 0.0,
+        "merge_rate": 0.0,
+        "fp_rate": 0.05263157894736842
+      }
+    ],
+    [
+      "UriyaCohenEliya_beitMansour1_SamsungSM-A235F_15-04-2026_exp5",
+      {
+        "n_gt": 18,
+        "n_pred": 19,
+        "clean": 18,
+        "missed": 0,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 1,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.972972972972973,
+        "recall": 1.0,
+        "precision": 0.9473684210526315,
+        "miss_rate": 0.0,
+        "merge_rate": 0.0,
+        "fp_rate": 0.05263157894736842
+      }
+    ],
+    [
+      "UriyaCohenEliya_beitYitzchakiRaanana_GooglePixel10_15-04-2026_exp6",
+      {
+        "n_gt": 29,
+        "n_pred": 28,
+        "clean": 24,
+        "missed": 3,
+        "gt_merged": 2,
+        "gt_split": 0,
+        "fp": 3,
+        "pred_merged": 1,
+        "pred_split_part": 0,
+        "f1_like": 0.8421052631578947,
+        "recall": 0.8275862068965517,
+        "precision": 0.8571428571428571,
+        "miss_rate": 0.10344827586206896,
+        "merge_rate": 0.03571428571428571,
+        "fp_rate": 0.10714285714285714
+      }
+    ],
+    [
+      "UriyaCohenEliya_beitYitzchakiRaanana_SamsungSM-A235F_15-04-2026_exp6",
+      {
+        "n_gt": 29,
+        "n_pred": 30,
+        "clean": 28,
+        "missed": 1,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 2,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.9491525423728814,
+        "recall": 0.9655172413793104,
+        "precision": 0.9333333333333333,
+        "miss_rate": 0.034482758620689655,
+        "merge_rate": 0.0,
+        "fp_rate": 0.06666666666666667
+      }
+    ],
+    [
+      "UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp1",
+      {
+        "n_gt": 10,
+        "n_pred": 13,
+        "clean": 5,
+        "missed": 3,
+        "gt_merged": 2,
+        "gt_split": 0,
+        "fp": 7,
+        "pred_merged": 1,
+        "pred_split_part": 0,
+        "f1_like": 0.43478260869565216,
+        "recall": 0.5,
+        "precision": 0.38461538461538464,
+        "miss_rate": 0.3,
+        "merge_rate": 0.07692307692307693,
+        "fp_rate": 0.5384615384615384
+      }
+    ],
+    [
+      "UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp2",
+      {
+        "n_gt": 31,
+        "n_pred": 5,
+        "clean": 1,
+        "missed": 30,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 4,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.05555555555555555,
+        "recall": 0.03225806451612903,
+        "precision": 0.2,
+        "miss_rate": 0.967741935483871,
+        "merge_rate": 0.0,
+        "fp_rate": 0.8
+      }
+    ],
+    [
+      "UriyaCohenEliya_milleniumHotel_SamsungSM-A235F_15-04-2026_exp2",
+      {
+        "n_gt": 31,
+        "n_pred": 34,
+        "clean": 31,
+        "missed": 0,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 3,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.9538461538461539,
+        "recall": 1.0,
+        "precision": 0.9117647058823529,
+        "miss_rate": 0.0,
+        "merge_rate": 0.0,
+        "fp_rate": 0.08823529411764706
+      }
+    ],
+    [
+      "UriyaCohenEliya_milleniumHotel_Xiaomi22101320I_15-04-2026_exp1",
+      {
+        "n_gt": 10,
+        "n_pred": 5,
+        "clean": 2,
+        "missed": 8,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 3,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 0.26666666666666666,
+        "recall": 0.2,
+        "precision": 0.4,
+        "miss_rate": 0.8,
+        "merge_rate": 0.0,
+        "fp_rate": 0.6
+      }
+    ],
+    [
+      "UriyaCohenEliya_milleniumOutside_GooglePixel10_15-04-2026_exp3",
+      {
+        "n_gt": 12,
+        "n_pred": 12,
+        "clean": 12,
+        "missed": 0,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 0,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 1.0,
+        "recall": 1.0,
+        "precision": 1.0,
+        "miss_rate": 0.0,
+        "merge_rate": 0.0,
+        "fp_rate": 0.0
+      }
+    ],
+    [
+      "UriyaCohenEliya_milleniumOutside_SamsungSM-A235F_15-04-2026_exp3",
+      {
+        "n_gt": 12,
+        "n_pred": 12,
+        "clean": 12,
+        "missed": 0,
+        "gt_merged": 0,
+        "gt_split": 0,
+        "fp": 0,
+        "pred_merged": 0,
+        "pred_split_part": 0,
+        "f1_like": 1.0,
+        "recall": 1.0,
+        "precision": 1.0,
+        "miss_rate": 0.0,
+        "merge_rate": 0.0,
+        "fp_rate": 0.0
+      }
+    ]
+  ],
+  "mistakes_total": 155,
+  "n_gt_total": 498
+}
