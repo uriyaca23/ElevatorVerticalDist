@@ -300,8 +300,17 @@ def detect(
     nms_samples = max(1, int(round(config.nms_radius_s * fs)))
     amp_gate = np.abs(best_A) >= config.min_peak_abs_a
     best_r2_gated = np.where(amp_gate, best_r2, -np.inf)
-    initial_peaks = _peak_pick(best_r2_gated, config.r2_peak_thresh, nms_samples)
+    # Per-sign peak picking: run local-NMS separately for + and − so that
+    # a nearby higher-R² opposite-sign peak doesn't suppress a valid
+    # same-sign peak. Previously _peak_pick ran on unsigned R² which
+    # dropped lots of lobes near high-R² peaks of the other sign (see
+    # iter_05/iter_06 notes in improvement_iterations/).
     signs = np.sign(best_A)
+    pos_r2_gated = np.where(signs > 0, best_r2_gated, -np.inf)
+    neg_r2_gated = np.where(signs < 0, best_r2_gated, -np.inf)
+    pos_peaks = _peak_pick(pos_r2_gated, config.r2_peak_thresh, nms_samples)
+    neg_peaks = _peak_pick(neg_r2_gated, config.r2_peak_thresh, nms_samples)
+    initial_peaks = sorted(set(pos_peaks) | set(neg_peaks))
     final_peaks = _same_sign_nms(
         initial_peaks, best_r2_gated, signs, t, config.same_sign_min_gap_s,
     )
