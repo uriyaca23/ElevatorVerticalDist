@@ -107,7 +107,7 @@ class DetectConfig:
 
     joint_r2_thresh: float = 0.90
     min_pair_abs_a: float = 0.40
-    heatmap_energy_thresh: float = 0.20
+    heatmap_energy_thresh: float = 0.40
 
     w_min_s: float = 0.4
     w_max_s: float = 3.0

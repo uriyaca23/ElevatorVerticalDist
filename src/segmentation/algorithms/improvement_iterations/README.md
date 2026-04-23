@@ -34,3 +34,4 @@ venv/bin/python -m src.segmentation.algorithms.improvement_iterations._iter_runn
 | 00 | `iter_00_baseline` | 264 / 498 | 260 | — | 0.669 | 0.406 | production code as of c4d2a9f |
 | 01 | `iter_01_loosen_filters` | 352 / 498 | 292 | +32 | 0.703 | 0.454 | recall+++, FPs exploded (26→146) |
 | 02 | `iter_02_tighten_pair_A` | 344 / 498 | 299 | +39 | 0.694 | 0.442 | min_pair_abs_a 0.30→0.40: only killed 1 FP — not the driver |
+| 03 | `iter_03_middle_heatmap` | 336 / 498 | 261 | +1 | 0.717 | 0.470 | heatmap_energy 0.20→0.40: FPs 145→99, mistakes back near baseline |
