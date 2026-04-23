@@ -142,7 +142,7 @@ def write_metrics_table(
 
     header = (
         "Algorithm & $n_\\mathrm{clean}$ & $n_\\mathrm{acc}$ & "
-        "Cov (clean) & Cov (acc) & "
+        "Cov (GT-clean) & Cov (filter-acc.) & "
         "$\\tilde{|e|}$ & $\\tilde{w}$ & $\\le 1.5$ m & "
         "Rej. dirty"
     )

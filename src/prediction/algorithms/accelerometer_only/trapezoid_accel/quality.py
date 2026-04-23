@@ -77,15 +77,26 @@ def assess(
     W_fit: float,
     A_fit: float,
     duration_s: float,
+    A_anchor_ratio: float,
+    out_of_lobe_residual_frac: float,
+    cruise_v_cv: float,
     min_segment_samples: int,
     grav_window_sec: float,
     grav_stability_max: float,
     quality_score_reject: float,
-    min_joint_r2: float,
+    min_r2_short: float,
+    min_r2_mid: float,
+    min_r2_long: float,
+    overlap_delta: float,
     min_delta_tc_sec: float,
     min_distance_m: float,
     max_distance_m: float,
     min_active_fraction: float,
+    max_A_anchor_ratio: float,
+    min_A_anchor_ratio: float,
+    max_out_of_lobe_frac: float,
+    max_cruise_v_cv: float,
+    max_pre_post_angle_deg: float,
 ) -> TrapezoidQuality:
     features: dict[str, float] = {}
 
@@ -129,6 +140,24 @@ def assess(
     acf1 = _residual_acf1(fit_residuals)
     features["residual_acf1"] = acf1
 
+    # --- New outlier-catcher features ---
+    features["A_anchor_ratio"] = float(A_anchor_ratio)
+    features["out_of_lobe_residual_frac"] = float(out_of_lobe_residual_frac)
+    features["cruise_v_cv"] = float(cruise_v_cv)
+
+    # --- Graded R² minimum that depends on predicted |Δh| ---
+    if predicted_abs_dh < 3.0:
+        min_r2_effective = float(min_r2_short)
+    elif predicted_abs_dh < 6.0:
+        min_r2_effective = float(min_r2_mid)
+    else:
+        min_r2_effective = float(min_r2_long)
+    features["min_r2_effective"] = min_r2_effective
+
+    # --- W-relative overlap threshold ---
+    overlap_threshold = 2.0 * W_fit * (1.0 + float(overlap_delta))
+    features["overlap_threshold_sec"] = overlap_threshold
+
     # ============================================================
     # Score (lower = better)
     # ============================================================
@@ -164,16 +193,47 @@ def assess(
     # ============================================================
     if not pre_ok and not post_ok:
         return TrapezoidQuality(False, "no_gravity_calibration", score, features)
-    if fit_joint_r2 < min_joint_r2:
-        return TrapezoidQuality(False, f"low_r2_{fit_joint_r2:.2f}", score, features)
+    if (np.isfinite(pp_angle) and pp_angle > max_pre_post_angle_deg):
+        return TrapezoidQuality(False, f"pre_post_angle_{pp_angle:.0f}deg", score, features)
+    # Graded R² threshold (short rides are allowed lower R² because SNR
+    # is intrinsically worse at short displacements).
+    if fit_joint_r2 < min_r2_effective:
+        return TrapezoidQuality(
+            False, f"low_r2_{fit_joint_r2:.2f}_min_{min_r2_effective:.2f}",
+            score, features,
+        )
+    # Absolute lobe-spacing floor only. The physically valid touching
+    # regime (Δt_c = 2W) is handled by the joined-pulse branch in the
+    # estimator, not by rejection here. We only reject when Δt_c
+    # falls below ``min_delta_tc_sec`` — a tiny numerical floor
+    # protecting against degenerate fits.
     if delta_tc_sec < min_delta_tc_sec:
-        return TrapezoidQuality(False, f"lobes_too_close_{delta_tc_sec:.2f}s", score, features)
+        return TrapezoidQuality(
+            False, f"delta_tc_below_floor_{delta_tc_sec:.2f}s",
+            score, features,
+        )
     if predicted_abs_dh < min_distance_m:
         return TrapezoidQuality(False, f"dh_too_small_{predicted_abs_dh:.2f}m", score, features)
     if predicted_abs_dh > max_distance_m:
         return TrapezoidQuality(False, f"dh_too_large_{predicted_abs_dh:.1f}m", score, features)
     if features["active_fraction"] < min_active_fraction and n > 400:
         return TrapezoidQuality(False, "no_significant_motion", score, features)
+    # --- New outlier-catcher rules (Pixel-10 Yitzchaki style misfires) ---
+    if A_anchor_ratio > max_A_anchor_ratio or A_anchor_ratio < min_A_anchor_ratio:
+        return TrapezoidQuality(
+            False, f"A_anchor_mismatch_{A_anchor_ratio:.2f}",
+            score, features,
+        )
+    if out_of_lobe_residual_frac > max_out_of_lobe_frac:
+        return TrapezoidQuality(
+            False, f"out_of_lobe_frac_{out_of_lobe_residual_frac:.2f}",
+            score, features,
+        )
+    if cruise_v_cv > max_cruise_v_cv:
+        return TrapezoidQuality(
+            False, f"cruise_v_cv_{cruise_v_cv:.2f}",
+            score, features,
+        )
     if score > quality_score_reject:
         return TrapezoidQuality(False, f"quality_score_{score:.1f}", score, features)
 
