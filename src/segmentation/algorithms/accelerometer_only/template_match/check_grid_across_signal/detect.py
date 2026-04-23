@@ -100,14 +100,14 @@ class DetectConfig:
     nms_radius_s: float = 2.0
 
 
-    same_sign_min_gap_s: float = 10.0
+    same_sign_min_gap_s: float = 5.0
     min_ride_s: float = 0.0
     max_ride_s: float = 30.0
 
 
     joint_r2_thresh: float = 0.90
-    min_pair_abs_a: float = 0.5
-    heatmap_energy_thresh: float = 0.60
+    min_pair_abs_a: float = 0.30
+    heatmap_energy_thresh: float = 0.20
 
     w_min_s: float = 0.4
     w_max_s: float = 3.0

@@ -32,3 +32,4 @@ venv/bin/python -m src.segmentation.algorithms.improvement_iterations._iter_runn
 | iter | branch | clean | mistakes | Δmistakes | f1_like | iou_f1@0.5 | note |
 |---|---|---|---|---|---|---|---|
 | 00 | `iter_00_baseline` | 264 / 498 | 260 | — | 0.669 | 0.406 | production code as of c4d2a9f |
+| 01 | `iter_01_loosen_filters` | 352 / 498 | 292 | +32 | 0.703 | 0.454 | recall+++, FPs exploded (26→146) |
