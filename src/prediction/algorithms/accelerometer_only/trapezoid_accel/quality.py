@@ -80,6 +80,7 @@ def assess(
     A_anchor_ratio: float,
     out_of_lobe_residual_frac: float,
     cruise_v_cv: float,
+    vert_method: str,
     min_segment_samples: int,
     grav_window_sec: float,
     grav_stability_max: float,
@@ -120,11 +121,18 @@ def assess(
     features["post_g_mag"] = post_mag
     features["pre_stability"] = pre_stab
     features["post_stability"] = post_stab
+    features["vert_method"] = vert_method  # kept on the row for diagnostics
     if pre_ok and post_ok:
         pp_angle = _angle_deg(pre_g, post_g)
     else:
         pp_angle = float("inf")
     features["pre_post_angle_deg"] = pp_angle if np.isfinite(pp_angle) else -1.0
+    # The estimator may have fallen back to in-ride gravity when neither
+    # pre nor post window is stationary. That fallback is good enough to
+    # certify a Δh on a single-ride pulse (median-of-window-means is
+    # robust on bipolar content), so the quality gate must trust the
+    # method actually used rather than the raw pre/post flags.
+    has_calibration = vert_method != "magnitude"
 
     # --- During-ride gravity drift ---
     max_drift, drift_std = _ride_gravity_drift(ride_ax, ride_ay, ride_az, fs)
@@ -162,9 +170,16 @@ def assess(
     # Score (lower = better)
     # ============================================================
     score = 0.0
-    # Gravity-projection penalties
+    # Gravity-projection penalties. Tiered by what the estimator actually
+    # used: a clean pre+post anchor is the gold standard, a one-sided
+    # anchor is mid-tier, and an in-ride fallback gets a moderate penalty
+    # (it is usable but noisier than a stationary anchor). Magnitude-only
+    # is rejected outright below — the score branch never fires for it.
     if not pre_ok and not post_ok:
-        score += 3.5
+        # In-ride fallback (or magnitude). Apply a flat penalty smaller
+        # than the old 3.5 because the projection is still signed and
+        # axis-aware; the noise is in the gravity *direction* estimate.
+        score += 2.0 if has_calibration else 3.5
     elif not pre_ok:
         score += 1.2
     else:
@@ -191,7 +206,11 @@ def assess(
     # ============================================================
     # Rejection rules
     # ============================================================
-    if not pre_ok and not post_ok:
+    # Reject only when the estimator actually had no orientation
+    # information at all (magnitude-only fallback). When pre/post fail
+    # but the in-ride estimate succeeded ("projected_ride"), we trust
+    # the result with the score-side penalty above.
+    if not has_calibration:
         return TrapezoidQuality(False, "no_gravity_calibration", score, features)
     if (np.isfinite(pp_angle) and pp_angle > max_pre_post_angle_deg):
         return TrapezoidQuality(False, f"pre_post_angle_{pp_angle:.0f}deg", score, features)

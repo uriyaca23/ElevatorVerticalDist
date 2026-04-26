@@ -181,6 +181,21 @@ class ZuptAccelEstimator:
             a_vert = vertical_accel_projected(inp.ax, inp.ay, inp.az, post_g)
             return a_vert, "projected_post", float(post_mag)
 
+        # In-ride gravity: when neither stationary window is usable
+        # (tight segmentation / back-to-back rides), estimate gravity
+        # from the ride itself. The median-of-window-means in
+        # ``estimate_gravity_stationary`` is robust to elevator-ride
+        # content. Validated only when |g| ∈ (8, 12) and stability is
+        # below twice the configured cap (relaxed because we are
+        # estimating on partially non-stationary samples).
+        ride_g, ride_mag, ride_stab = estimate_gravity_stationary(
+            inp.ax, inp.ay, inp.az,
+            fs=inp.fs, window_sec=c.grav_window_sec,
+        )
+        if 8.0 < ride_mag < 12.0 and ride_stab < 2.0 * c.grav_stability_max:
+            a_vert = vertical_accel_projected(inp.ax, inp.ay, inp.az, ride_g)
+            return a_vert, "projected_ride", float(ride_mag)
+
         # Magnitude fallback — loses direction sign but robust
         mag = np.sqrt(inp.ax ** 2 + inp.ay ** 2 + inp.az ** 2)
         g_ref = float(np.median(mag))

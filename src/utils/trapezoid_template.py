@@ -69,6 +69,14 @@ def match_one_template(a: np.ndarray, t: np.ndarray, W: float, frac_flat: float)
     if K % 2 == 0:
         K += 1
     half = K // 2
+    # ``np.convolve(..., mode="same")`` returns ``max(N, K)`` samples — when
+    # the template is at least as long as the signal, the result desyncs
+    # from the per-sample masks (``local_power``, ``valid``) which are
+    # built on ``n``. Bail out with all-NaN so the grid search just skips
+    # this ``W`` instead of crashing on ``A_hat[valid] = inner[valid] /…``.
+    # Mirrors the guard already in ``match_joined_template``.
+    if K >= n:
+        return TemplateScan(nan, nan, nan, nan, 0.0)
 
     t_kernel = (np.arange(K) - half) * dt
     tpl = trapezoid_kernel(t_kernel, 0.0, W, frac_flat)
@@ -76,7 +84,10 @@ def match_one_template(a: np.ndarray, t: np.ndarray, W: float, frac_flat: float)
     if norm_t < 1e-9:
         return TemplateScan(nan, nan, nan, nan, 0.0)
 
-    inner = np.convolve(a, tpl[::-1], mode="same")
+    # Slice to ``n`` defensively: ``mode="same"`` is documented to return
+    # max(N, K) so when K = N − 1 (and rounding / odd-fixing creeps it
+    # over the line) we still want exactly ``n`` samples.
+    inner = np.convolve(a, tpl[::-1], mode="same")[:n]
 
     a2 = a * a
     csum = np.concatenate(([0.0], np.cumsum(a2)))
