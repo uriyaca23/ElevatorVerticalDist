@@ -218,7 +218,7 @@ def main() -> int:
             old = bs[k]; new = summary[k]
             if old > 0:
                 speedup = old / max(new, 1e-12)
-                print(f"  {k}: {old*1000:.2f}ms → {new*1000:.2f}ms  ({speedup:.2f}×)")
+                print(f"  {k}: {old*1000:.2f}ms -> {new*1000:.2f}ms  ({speedup:.2f}x)")
         # Accuracy comparison
         print("\nAccuracy diff (per-experiment):")
         for r_new, r_old in zip(results, baseline["details"]):
