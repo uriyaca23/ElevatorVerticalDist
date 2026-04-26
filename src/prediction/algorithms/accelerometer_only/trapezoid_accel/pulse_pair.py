@@ -87,9 +87,30 @@ Delta method gives σ_Δh from the gradient of Δh(A, W, f, Δt_c):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import NamedTuple, Optional
+from typing import Optional
 
 import numpy as np
+
+# Stage-agnostic matched-filter primitives live in ``src.utils``. We
+# re-export them here so ``estimator.py`` (and any other downstream
+# caller) can keep importing ``trapezoid_kernel`` etc. from this module.
+from src.utils.trapezoid_template import (
+    TemplateScan,
+    match_one_template,
+    search_shared_shape_pair,
+    trapezoid_kernel,
+)
+
+__all__ = [
+    "GRID_W_S", "GRID_F", "LOBE1_REGION", "LOBE2_REGION",
+    "TemplateScan", "match_one_template", "trapezoid_kernel",
+    "trapezoid_kernel_deriv",
+    "PulsePairFit", "fit_shared_shape_pair", "fit_joined_pulse",
+    "joined_kernel", "match_joined_template",
+    "height_from_fit", "theoretical_sigma_height",
+    "theoretical_sigma_height_joined",
+    "smooth_rolling_mean",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -109,25 +130,11 @@ LOBE2_REGION: tuple[float, float] = (0.40, 1.00)
 
 
 # ---------------------------------------------------------------------------
-# Trapezoid kernel + matched-filter primitive
+# Trapezoid-kernel derivative (matched-filter CRB on t_c)
 # ---------------------------------------------------------------------------
 
-def trapezoid_kernel(t: np.ndarray, t_c: float, W: float, frac_flat: float) -> np.ndarray:
-    """Unit-amplitude symmetric trapezoid centered at t_c, half-width W,
-    flat fraction f ∈ [0, 1]."""
-    frac_flat = max(0.0, min(1.0, float(frac_flat)))
-    W = max(1e-6, float(W))
-    flat_half = frac_flat * W
-    ramp_width = W - flat_half + 1e-9
-    dt = np.abs(t - t_c)
-    return np.where(
-        dt <= flat_half, 1.0,
-        np.where(dt < W, (W - dt) / ramp_width, 0.0),
-    )
-
-
 def trapezoid_kernel_deriv(t: np.ndarray, t_c: float, W: float, frac_flat: float) -> np.ndarray:
-    """Time derivative of ``trapezoid_kernel``. Slope is ±1/ramp_width
+    """Time derivative of :func:`trapezoid_kernel`. Slope is ±1/ramp_width
     on the ramps, 0 elsewhere. Needed for the matched-filter CRB on t_c.
     """
     frac_flat = max(0.0, min(1.0, float(frac_flat)))
@@ -140,64 +147,6 @@ def trapezoid_kernel_deriv(t: np.ndarray, t_c: float, W: float, frac_flat: float
     out = np.zeros_like(t)
     out[ramp] = -s[ramp] / ramp_width
     return out
-
-
-class TemplateScan(NamedTuple):
-    A_hat: np.ndarray        # (n,)   closed-form LS amplitude at each centre
-    r2_local: np.ndarray     # (n,)   local R² of the single-template fit
-    inner: np.ndarray        # (n,)   ⟨a, tpl⟩ at each centre
-    local_power: np.ndarray  # (n,)   ⟨a, a⟩ on the ±W window
-    norm_t: float            # ⟨tpl, tpl⟩ (scalar)
-
-
-def match_one_template(a: np.ndarray, t: np.ndarray, W: float, frac_flat: float) -> TemplateScan:
-    """Slide a unit trapezoid of shape (W, f) over the smoothed accel
-    signal ``a`` sampled at times ``t``. Returns the LS amplitude, the
-    local R², and the raw inner-product + local-power series needed by
-    the pair fit.
-
-    Edges where the ±W window falls off the signal are NaN so masks
-    can propagate cleanly through downstream code.
-    """
-    n = a.size
-    nan = np.full(n, np.nan)
-    if n == 0:
-        return TemplateScan(nan[:0], nan[:0], nan[:0], nan[:0], 0.0)
-
-    dt = float(np.median(np.diff(t))) if t.size > 1 else 1.0 / 100.0
-    K = max(3, int(round(2 * W / dt)))
-    if K % 2 == 0:
-        K += 1
-    half = K // 2
-
-    t_kernel = (np.arange(K) - half) * dt
-    tpl = trapezoid_kernel(t_kernel, 0.0, W, frac_flat)
-    norm_t = float(np.sum(tpl * tpl))
-    if norm_t < 1e-9:
-        return TemplateScan(nan, nan, nan, nan, 0.0)
-
-    inner = np.convolve(a, tpl[::-1], mode="same")
-
-    a2 = a * a
-    csum = np.concatenate(([0.0], np.cumsum(a2)))
-    local_power = np.full(n, np.nan)
-    if n - half > half:
-        idx = np.arange(half, n - half)
-        local_power[idx] = csum[idx + half + 1] - csum[idx - half]
-
-    A_hat = np.full(n, np.nan)
-    valid = np.isfinite(local_power)
-    A_hat[valid] = inner[valid] / norm_t
-
-    r2_local = np.full(n, np.nan)
-    denom = local_power[valid]
-    with np.errstate(divide="ignore", invalid="ignore"):
-        ss_res = denom - A_hat[valid] * inner[valid]
-        r2 = 1.0 - ss_res / np.where(denom > 1e-9, denom, np.nan)
-    r2_local[valid] = r2
-
-    inner_masked = np.where(np.isfinite(local_power), inner, np.nan)
-    return TemplateScan(A_hat, r2_local, inner_masked, local_power, norm_t)
 
 
 # ---------------------------------------------------------------------------
@@ -231,75 +180,6 @@ class PulsePairFit:
     def delta_t_c(self) -> float:
         """Centre-to-centre spacing (always positive)."""
         return float(self.t_c2 - self.t_c1)
-
-
-def _search_pair_on_grid(
-    a: np.ndarray, t: np.ndarray,
-    lo1: float, hi1: float, lo2: float, hi2: float,
-    sign1: float, sign2: float,
-    grid_W: np.ndarray, grid_F: np.ndarray,
-) -> Optional[tuple]:
-    """Exhaustive (W, f, i1, i2) search for the shared-shape optimum.
-
-    Returns a tuple ``(W, f, i1, i2, A_abs, r2_1, r2_2, norm_t, P1, P2)``
-    or ``None`` when no sign-valid pair exists anywhere on the grid.
-    """
-    in1 = (t >= lo1) & (t <= hi1)
-    in2 = (t >= lo2) & (t <= hi2)
-    if not in1.any() or not in2.any():
-        return None
-
-    best_score = -np.inf
-    best = None
-
-    for W in grid_W:
-        for f in grid_F:
-            scan = match_one_template(a, t, float(W), float(f))
-            inner = scan.inner
-            power = scan.local_power
-            norm_t = scan.norm_t
-            if norm_t < 1e-9:
-                continue
-
-            valid = np.isfinite(inner) & np.isfinite(power) & (power > 1e-9)
-            m1 = in1 & valid & (sign1 * inner > 0.0)
-            m2 = in2 & valid & (sign2 * inner > 0.0)
-            if not m1.any() or not m2.any():
-                continue
-
-            i1s = np.where(m1)[0]
-            i2s = np.where(m2)[0]
-            u1 = sign1 * inner[i1s]
-            u2 = sign2 * inner[i2s]
-            p1 = power[i1s]
-            p2 = power[i2s]
-
-            U1 = u1[:, None]
-            U2 = u2[None, :]
-            P1 = p1[:, None]
-            P2 = p2[None, :]
-
-            A_abs = (U1 + U2) / (2.0 * norm_t)
-            ss1 = P1 - 2.0 * A_abs * U1 + A_abs * A_abs * norm_t
-            ss2 = P2 - 2.0 * A_abs * U2 + A_abs * A_abs * norm_t
-            r2_1 = 1.0 - ss1 / P1
-            r2_2 = 1.0 - ss2 / P2
-            mean_r2 = 0.5 * (r2_1 + r2_2)
-
-            flat = int(np.argmax(mean_r2))
-            j1, j2 = np.unravel_index(flat, mean_r2.shape)
-            score = float(mean_r2[j1, j2])
-            if score > best_score:
-                best_score = score
-                best = (
-                    float(W), float(f),
-                    int(i1s[j1]), int(i2s[j2]),
-                    float(A_abs[j1, j2]),
-                    float(r2_1[j1, j2]), float(r2_2[j1, j2]),
-                    float(norm_t),
-                    float(P1[j1, 0]), float(P2[0, j2]),
-                )
-    return best
 
 
 def fit_shared_shape_pair(
@@ -349,30 +229,30 @@ def fit_shared_shape_pair(
     def _one_direction(d: int) -> Optional[PulsePairFit]:
         sign1 = +1.0 * d
         sign2 = -1.0 * d
-        found = _search_pair_on_grid(
+        found = search_shared_shape_pair(
             a, t, lo1, hi1, lo2, hi2, sign1, sign2,
             grid_W_eff, grid_F,
         )
         if found is None:
             return None
-        W_b, f_b, i1, i2, A_b, r2_1, r2_2, norm_t_b, P1, P2 = found
         # Reconstruct residuals on the pair-fit support region
-        t_c1 = float(t[i1])
-        t_c2 = float(t[i2])
+        t_c1 = float(t[found.i1])
+        t_c2 = float(t[found.i2])
         tpl = (
-            sign1 * A_b * trapezoid_kernel(t, t_c1, W_b, f_b)
-            + sign2 * A_b * trapezoid_kernel(t, t_c2, W_b, f_b)
+            sign1 * found.A_abs * trapezoid_kernel(t, t_c1, found.W, found.f)
+            + sign2 * found.A_abs * trapezoid_kernel(t, t_c2, found.W, found.f)
         )
         residuals = a - tpl
         return PulsePairFit(
-            A=A_b, W=W_b, f=f_b,
+            A=found.A_abs, W=found.W, f=found.f,
             t_c1=t_c1, t_c2=t_c2,
             sign=d,
-            r2_1=r2_1, r2_2=r2_2,
-            joint_r2=0.5 * (r2_1 + r2_2),
+            r2_1=found.r2_1, r2_2=found.r2_2,
+            joint_r2=0.5 * (found.r2_1 + found.r2_2),
             residuals=residuals,
-            norm_t=norm_t_b,
-            local_power_1=P1, local_power_2=P2,
+            norm_t=found.norm_t,
+            local_power_1=found.local_power_1,
+            local_power_2=found.local_power_2,
         )
 
     if direction is not None:

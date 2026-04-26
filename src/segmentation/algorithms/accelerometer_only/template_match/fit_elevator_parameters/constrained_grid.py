@@ -53,6 +53,8 @@ from pathlib import Path
 
 import numpy as np
 
+from src.utils.trapezoid_template import search_shared_shape_pair
+
 # See ``basic_grid.py`` for why we load ``common.py`` by file path.
 _HERE = Path(__file__).resolve().parent
 _COMMON_MOD_NAME = "_fit_ep_common"
@@ -71,80 +73,10 @@ GRID_W_S = _common.GRID_W_S
 GRID_F = _common.GRID_F
 LOBE1_REGION = _common.LOBE1_REGION
 LOBE2_REGION = _common.LOBE2_REGION
-match_one_template = _common.match_one_template
 run_fitter = _common.run_fitter
 
 OUT_DIR_NAME = "basicTrapezoidGridWithConstraint"
 TITLE_SUFFIX = "shared-shape per-ride trapezoid fit (|A|,W,f tied; max mean R²)"
-
-
-def _search_best_pair(
-    a: np.ndarray, t: np.ndarray,
-    lo1: float, hi1: float, lo2: float, hi2: float,
-    sign1: float, sign2: float,
-    grid_W: np.ndarray, grid_F: np.ndarray,
-) -> tuple[int, int, float, float, float, float, float] | None:
-    """Exhaustive search for the shared-shape optimum.
-
-    Returns ``(i1, i2, A_abs, W, f, r2_1, r2_2)`` or ``None`` if no
-    sign-valid pair exists anywhere on the grid.
-    """
-    in1 = (t >= lo1) & (t <= hi1)
-    in2 = (t >= lo2) & (t <= hi2)
-    if not in1.any() or not in2.any():
-        return None
-
-    best: tuple[int, int, float, float, float, float, float] | None = None
-    best_score = -np.inf
-
-    for W in grid_W:
-        for f in grid_F:
-            scan = match_one_template(a, t, float(W), float(f))
-            inner = scan.inner
-            power = scan.local_power
-            norm_t = scan.norm_t
-            if norm_t < 1e-9:
-                continue
-            valid = np.isfinite(inner) & np.isfinite(power) & (power > 1e-9)
-            m1 = in1 & valid & (sign1 * inner > 0.0)
-            m2 = in2 & valid & (sign2 * inner > 0.0)
-            if not m1.any() or not m2.any():
-                continue
-
-            i1s = np.where(m1)[0]
-            i2s = np.where(m2)[0]
-
-            # Sign-folded inner products (positive after the masks above).
-            u1 = sign1 * inner[i1s]
-            u2 = sign2 * inner[i2s]
-            p1 = power[i1s]
-            p2 = power[i2s]
-
-            U1 = u1[:, None]
-            U2 = u2[None, :]
-            P1 = p1[:, None]
-            P2 = p2[None, :]
-
-            A = (U1 + U2) / (2.0 * norm_t)
-            ss1 = P1 - 2.0 * A * U1 + A * A * norm_t
-            ss2 = P2 - 2.0 * A * U2 + A * A * norm_t
-            r2_1 = 1.0 - ss1 / P1
-            r2_2 = 1.0 - ss2 / P2
-            mean_r2 = 0.5 * (r2_1 + r2_2)
-
-            flat = int(np.argmax(mean_r2))
-            j1, j2 = np.unravel_index(flat, mean_r2.shape)
-            score = float(mean_r2[j1, j2])
-            if score > best_score:
-                best_score = score
-                i1_best = int(i1s[j1])
-                i2_best = int(i2s[j2])
-                best = (
-                    i1_best, i2_best,
-                    float(A[j1, j2]), float(W), float(f),
-                    float(r2_1[j1, j2]), float(r2_2[j1, j2]),
-                )
-    return best
 
 
 def fit_ride(
@@ -171,20 +103,19 @@ def fit_ride(
     if grid_W.size == 0:
         grid_W = GRID_W_S[:1]
 
-    best = _search_best_pair(
+    best = search_shared_shape_pair(
         a_smooth, t_ride, lo1, hi1, lo2, hi2, sign1, sign2, grid_W, GRID_F,
     )
     if best is None:
         return fail
 
-    i1, i2, A_abs, W, f, r2_1, r2_2 = best
     lobe1 = LobeFit(
-        t_c=float(t_ride[i1]), a_peak=float(sign1 * A_abs),
-        half_width_s=W, frac_flat=f, r2_local=r2_1,
+        t_c=float(t_ride[best.i1]), a_peak=float(sign1 * best.A_abs),
+        half_width_s=best.W, frac_flat=best.f, r2_local=best.r2_1,
     )
     lobe2 = LobeFit(
-        t_c=float(t_ride[i2]), a_peak=float(sign2 * A_abs),
-        half_width_s=W, frac_flat=f, r2_local=r2_2,
+        t_c=float(t_ride[best.i2]), a_peak=float(sign2 * best.A_abs),
+        half_width_s=best.W, frac_flat=best.f, r2_local=best.r2_2,
     )
     return RideFit(
         index=ride_idx, ride_type=ride_type, duration_s=duration,

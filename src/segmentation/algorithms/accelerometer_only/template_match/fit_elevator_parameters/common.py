@@ -25,7 +25,7 @@ import math
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Callable, NamedTuple
+from typing import Callable
 
 import matplotlib
 
@@ -43,6 +43,14 @@ from src.physics import calculate_velocity_from_accelerometer  # noqa: E402
 from src.utils.accelerometer_utils import (  # noqa: E402
     estimate_gravity_stationary,
     vertical_accel_projected,
+)
+# Stage-agnostic matched-filter primitives — re-exported so the existing
+# ``from ..fit_elevator_parameters.common import trapezoid_kernel,
+# match_one_template, TemplateScan`` call sites keep working unchanged.
+from src.utils.trapezoid_template import (  # noqa: E402, F401
+    TemplateScan,
+    match_one_template,
+    trapezoid_kernel,
 )
 
 LABELS_ROOT = (
@@ -136,91 +144,9 @@ def _vertical_accel(ax: np.ndarray, ay: np.ndarray, az: np.ndarray, fs: float) -
     return a - dc
 
 
-def trapezoid_kernel(t: np.ndarray, t_c: float, W: float, frac_flat: float) -> np.ndarray:
-    """Unit-amplitude symmetric trapezoid kernel."""
-    frac_flat = max(0.0, min(1.0, float(frac_flat)))
-    W = max(1e-6, float(W))
-    flat_half = frac_flat * W
-    ramp_width = W - flat_half + 1e-9
-    dt = np.abs(t - t_c)
-    return np.where(
-        dt <= flat_half, 1.0,
-        np.where(dt < W, (W - dt) / ramp_width, 0.0),
-    )
-
-
 def _smooth(x: np.ndarray, fs: float, seconds: float) -> np.ndarray:
     w = max(3, int(round(seconds * fs)))
     return pd.Series(x).rolling(w, center=True, min_periods=1).mean().to_numpy()
-
-
-# --------------------------------------------------------------------------
-# Matched-filter sweep (shared by every fitter)
-# --------------------------------------------------------------------------
-
-class TemplateScan(NamedTuple):
-    """Result of sliding one ``(W, f)`` template across a ride window.
-
-    ``A_hat[i]`` / ``r2_local[i]`` are the unconstrained least-squares
-    amplitude and local R² if the template were centered at sample ``i``.
-    ``inner[i] = A_hat[i] * norm_t`` is the raw ``<a, tpl>`` inner product,
-    and ``local_power[i] = <a, a>`` on the same ±W window. Positions whose
-    ±W window falls off the signal are NaN. These five quantities are
-    enough to form any per-lobe or joint objective.
-    """
-
-    A_hat: np.ndarray
-    r2_local: np.ndarray
-    inner: np.ndarray
-    local_power: np.ndarray
-    norm_t: float
-
-
-def match_one_template(a: np.ndarray, t: np.ndarray, W: float, frac_flat: float) -> TemplateScan:
-    """Slide a unit trapezoid of shape ``(W, frac_flat)`` over signal ``a``."""
-    n = a.size
-    nan = np.full(n, np.nan)
-    if n == 0:
-        return TemplateScan(nan[:0], nan[:0], nan[:0], nan[:0], 0.0)
-
-    dt = float(np.median(np.diff(t))) if t.size > 1 else 1.0 / 100.0
-    K = max(3, int(round(2 * W / dt)))  # samples per ±W window
-    if K % 2 == 0:
-        K += 1
-    half = K // 2
-
-    t_kernel = (np.arange(K) - half) * dt
-    tpl = trapezoid_kernel(t_kernel, 0.0, W, frac_flat)
-    norm_t = float(np.sum(tpl * tpl))
-    if norm_t < 1e-9:
-        return TemplateScan(nan, nan, nan, nan, 0.0)
-
-    # Cross-correlation at each center.
-    inner = np.convolve(a, tpl[::-1], mode="same")
-
-    # Rolling window power of the signal.
-    a2 = a * a
-    csum = np.concatenate(([0.0], np.cumsum(a2)))
-    local_power = np.full(n, np.nan)
-    if n - half > half:
-        idx = np.arange(half, n - half)
-        local_power[idx] = csum[idx + half + 1] - csum[idx - half]
-
-    A_hat = np.full(n, np.nan)
-    valid = np.isfinite(local_power)
-    A_hat[valid] = inner[valid] / norm_t
-
-    r2_local = np.full(n, np.nan)
-    denom = local_power[valid]
-    with np.errstate(divide="ignore", invalid="ignore"):
-        ss_res = denom - A_hat[valid] * inner[valid]
-        r2 = 1.0 - ss_res / np.where(denom > 1e-9, denom, np.nan)
-    r2_local[valid] = r2
-
-    # Zero out inner outside the valid (power-defined) window so downstream
-    # sign masks don't trip on edge artefacts.
-    inner_masked = np.where(np.isfinite(local_power), inner, np.nan)
-    return TemplateScan(A_hat, r2_local, inner_masked, local_power, norm_t)
 
 
 # --------------------------------------------------------------------------

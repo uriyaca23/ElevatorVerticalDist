@@ -50,7 +50,7 @@ class TemplateMatchConfig(BaseModel):
     # ``src/segmentation/README.md`` ("Tuning round — 2026-04") for the
     # before/after table and rationale.
     r2_peak_thresh: float = 0.40
-    min_peak_abs_a: float = 0.25
+    min_peak_abs_a: float = 0.20
     nms_radius_s: float = 1.0
     same_sign_min_gap_s: float = 5.0
 
@@ -72,13 +72,22 @@ class TemplateMatchConfig(BaseModel):
     # zero-padded behaviour.
     segment_pad_eps_s: float = 0.25
 
-    # (W, f) trapezoid-template grid
-    w_min_s: float = 0.4
+    # (W, f) trapezoid-template grid. ``w_min_s`` was lowered from 0.4 to
+    # 0.3 in the iter_15 tuning round after diagnostics showed many
+    # missed rides had ``pair_W`` pinned at the floor.
+    w_min_s: float = 0.3
     w_max_s: float = 3.0
     n_w: int = 30
     f_min: float = 0.05
     f_max: float = 0.80
     n_f: int = 15
+
+    # iter_13: prepend an explicit f=0 (pure-triangle) row to the (W, f)
+    # grid built by ``DetectConfig.grid_f()``. One-floor / joined-pulse
+    # rides have no cruise phase, so each lobe collapses to a triangle;
+    # the per-pair argmax in ``joint_pair_score`` picks trapezoid vs.
+    # triangle on a pair-by-pair basis with no separate branch needed.
+    include_triangle_row: bool = True
 
     # Phone-aware amplitude floor. When ``phone_model`` is passed to
     # ``Segmenter.detect``, ``min_peak_abs_a`` / ``min_pair_abs_a`` are

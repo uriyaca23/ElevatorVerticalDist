@@ -881,10 +881,13 @@ blocks follow in pipeline order (detection, then pair filter).
 \rowcolor{gray!12}
 \multicolumn{3}{@{}l}{\textbf{A. Template grid -- half-width $W$
   (\S\ref{sec:trapezoid-detect}, Eq.~\eqref{eq:trap-template})}} \\
-\paramcell{W\_MIN\_S}   & $0.4$~s  &
-  Lower bound on lobe half-width. A hair below the smallest physically
-  plausible $T_j$; excludes sub-jerk-ramp spikes that can only be
-  noise. \\
+\paramcell{W\_MIN\_S}   & $0.3$~s  &
+  Lower bound on lobe half-width. Lowered from $0.4$~s to $0.3$~s in
+  the iter\_15 round
+  (Section~\ref{sec:trapezoid-detect-tuning}) after diagnostics
+  showed many missed rides had \paramcell{pair\_W} pinned at the
+  floor. Still a hair below the smallest physically plausible $T_j$
+  observed in the corpus, so sub-jerk-ramp spikes remain excluded. \\
 \paramcell{W\_MAX\_S}   & $3.0$~s  &
   Upper bound on lobe half-width. Comfortably brackets the largest
   $T_j + T_v/2$ we see in commercial rides. \\
@@ -895,10 +898,16 @@ blocks follow in pipeline order (detection, then pair filter).
 \rowcolor{gray!12}
 \multicolumn{3}{@{}l}{\textbf{B. Template grid -- flat fraction $f$
   (\S\ref{sec:trapezoid-detect}, Eq.~\eqref{eq:trap-template})}} \\
-\paramcell{F\_MIN}      & $0.05$   &
-  Lower bound on plateau fraction. Excludes the degenerate
-  exactly-triangular pulse ($f=0$) whose discontinuous derivative
-  makes the matched filter score unstable under smoothing. \\
+\paramcell{F\_MIN}      & $0.05$ \;\textit{+ triangle row at $f=0$}  &
+  Lower bound on plateau fraction for the trapezoid grid. Originally
+  set above zero because an exactly-triangular pulse has a
+  discontinuous derivative and fits unstably under smoothing.
+  Iter\_13 (Section~\ref{sec:trapezoid-detect-tuning}) revisited
+  this: one-floor and joined-pulse rides really \emph{are}
+  triangular, so an explicit $f = 0$ row is now prepended to
+  \paramcell{grid\_f()}. The per-pair argmax in
+  \paramcell{joint\_pair\_score} picks trapezoid vs.\ triangle
+  pair-by-pair --- the trapezoid grid still starts at $0.05$. \\
 \paramcell{F\_MAX}      & $0.80$   &
   Upper bound on plateau fraction. Large enough to cover long rides
   where $T_a \gg T_j$, small enough to reject the near-constant
@@ -913,11 +922,14 @@ blocks follow in pipeline order (detection, then pair filter).
   Minimum shape-agreement of a candidate with its best template.
   Below this, the window isn't ``trapezoidal enough'' to treat as a
   lobe. Guards against low-$R^2$ noise. \\
-\paramcell{min\_peak\_abs\_a}    & $0.5$~m/s$^2$ &
+\paramcell{min\_peak\_abs\_a}    & $0.20$~m/s$^2$ &
   Minimum LS-fit $|\hat A|$ for a peak. Pedestrian bumps are the
   \emph{right shape} but the \emph{wrong size}; this floor separates
   them from $a_{\max}$-scale cruise lobes. Principal pedestrian-FP
-  lever. \\
+  lever. Lowered through two tuning rounds ($0.5 \to 0.25 \to
+  0.20$, Section~\ref{sec:trapezoid-detect-tuning}) once the
+  joint-$R^2$ and quiet-middle pair gates were in place to absorb
+  the FP risk. \\
 \paramcell{nms\_radius\_s}       & $0.5$~s &
   Duplicate-peak dedup radius. A single physical pulse produces
   adjacent high-$R^2$ samples; this collapses them to one. \\
@@ -1397,19 +1409,19 @@ penalised for missing the padding.
 \paragraph{Why the tight endpoints of
 \eqref{eq:trap-endpoints} are not quite right for the downstream
 integrators.}
-Both accelerometer-only Δh predictors --- ZUPT
+Both accelerometer-only $\Delta h$ predictors --- ZUPT
 (\S\ref{sec:algo-zupt}) and trapezoid-pulse-pair
 (\S\ref{sec:algo-trapezoid}) --- consume the segmenter's
 emitted interval $[t_{\text{start}},\,t_{\text{end}}]$ and
 \emph{double-integrate} the vertical acceleration over it to
-estimate Δh. A tight interval whose left edge coincides exactly with
+estimate $\Delta h$. A tight interval whose left edge coincides exactly with
 the foot of the take-off ramp inevitably clips the leading few
 samples of acceleration (smoothed signals have finite rise time;
 gravity-subtraction residuals bleed slightly outside the ramp
 support; the jerk-limited profile doesn't truly reach zero at
 $\pm W^\star$). The symmetric story holds at the landing ramp.
 Clipped tails mean a systematically low $\int a\,\mathrm{d}t$ and
-therefore a systematically low Δh.
+therefore a systematically low $\Delta h$.
 
 \paragraph{Fix.} Widen the emitted interval by a small constant
 $\varepsilon$ on each side:
@@ -1639,7 +1651,91 @@ candidates are expensive, while a soft ranking bias like the
 duration penalty can tilt the greedy in the right direction without
 categorically rejecting anyone.
 
-\subsubsection{Evaluation Metrics}
+\subsubsection{Detection-Stage Tuning: Triangle Row, $W$ Floor,
+Amplitude Floor}
+\label{sec:trapezoid-detect-tuning}
+
+A final tuning round on the full $498$-ride GT set revisited three
+threshold-grade knobs from Table~\ref{tab:detect-config}, all on
+the detection stage. The pair-filter structure
+(Section~\ref{sec:trapezoid-iterations}) was held frozen. Three
+changes landed; one knob produced a structural fix and the other
+two tightened the operating point.
+
+\paragraph{Triangle template row ($f = 0$, iter\_13).}
+A one-floor or joined-pulse ride has no cruise phase, so each lobe
+collapses to a triangle; the trapezoid kernel of
+Equation~\eqref{eq:trap-template} at $f = 0$ matches that shape
+exactly. We prepended an explicit $f = 0$ row to the
+$(W, f)$ grid built by \paramcell{grid\_f()}. The per-pair
+joint-$R^2$ argmax in \paramcell{joint\_pair\_score} then picks
+trapezoid vs.\ triangle on a pair-by-pair basis with no separate
+branch needed. Across all clean pairs, $10\%$ now prefer
+$f = 0$; among missed-but-candidate pairs the figure is $27\%$.
+The change is roughly mistake-neutral on the composite
+($154 \to 155$) but lifts $\mathrm{IoU}$-F1 at threshold $0.5$
+from $0.601$ to $0.703$ because triangle lobes pull endpoints in
+where the cruise plateau doesn't exist. This is the largest
+single-axis IoU improvement of any tuning round.
+
+\paragraph{Narrow the $W$ floor ($0.4 \to 0.3$~s, iter\_15).}
+Diagnostics on the missed rides that did produce candidate pairs
+showed \paramcell{pair\_W} pinned at the $0.4$~s lower bound for
+many of them --- the grid was being asked for narrower templates
+than it was allowed to build. Lowering \paramcell{w\_min\_s} to
+$0.3$~s admits those lobes. Combined with the triangle row, this
+reduced FPs by $10$ ($59 \to 49$) and dropped the composite
+mistake count from $155$ to $147$, a new best.
+
+\paragraph{Lower the peak-amplitude floor ($0.25 \to 0.20$~m/s$^2$,
+iter\_16).}
+On the remaining $\sim 50$ missed rides that \emph{never}
+produced a candidate peak, signed $R^2$ was high (median
+$0.94$--$0.95$) but $|\hat A|$ medians sat at
+$0.14$--$0.16$~m/s$^2$, just below the gate. Lowering the
+\paramcell{min\_peak\_abs\_a} floor to $0.20$~m/s$^2$ admits some
+of these. The quiet-middle filter (\S\ref{sec:trapezoid-pair},
+Gate 5) and the $0.40$ heatmap-energy gate caught the walking FPs
+that might have leaked through, so the change was a small but
+pure FP win: $49 \to 46$, mistakes $147 \to 144$. This is the
+deployed configuration.
+
+\paragraph{Net effect and ceiling.} Across the iter\_13--iter\_16
+round, the composite mistake count fell $154 \to 144$ ($-6.5\%$
+versus the iter\_07 baseline) and $\mathrm{IoU}$-F1 at $0.5$
+climbed $0.601 \to 0.705$. Subsequent variants explored after
+iter\_16 --- aggressively lower amplitude gates, a duration
+penalty on long pairs, session-adaptive floors, a nesting-aware
+resolver, conditional heatmaps --- either regressed or no-op'd.
+The remaining $\sim 50$ rides that produce no candidate peak at
+the current floor carry high signed $R^2$ but genuinely low
+acceleration on damped/noisy phones (one Pixel~10 unit alone
+contributes $\sim 31$ of them). Recovering them appears to
+require per-session noise-scaled floors, not a further global
+threshold sweep.
+
+\subsection{Evaluation}
+\label{sec:seg-eval}
+
+\IfFileExists{figures/seg_eval/results_macros.tex}
+  {\input{figures/seg_eval/results_macros.tex}}{}
+
+This subsection publishes the empirical performance of the deployed
+detector (the iter\_16 configuration of
+\S\ref{sec:trapezoid-detect-tuning}) on the full
+$\SegPooledNExp$-experiment dataset, broken into the train pool used
+for tuning ($\SegTrainNExp$ recordings, $\SegTrainNGt$ ground-truth
+rides) and the held-out cross-building test set ($\SegTestNExp$
+recordings at \texttt{beitYitzchakiRaanana}, $\SegTestNGt$ rides).
+The held-out set was never seen during the iter\_00 $\to$ iter\_16
+tuning rounds and therefore acts as a generalisation check. Every
+number, table, and figure here is regenerated end-to-end by
+\texttt{scripts/segmentation\_evaluation\_report.py}, which reads the
+active configuration from
+\texttt{src/segmentation/algorithms/config.json} and writes its
+artifacts under \texttt{docs/latex/figures/seg\_eval/}.
+
+\subsubsection{Metric Definitions}
 \label{sec:trapezoid-evaluation}
 
 Reporting a single detection F1 on temporal intervals hides several
@@ -1698,6 +1794,326 @@ well-placed once a match exists, and how the detector compares to
 generic temporal baselines. On our dataset the two curves track each
 other across iterations, which is a sanity check that the composite
 isn't gamed by quirks of the four-mode definition.
+
+\subsubsection{Dataset and Protocol}
+\label{sec:seg-eval-dataset}
+
+The evaluation dataset is the union of every recording in
+\texttt{rawData/} that carries either a barometer-derived or a
+hand-labelled GT track: $\SegPooledNExp$ experiments,
+$\SegPooledNGt$ \texttt{up}/\texttt{down} rides, five distinct
+phone models (Google Pixel~10, Samsung Galaxy~S23, Samsung
+Galaxy~A23, Samsung Galaxy~Z~Flip6, Xiaomi 22101320I) across six
+buildings (Millenium Hotel, Millenium Outside, Acro, Beit Mansour,
+Bar-Ilan~2 Herzelia, Haari~3) plus the held-out Beit~Yitzchaki
+Raanana site. The split rule (\texttt{src/data/loader/pipeline.py},
+\texttt{classify\_experiment\_type}) is purely lexical on the folder
+name, so reruns are deterministic.
+
+For each experiment, sensor frames and the GT-ride list are loaded
+via \texttt{getExperimentData} (cached CSV path under
+\texttt{structuredData/data/}). The active iter\_16 detector is
+invoked through the standard \texttt{Segmenter.detect} dispatcher
+with no overrides; the chip-spec amplitude floor is enabled and uses
+each experiment's recorded phone model. Metrics are aggregated using
+\texttt{IntervalPredictionMetrics.from\_intervals} on each experiment
+separately and then summed; IoU-F1@0.5 is computed on a pooled stream
+of intervals (each experiment offset by $10^9$~s before pooling, so
+inter-experiment matches are impossible).
+
+\subsubsection{Headline Results}
+\label{sec:seg-eval-headline}
+
+\begin{table}[H]
+\centering
+\input{figures/seg_eval/results_table_train.tex}
+\caption{Aggregate metrics on the train split
+($\SegTrainNExp$ experiments, $\SegTrainNGt$ ground-truth rides).}
+\label{tab:seg-eval-headline-train}
+\end{table}
+
+\begin{table}[H]
+\centering
+\input{figures/seg_eval/results_table_test.tex}
+\caption{Aggregate metrics on the held-out cross-building test split
+($\SegTestNExp$ experiments at \texttt{beitYitzchakiRaanana},
+$\SegTestNGt$ ground-truth rides).}
+\label{tab:seg-eval-headline-test}
+\end{table}
+
+On the train pool the detector matches $\SegTrainClean$ of
+$\SegTrainNGt$ rides cleanly
+($F1^\ast = \SegTrainFOne$, IoU-F1@0.5 = $\SegTrainIoUFOne$,
+recall = $\SegTrainRecall$, precision = $\SegTrainPrecision$). On
+the cross-building held-out set, never seen during the iter\_00
+$\to$ iter\_16 tuning rounds, it scores noticeably \emph{higher}
+along every axis: $\SegTestClean$ of $\SegTestNGt$ rides clean,
+$F1^\ast = \SegTestFOne$, IoU-F1@0.5 = $\SegTestIoUFOne$, recall
+$= \SegTestRecall$, precision $= \SegTestPrecision$. The
+test-set lift over train is the cleanest evidence we have that the
+detector has not overfit any single-building artefact; the
+operating point generalises across phones, buildings, and
+experimenters. Pooled across all $\SegPooledNExp$ experiments the
+counts are $\SegPooledClean$ clean, $\SegPooledMissed$ missed,
+$\SegPooledFp$ false positives, $\SegPooledGtMerged$ GT-merged,
+$\SegPooledGtSplit$ GT-split (composite
+$F1^\ast = \SegPooledFOne$, IoU-F1@0.5 = $\SegPooledIoUFOne$).
+
+\subsubsection{Failure Mode Distribution}
+\label{sec:seg-eval-failure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\linewidth]{seg_eval/failure_modes_train_vs_test.png}
+  \caption{Counts per failure category, train (solid) vs test
+  (hatched). Both splits are dominated by the \texttt{clean}
+  bucket; on the test split the missed/FP tails are noticeably
+  shorter relative to the GT count.}
+  \label{fig:seg-eval-failure-split}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{seg_eval/per_experiment_failure_bar.png}
+  \caption{Failure-mode stack per experiment, sorted by GT count
+  descending. The two tall red columns
+  (\texttt{UCE/BarIlan2/Pix10}, \texttt{UCE/milleniumHotel/Pix10})
+  are the two damped-Pixel\,10 outliers discussed in
+  \S\ref{sec:trapezoid-detect-tuning} --- they account for the
+  bulk of the missed-ride tail.}
+  \label{fig:seg-eval-failure-perexp}
+\end{figure}
+
+\subsubsection{Per-Experiment Breakdown}
+\label{sec:seg-eval-perexp}
+
+Per-experiment numbers — useful both for spot-checking and for
+identifying the recordings that drive the aggregate failure tail.
+Rows are sorted by GT count descending; experiment labels follow
+the prediction section convention
+(initials~/~building~/~phone-tag).
+
+\begin{table}[H]
+\centering
+\small
+\input{figures/seg_eval/per_exp_train.tex}
+\caption{Per-experiment metrics on the train split.}
+\label{tab:seg-eval-perexp-train}
+\end{table}
+
+\begin{table}[H]
+\centering
+\small
+\input{figures/seg_eval/per_exp_test.tex}
+\caption{Per-experiment metrics on the held-out test split.
+Recall is uniformly $\ge 65\%$ across the four
+\texttt{beitYitzchakiRaanana} recordings, with
+$F1^\ast \ge 0.76$ on every device --- including the Xiaomi
+unit that loses ten rides to weak-signal misses.}
+\label{tab:seg-eval-perexp-test}
+\end{table}
+
+Of the $\SegTrainNExp$ train recordings, twelve hit
+$F1^\ast \ge 0.95$ and six are perfect at $1.00$; the long tail
+that costs the train pool its score is concentrated in four
+recordings on \texttt{milleniumHotel} (one Pixel\,10 unit at
+$3.2\%$ recall, one A23 unit at $0.0\%$, plus two with weak-signal
+losses) and the Bar-Ilan\,2 Pixel\,10 at $11.4\%$. These are
+exactly the rides that motivate the per-session noise-scaled
+floor referenced in \S\ref{sec:trapezoid-detect-tuning}.
+
+\subsubsection{Edge Quality: IoU and Edge Residuals}
+\label{sec:seg-eval-edges}
+
+The IoU-F1@0.5 metric tells us how often the detector places a
+match at all; what follows is how tightly the matched edges line up
+with the GT edges. Every distribution below is over the pooled set
+of $\SegPooledIoUTp$ matched pairs (CDF on the left, density on the
+right with a kernel-density overlay; the dashed black tick marks
+the median).
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{seg_eval/cdf_pdf_iou.png}
+  \caption{Distribution of matched-pair IoU. Median IoU across the
+  pooled match set is approximately $\SegPooledIoUMean$; the
+  fraction at or above $0.5$ is the IoU-recall reported in
+  Tables~\ref{tab:seg-eval-headline-train}--\ref{tab:seg-eval-headline-test}.}
+  \label{fig:seg-eval-iou-dist}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{seg_eval/cdf_pdf_duration_error.png}
+  \caption{Signed predicted-minus-GT duration error. The detector
+  is roughly unbiased: the median sits within $\pm 0.5$~s of zero
+  even though a small subset of long rides extends the right tail
+  through the segmentation pad $\varepsilon$ (\S\ref{sec:trapezoid-pad}).}
+  \label{fig:seg-eval-duration-err}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_eval/cdf_pdf_start_residual.png}
+    \caption{Start-edge residual (s).}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_eval/cdf_pdf_end_residual.png}
+    \caption{End-edge residual (s).}
+  \end{subfigure}
+  \caption{Signed start- and end-edge residuals
+  ($\text{pred} - \text{gt}$). Both are sub-second-tight in the
+  bulk; the small left bias on the start edge and right bias on
+  the end edge reflect the symmetric $\varepsilon = 0.25$~s
+  segmentation pad applied for downstream integrators.}
+  \label{fig:seg-eval-edge-residuals}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.55\linewidth}
+    \includegraphics[width=\linewidth]{seg_eval/iou_vs_duration.png}
+    \caption{IoU vs GT ride duration. Long rides have proportionally
+    less edge slack to give up, so IoU concentrates near $1$;
+    sub-five-second rides drive the dispersion.}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.42\linewidth}
+    \includegraphics[width=\linewidth]{seg_eval/pred_vs_gt_duration.png}
+    \caption{Predicted vs GT duration, coloured by IoU. Points hug
+    the $y = x$ line; outliers below the diagonal are short rides
+    where the trapezoid pulse pair landed inside the GT support
+    rather than spanning it.}
+  \end{subfigure}
+  \caption{Joint diagnostics on duration and edge fidelity.}
+  \label{fig:seg-eval-duration-scatter}
+\end{figure}
+
+\subsubsection{Hyperparameter Sensitivity}
+\label{sec:seg-eval-sweeps}
+
+We probed each tunable knob from
+Table~\ref{tab:detect-config} with a one-dimensional sweep around
+the iter\_16 operating point. The composite $F1^\ast$ is the orange
+curve, IoU-F1@0.5 the blue curve. Every sweep was run on the same
+$\SegPooledNExp$-experiment set with the rest of the configuration
+held fixed, so the curves below show the marginal effect of each
+parameter at the deployed setting.
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_sweep/sweep_r2_peak_thresh.png}
+    \caption{Peak-pick $R^2$ floor.}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_sweep/sweep_min_peak_abs_a.png}
+    \caption{Peak-pick amplitude floor.}
+  \end{subfigure}
+
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_sweep/sweep_nms_radius_s.png}
+    \caption{Same-sample NMS radius.}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_sweep/sweep_same_sign_min_gap_s.png}
+    \caption{Same-sign minimum gap.}
+  \end{subfigure}
+
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_sweep/sweep_joint_r2_thresh.png}
+    \caption{Pair joint-$R^2$ floor.}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_sweep/sweep_min_pair_abs_a.png}
+    \caption{Pair amplitude floor.}
+  \end{subfigure}
+
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_sweep/sweep_heatmap_energy_thresh.png}
+    \caption{Heatmap-energy floor.}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_sweep/sweep_max_ride_s.png}
+    \caption{Maximum ride duration.}
+  \end{subfigure}
+  \caption{One-dimensional hyperparameter sweeps around the iter\_16
+  operating point. Vertical dashed lines (when present) mark the
+  deployed setting. Most knobs are monotone or near-flat near
+  optimum; \texttt{min\_pair\_abs\_a} is the exception, with a
+  pronounced U-shape around its $0.30$~m/s$^2$ setting.}
+  \label{fig:seg-eval-sweeps}
+\end{figure}
+
+\subsubsection{Phone-Model Breakdown}
+\label{sec:seg-eval-phones}
+
+The bulk of the unrecovered missed rides come from a small set of
+damped/quiet phones --- the same observation that motivated the
+phone-aware noise-floor proposal in
+\S\ref{sec:trapezoid-detect-tuning}. Aggregating failure modes by
+device makes the asymmetry visible.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\linewidth]{seg_eval/phone_breakdown.png}
+  \caption{Failure modes summed across every experiment recorded on
+  each phone model. The Pixel\,10 column is dominated by misses;
+  the Samsung S23, A23, Z~Flip6, and Xiaomi columns are dominated
+  by clean matches with single-digit FP tails.}
+  \label{fig:seg-eval-phones}
+\end{figure}
+
+\subsubsection{Per-Experiment Detection Timelines}
+\label{sec:seg-eval-timelines}
+
+A representative best-case, typical, and worst-case experiment ---
+chosen automatically as the highest, median, and lowest $F1^\ast$
+recordings (subject to a minimum of six GT rides). Each panel
+shows the accelerometer magnitude $|a|$ above and the
+gravity-projected vertical velocity below, with GT rides shaded
+behind (green = up, red = down) and predicted intervals as bands
+above the upper axes (green = clean, gray = FP, orange = merge or
+split). Each clean match is annotated with its IoU.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{seg_eval/timeline_best.png}
+  \caption{Best-case experiment. Every GT ride has a clean
+  predicted match with high IoU; the band stack at the top of the
+  upper panel is uniformly green.}
+  \label{fig:seg-eval-timeline-best}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{seg_eval/timeline_typical.png}
+  \caption{Typical experiment. Most GT rides match cleanly with
+  IoU $> 0.7$; isolated grey FP bands appear where the detector
+  fired on outside-segment activity.}
+  \label{fig:seg-eval-timeline-typical}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{seg_eval/timeline_worst.png}
+  \caption{Worst-case experiment. The accelerometer trace is
+  visibly damped and many GT rides leave no detectable lobe pair
+  --- the missed-ride tail visible in
+  Figure~\ref{fig:seg-eval-failure-perexp} comes from this
+  regime.}
+  \label{fig:seg-eval-timeline-worst}
+\end{figure}
+
+These three panels make the deployment story concrete: on phones
+that produce a clean accelerometer trace the detector is at or
+above $F1^\ast = 0.95$ and IoU-F1 $> 0.85$ per experiment; on
+unusually damped recordings (less than $5\%$ of the dataset by
+recording-count but disproportionately represented in the missed
+tail) the lobes simply do not exist at the deployed amplitude
+floor, and the per-session noise-scaled floor proposed in
+\S\ref{sec:trapezoid-detect-tuning} is the open lever to recover
+them.
 
 
 % --- Accelerometer-based prediction, quality filter, CI, evaluation ---

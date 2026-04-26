@@ -10,7 +10,7 @@
   },
   "acc_template_match": {
     "r2_peak_thresh": 0.40,
-    "min_peak_abs_a": 0.25,
+    "min_peak_abs_a": 0.20,
     "nms_radius_s": 1.0,
     "same_sign_min_gap_s": 5.0,
     "min_ride_s": 0.0,
@@ -20,12 +20,13 @@
     "heatmap_energy_thresh": 0.40,
     "quiet_middle_ratio": 0.5,
     "segment_pad_eps_s": 0.25,
-    "w_min_s": 0.4,
+    "w_min_s": 0.3,
     "w_max_s": 3.0,
     "n_w": 30,
     "f_min": 0.05,
     "f_max": 0.80,
     "n_f": 15,
+    "include_triangle_row": true,
     "noise_sigma_multiplier": 6.0
   }
 }
