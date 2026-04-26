@@ -57,6 +57,11 @@ OUT_ROOT = REPO_ROOT / "docs" / "latex" / "figures" / "seg_eval"
 EXCLUDED_EXPERIMENTS = {
     "UriyaCohenEliya_BarIlan2Herzelia_Pixel10_24-3-2026",
     "UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp2",
+    # Third outlier (added per user request 2026-04-26): A235F session
+    # whose every GT ride misses — the chip-level noise floor swallows
+    # the lobes the same way it does on the two Pixel 10 sessions
+    # above. 0/10 clean, 10 missed, 4 FP, F1*=0.000.
+    "eyalyakir_milleniumHotel_SamsungSM-A235F_15-04-2026_exp1",
 }
 
 ITER16_PER_GT_CSV = (
@@ -669,6 +674,11 @@ def main() -> int:
     print(f"  pooled: gt={pooled_total.n_gt} pred={pooled_total.n_pred} "
           f"clean={pooled_total.clean} miss={pooled_total.missed} "
           f"fp={pooled_total.fp} f1_like={pooled_total.score():.3f}")
+    cleaned_pooled = clean_train_total + clean_test_total
+    print(f"  cleaned pooled (-{(len(train_per_exp)+len(test_per_exp))-(len(clean_train_per_exp)+len(clean_test_per_exp))} exps): "
+          f"gt={cleaned_pooled.n_gt} pred={cleaned_pooled.n_pred} "
+          f"clean={cleaned_pooled.clean} miss={cleaned_pooled.missed} "
+          f"fp={cleaned_pooled.fp} f1_like={cleaned_pooled.score():.3f}")
     print(f"\nartifacts under: {OUT_ROOT}")
     return 0
 

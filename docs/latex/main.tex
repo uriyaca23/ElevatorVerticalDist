@@ -11,7 +11,7 @@
 \usepackage[table]{xcolor}
 \usepackage{array}
 \usepackage{tikz}
-\usetikzlibrary{decorations.pathreplacing,arrows.meta}
+\usetikzlibrary{decorations.pathreplacing,arrows.meta,positioning,shapes.geometric,fit}
 \usepackage{hyperref}
 \usepackage[margin=1in]{geometry}
 
@@ -1922,70 +1922,45 @@ losses) and the Bar-Ilan\,2 Pixel\,10 at $11.4\%$. These are
 exactly the rides that motivate the per-session noise-scaled
 floor referenced in \S\ref{sec:trapezoid-detect-tuning}.
 
-\subsubsection{Edge Quality: IoU and Edge Residuals}
+\subsubsection{Edge Quality: IoU Distribution}
 \label{sec:seg-eval-edges}
 
 The IoU-F1@0.5 metric tells us how often the detector places a
-match at all; what follows is how tightly the matched edges line up
-with the GT edges. Every distribution below is over the pooled set
-of $\SegPooledIoUTp$ matched pairs (CDF on the left, density on the
-right with a kernel-density overlay; the dashed black tick marks
-the median).
+match at all; the IoU distribution below shows how tight those
+matches are when they happen. We deliberately omit the
+predicted-minus-GT \emph{time}-residual diagnostics
+(start-edge, end-edge, signed duration error) here: the GT edges
+themselves carry $\sim 0.5$--$1$~s of human-labelling slack from
+the barometer-derived ride boundaries (and even more when the
+hand-edited ground truth is invoked --- see
+\S\ref{sec:gt-editor}), so any edge-time residual the segmenter
+produces is dominated by GT noise rather than detector behaviour.
+Reporting those residuals would suggest a precision the underlying
+labels do not justify. IoU as a ratio metric, by contrast, is
+robust to symmetric GT pad and remains a faithful read on edge
+fidelity.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=\linewidth]{seg_eval/cdf_pdf_iou.png}
-  \caption{Distribution of matched-pair IoU. Median IoU across the
-  pooled match set is approximately $\SegPooledIoUMean$; the
-  fraction at or above $0.5$ is the IoU-recall reported in
+  \caption{Distribution of matched-pair IoU over the pooled set of
+  $\SegPooledIoUTp$ matches (CDF on the left, density on the right
+  with a Gaussian-KDE overlay; the dashed black tick marks the
+  median). The fraction at or above $0.5$ is the IoU-recall
+  reported in
   Tables~\ref{tab:seg-eval-headline-train}--\ref{tab:seg-eval-headline-test}.}
   \label{fig:seg-eval-iou-dist}
 \end{figure}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\linewidth]{seg_eval/cdf_pdf_duration_error.png}
-  \caption{Signed predicted-minus-GT duration error. The detector
-  is roughly unbiased: the median sits within $\pm 0.5$~s of zero
-  even though a small subset of long rides extends the right tail
-  through the segmentation pad $\varepsilon$ (\S\ref{sec:trapezoid-pad}).}
-  \label{fig:seg-eval-duration-err}
-\end{figure}
-
-\begin{figure}[H]
-  \centering
-  \begin{subfigure}{0.49\linewidth}
-    \includegraphics[width=\linewidth]{seg_eval/cdf_pdf_start_residual.png}
-    \caption{Start-edge residual (s).}
-  \end{subfigure}\hfill
-  \begin{subfigure}{0.49\linewidth}
-    \includegraphics[width=\linewidth]{seg_eval/cdf_pdf_end_residual.png}
-    \caption{End-edge residual (s).}
-  \end{subfigure}
-  \caption{Signed start- and end-edge residuals
-  ($\text{pred} - \text{gt}$). Both are sub-second-tight in the
-  bulk; the small left bias on the start edge and right bias on
-  the end edge reflect the symmetric $\varepsilon = 0.25$~s
-  segmentation pad applied for downstream integrators.}
-  \label{fig:seg-eval-edge-residuals}
-\end{figure}
-
-\begin{figure}[H]
-  \centering
-  \begin{subfigure}{0.55\linewidth}
-    \includegraphics[width=\linewidth]{seg_eval/iou_vs_duration.png}
-    \caption{IoU vs GT ride duration. Long rides have proportionally
-    less edge slack to give up, so IoU concentrates near $1$;
-    sub-five-second rides drive the dispersion.}
-  \end{subfigure}\hfill
-  \begin{subfigure}{0.42\linewidth}
-    \includegraphics[width=\linewidth]{seg_eval/pred_vs_gt_duration.png}
-    \caption{Predicted vs GT duration, coloured by IoU. Points hug
-    the $y = x$ line; outliers below the diagonal are short rides
-    where the trapezoid pulse pair landed inside the GT support
-    rather than spanning it.}
-  \end{subfigure}
-  \caption{Joint diagnostics on duration and edge fidelity.}
+  \includegraphics[width=0.7\linewidth]{seg_eval/iou_vs_duration.png}
+  \caption{IoU as a function of GT ride duration. Long rides have
+  proportionally less edge slack to give up, so IoU concentrates
+  near $1$; sub-five-second rides drive the dispersion. This is the
+  one duration-axis figure we keep --- the $y$-axis is a unitless
+  IoU, not a time error, and the GT-noise concern above does not
+  apply.}
   \label{fig:seg-eval-duration-scatter}
 \end{figure}
 
@@ -2115,10 +2090,1510 @@ floor, and the per-session noise-scaled floor proposed in
 \S\ref{sec:trapezoid-detect-tuning} is the open lever to recover
 them.
 
+\subsubsection{After Removing Three Outlier Experiments}
+\label{sec:seg-eval-cleaned}
+
+The aggregate numbers in
+\S\ref{sec:seg-eval-headline}--\ref{sec:seg-eval-perexp} include
+three recordings where the accelerometer trace is clearly damped
+to the point that the lobe pair never forms at the deployed
+amplitude floor:
+
+\begin{itemize}
+  \item \texttt{UCE/BarIlan2/Pix10}
+  (\texttt{UriyaCohenEliya\_BarIlan2Herzelia\_Pixel10\_24-3-2026},
+  $44$ GT rides, $5$ clean / $31$ missed --- $11.4\%$ recall);
+  \item \texttt{UCE/milleniumHotel/Pix10} (the second
+  \texttt{15-04-2026} session,
+  $31$ GT rides, $1$ clean / $30$ missed --- $3.2\%$ recall);
+  \item \texttt{EY/milleniumHotel/A23}
+  (\texttt{eyalyakir\_milleniumHotel\_SamsungSM-A235F\_15-04-2026\_exp1},
+  $10$ GT rides, $0$ clean / $10$ missed --- $0\%$ recall, with
+  $4$ false positives on top).
+\end{itemize}
+
+All three sessions sit on phones whose chip-level acceleration
+noise floor swallows the lift lobes (median $|\hat A|$ on the
+missed rides is $0.14$--$0.16$~m/s$^2$, well below the
+$0.20$~m/s$^2$ \texttt{min\_peak\_abs\_a} gate). Recovering them
+is the open work item identified in
+\S\ref{sec:trapezoid-detect-tuning} (per-session noise-scaled
+floor); they are not failure modes of the algorithm at its
+deployed operating point. We re-aggregate the dataset with these
+$\SegCleanExpRemoved$ experiments and their $\SegCleanGtRemoved$
+GT rides set aside, to make the rest of the operating point
+visible.
+
+\begin{table}[H]
+\centering
+\input{figures/seg_eval/results_table_train_cleaned.tex}
+\caption{Aggregate metrics on the cleaned train split
+($\SegCleanTrainNExp$ experiments, $\SegCleanTrainNGt$ GT rides
+after dropping the outliers).}
+\label{tab:seg-eval-cleaned-train}
+\end{table}
+
+\begin{table}[H]
+\centering
+\input{figures/seg_eval/results_table_test_cleaned.tex}
+\caption{Aggregate metrics on the cleaned test split
+($\SegCleanTestNExp$ experiments, $\SegCleanTestNGt$ GT rides ---
+the held-out set has no Pixel\,10 outliers, so this is identical
+to Table~\ref{tab:seg-eval-headline-test}).}
+\label{tab:seg-eval-cleaned-test}
+\end{table}
+
+On the cleaned train split the detector lifts to
+$F1^\ast = \SegCleanTrainFOne$ ($\SegCleanTrainClean$ of
+$\SegCleanTrainNGt$ clean, recall $= \SegCleanTrainRecall$,
+precision $= \SegCleanTrainPrecision$, IoU-F1@0.5
+$= \SegCleanTrainIoUFOne$) --- a $\SegCleanFOneLift$ improvement on
+the composite and $\SegCleanIoUFOneLift$ on IoU-F1@0.5 versus the
+all-experiment pooled baseline. Pooled across train and test the
+cleaned set scores $F1^\ast = \SegCleanPooledFOne$
+($\SegCleanPooledClean$ clean of $\SegCleanPooledNGt$, recall
+$= \SegCleanPooledRecall$, precision $= \SegCleanPooledPrecision$).
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_eval/failure_modes_train_vs_test_cleaned.png}
+    \caption{Failure modes by split (cleaned).}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_eval/cdf_pdf_iou_cleaned.png}
+    \caption{IoU distribution over matched pairs (cleaned).}
+  \end{subfigure}
+  \caption{Cleaned-set diagnostics. Compare to
+  Figures~\ref{fig:seg-eval-failure-split} and
+  \ref{fig:seg-eval-iou-dist}: the missed-ride bar collapses by a
+  factor of two and the IoU CDF shifts noticeably to the right.}
+  \label{fig:seg-eval-cleaned-overview}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{seg_eval/per_experiment_failure_bar_cleaned.png}
+  \caption{Per-experiment failure stack on the cleaned set. Of the
+  $\SegCleanPooledNExp$ remaining experiments most are clean to
+  the rim; the residual missed mass (red) sits on the
+  \texttt{milleniumHotel} sessions where one or two GT rides per
+  experiment slip through the amplitude gate but the bulk of the
+  ride list still lands.}
+  \label{fig:seg-eval-cleaned-perexp}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{seg_eval/iou_vs_duration_cleaned.png}
+  \caption{IoU vs GT ride duration on the cleaned set. The
+  short-ride dispersion seen in
+  Figure~\ref{fig:seg-eval-duration-scatter} is attenuated; the
+  bulk of matched pairs sit comfortably above $0.5$.}
+  \label{fig:seg-eval-cleaned-iou-vs-dur}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\small
+\input{figures/seg_eval/per_exp_train_cleaned.tex}
+\caption{Per-experiment metrics on the cleaned train split.}
+\label{tab:seg-eval-cleaned-perexp-train}
+\end{table}
+
+\begin{table}[H]
+\centering
+\small
+\input{figures/seg_eval/per_exp_test_cleaned.tex}
+\caption{Per-experiment metrics on the cleaned test split.}
+\label{tab:seg-eval-cleaned-perexp-test}
+\end{table}
+
+\subsubsection{Why These Constraints Hold: Per-GT Score
+Distributions}
+\label{sec:seg-eval-constraints}
+
+The pair filter rejects a candidate pair if any of three pair-level
+gates fails: joint $R^2 \ge 0.90$
+(\texttt{joint\_r2\_thresh}), pair amplitude
+$|\hat A| \ge 0.30$~m/s$^2$ (\texttt{min\_pair\_abs\_a}), and
+mean clamped joint-$R^2$ across the $(W, f)$ grid
+$\ge 0.40$ (\texttt{heatmap\_energy\_thresh}). At the detection
+stage two more gates filter peak candidates: peak signed
+$R^2 \ge 0.40$ (\texttt{r2\_peak\_thresh}) and peak amplitude
+$|\hat A| \ge 0.20$~m/s$^2$
+(\texttt{min\_peak\_abs\_a}). Each of these thresholds was chosen
+in the iter\_07 / iter\_15 / iter\_16 tuning rounds; the histograms
+below show the per-GT diagnostic scores recorded by the iter\_16
+runner (see
+\texttt{src/segmentation/algorithms/improvement\_iterations/iter\_16\_lower\_peak\_a/per\_gt.csv})
+coloured by the GT's classification status. Where the clean
+density mass sits on one side of the dashed threshold and the
+missed density mass sits on the other, the gate is doing useful
+discriminative work --- the constraint earns its keep.
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_eval/constraint_pair_joint_r2.png}
+    \caption{Pair joint $R^2$. The $0.90$ floor sits cleanly
+    between the clean ($\gtrsim 0.93$) and missed-with-pair
+    ($\lesssim 0.85$) populations.}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_eval/constraint_pair_A.png}
+    \caption{Pair amplitude $|A|$. Clean GTs cluster around
+    $0.4$--$1.0$~m/s$^2$; the missed mass that did produce a pair
+    sits at the $\lesssim 0.30$~m/s$^2$ floor.}
+  \end{subfigure}
+
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_eval/constraint_heatmap_energy.png}
+    \caption{Heatmap energy. The $0.40$ floor catches a long thin
+    tail of pairs whose joint-$R^2$ heatmap is fragmentary
+    (typically walking artefacts).}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_eval/constraint_jointR2_vs_pairA.png}
+    \caption{Joint scatter of pair $R^2$ vs pair $|A|$. The
+    accept rectangle (top-right) is densely populated by green
+    clean points; missed-with-pair points concentrate below or
+    left of both thresholds.}
+  \end{subfigure}
+  \caption{Pair-filter score distributions split by GT
+  classification. The dashed lines are the deployed thresholds;
+  the $y$-axes use \texttt{symlog} so the clean bulk and the
+  rejected tail are simultaneously legible.}
+  \label{fig:seg-eval-pair-constraints}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_eval/constraint_peak_R2.png}
+    \caption{Peak signed $R^2$ (both lobes pooled). Clean GTs
+    sit far above the $0.40$ floor; the missed mass crowding the
+    floor is the population the iter\_16 round chose to admit by
+    lowering the peak gate.}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{seg_eval/constraint_peak_A.png}
+    \caption{Peak amplitude $|A|$ (both lobes pooled). The
+    bimodal shape --- a clean cluster at $0.4$--$1.0$~m/s$^2$ and
+    a low-amplitude shoulder at $0.1$--$0.2$~m/s$^2$ --- is the
+    direct visual driver of the $0.20$~m/s$^2$ floor chosen in
+    iter\_16. Lowering the floor any further pulls in
+    walking-artefact peaks; raising it loses the damped-phone
+    rides that already squeak through.}
+  \end{subfigure}
+  \caption{Peak-stage score distributions. These are the gates
+  that cull peak candidates before the pair filter ever sees
+  them.}
+  \label{fig:seg-eval-peak-constraints}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\linewidth]{seg_eval/constraint_reject_reasons.png}
+  \caption{Among the non-clean GTs whose candidate pair did
+  trigger at least one gate, this is the count broken down by
+  which gate caught it. The pair joint-$R^2$ constraint is the
+  most-discriminative single gate, with the pair-amplitude floor
+  catching a long tail of weak-signal candidates that would
+  otherwise slip through.}
+  \label{fig:seg-eval-reject-reasons}
+\end{figure}
+
+The shape of these distributions is what justifies the chosen
+operating point: the gates separate populations rather than slice
+through one. The exception is the peak amplitude floor (lower
+right of Figure~\ref{fig:seg-eval-peak-constraints}), which sits
+inside the missed-ride mass --- this is exactly the signal
+\S\ref{sec:trapezoid-detect-tuning} interprets as the open lever
+for the per-session noise-scaled floor.
+
+\subsubsection{Pair-Filter Hyperparameter Walkthrough}
+\label{sec:seg-eval-walkthrough}
+
+The pair filter exposes seven tunable knobs (six pair-level gates
+plus one segment-padding constant). The detector hyper-parameter
+table at \S\ref{sec:trapezoid-tunables}
+(Table~\ref{tab:detect-config}) lists their deployed iter\_16
+values; this walkthrough takes them one at a time, in pipeline
+order, and explains why each one exists, how the iteration record
+proves it earns its keep, and why the chosen threshold value
+sits where it does. Each knob occupies its own page so the
+gate-by-gate logic can be read end-to-end without backtracking.
+
+\paragraph{1.\ \texttt{min\_ride\_s} = 0.0~s --- minimum pair
+duration.}
+
+\textbf{Need.} A trapezoid pulse pair represents the
+acceleration--deceleration signature of a single elevator ride;
+the time between the positive lobe (acceleration) and the negative
+lobe (deceleration) is the ride's cruise duration. A pair where
+that interval collapses to nearly zero is geometrically
+implausible --- the elevator would have to brake at the same
+instant it finishes accelerating. Without this guard the pair
+search would happily emit pairs with overlapping or near-touching
+lobes when noise momentarily satisfies the joint-$R^2$ test.
+
+\textbf{Examples.} The deployed value is $0.0$~s because
+\texttt{same\_sign\_min\_gap\_s} (5~s) at the peak stage already
+forces consecutive same-sign peaks apart and \texttt{w\_min\_s}
+($0.30$~s) gives every lobe a non-trivial width, so the effective
+floor is already $\sim 0.6$~s without ever invoking
+\texttt{min\_ride\_s}. The knob is retained as a no-op safety net:
+it is the single line of defence if those upstream gates were ever
+loosened. The hyperparameter sweep has it pinned at zero across
+every iteration tried (no iteration found a non-zero value useful);
+that null result is itself the evidence the knob does not need to
+fire today, but its presence cheaply guarantees that no
+zero-duration ride can ever leak through.
+
+\textbf{Logic.} The interval test is a hard reject (not a soft
+penalty) because a sub-resolution pair has no useful prediction
+attached to it --- a downstream integrator running on a
+$\sim 0$~s window would produce a meaningless distance. Treating
+duration as a hard floor short-circuits the rest of the filter and
+saves the cost of evaluating the joint-$R^2$ heatmap on garbage
+inputs.
+
+\newpage
+
+\paragraph{2.\ \texttt{max\_ride\_s} = 30.0~s --- maximum pair
+duration.}
+
+\textbf{Need.} The greedy pair-search step can in principle
+combine a positive lobe from one ride with a negative lobe from a
+much later ride if the joint-$R^2$ score happens to clear the
+gate. The result is a single ``super-pair'' that swallows multiple
+real GTs (the \texttt{pred\_merged} / \texttt{gt\_merged} failure
+mode of \S\ref{sec:trapezoid-pair}). \texttt{max\_ride\_s} caps
+the temporal extent of any candidate pair, breaking these
+super-pairs at their root.
+
+\textbf{Examples.} The super-pair problem is the original failure
+mode that motivated rewriting the pair filter altogether. Iter\_00
+(baseline) had super-pairs spanning $40$--$70$~s on the Bar-Ilan~2
+recordings; raising the cap to $30$~s collapsed them. The
+hyperparameter sweep
+(Figure~\ref{fig:seg-eval-sweeps}, sub-figure
+\texttt{max\_ride\_s}) shows $F1^\ast$ falling sharply as the cap
+is lifted past $30$~s --- each additional second of
+allowed-pair-extent admits one or two new super-pairs that each
+swallow $2$--$3$ GTs. The composite cost is at least $4$--$6$
+mistakes per second of additional headroom past the elbow.
+
+\textbf{Logic.} A real elevator ride's cruise interval is bounded
+by the building height: at the typical $1.5$--$2.5$~m/s observed
+across our buildings, a $30$-floor express ride takes
+$\sim 12$--$25$~s, so $30$~s is a generous bound that retains a
+safety margin for the few longer rides we have logged in tall
+buildings (Acro, Bar-Ilan~2). Going much higher is gratuitous;
+going much lower would clip the longest rides in the dataset and
+produce \texttt{gt\_split} failures.
+
+\newpage
+
+\paragraph{3.\ \texttt{joint\_r2\_thresh} = 0.90 --- minimum pair
+joint $R^2$.}
+
+\textbf{Need.} A candidate pair only earns acceptance if both
+lobes individually fit the trapezoid template well. Joint $R^2$
+is the geometric mean of \texttt{pos\_r2} and \texttt{neg\_r2}
+(both lobes must be good --- not just one). Without this gate any
+single strong lobe paired with a noise-fit lobe of the opposite
+sign would emit a ride; a single walking step is one example of
+exactly such a noise-fit lobe.
+
+\textbf{Examples.} Iter\_21 lowered the threshold to $0.87$,
+hoping to recover three rides whose joint $R^2$ sat between
+$0.87$ and $0.90$; FPs went up by $7$ at the same time
+($46 \to 53$) because seven walking-step pairs slipped through
+the relaxed gate. Net mistake count went $144 \to 148$ ---
+clear regression. The constraint distribution
+(Figure~\ref{fig:seg-eval-pair-constraints}, top-left) makes the
+choice visible: clean GTs cluster around $0.93$--$0.99$, and the
+missed-with-pair tail clusters at $\le 0.87$. The $0.90$ floor
+sits in the empty corridor between the two populations, which is
+exactly what a well-chosen threshold should look like. The reject
+reason bar (Figure~\ref{fig:seg-eval-reject-reasons}) further
+shows that the joint-$R^2$ gate catches more rejected pairs than
+any other single gate --- the most discriminative knob in the
+filter.
+
+\textbf{Logic.} Joint $R^2$ is the right test (vs. say minimum
+or arithmetic mean of the two lobe $R^2$ values) because it
+penalises asymmetry: a pair with one $R^2 = 0.99$ lobe and one
+$R^2 = 0.70$ lobe gets a joint score of $\sqrt{0.99 \cdot 0.70}
+\approx 0.83$ --- which is below the floor, even though the
+arithmetic mean ($0.84$) and minimum ($0.70$) might still pass
+softer alternatives. The geometric mean is the principled choice
+when the two factors are required to be co-good, which is exactly
+the regime here: an elevator ride has two well-shaped lobes by
+construction.
+
+\newpage
+
+\paragraph{4.\ \texttt{min\_pair\_abs\_a} = 0.30~m/s$^2$ ---
+minimum pair amplitude.}
+
+\textbf{Need.} The pair amplitude $|\hat A|$ is the geometric
+mean of the two lobe peak amplitudes. Pairs with very small
+amplitudes are the regime where the chip-level acceleration noise
+of the phone starts to dominate the lobe shape --- you can fit a
+trapezoid to almost anything if you let the amplitude shrink. This
+gate filters out pairs whose absolute energy is too low to be a
+real ride, irrespective of how good the shape match looks.
+
+\textbf{Examples.} The iteration record has six attempts to move
+this knob:
+\begin{itemize}
+  \item \texttt{iter\_02} pushed it $0.30 \to 0.40$~m/s$^2$ ---
+    only killed $1$ FP, lost $7$ clean GTs; reverted.
+  \item \texttt{iter\_04} reverted to $0.30$ and instead added the
+    \texttt{quiet\_middle\_ratio} filter, which produced the
+    larger $99 \to 50$ FP win.
+  \item \texttt{iter\_14} pushed $0.30 \to 0.22$ alongside
+    widening the $W$ floor; \texttt{gt\_split} jumped $1 \to 10$
+    on Beit Mansour because admitting weak pairs caused
+    over-segmentation of long rides.
+  \item \texttt{iter\_15} restored $0.30$, kept the $W$ widening;
+    new best at the time.
+  \item \texttt{iter\_19} retried $0.26$ with a duration penalty
+    \--- \texttt{gt\_split} $1 \to 8$ again; reverted.
+  \item \texttt{iter\_17} attempted $0.20$ in combination with
+    other relaxations, producing the catastrophic
+    \texttt{gt\_split} $1 \to 86$ regression.
+\end{itemize}
+The constraint distribution
+(Figure~\ref{fig:seg-eval-pair-constraints}, top-right)
+shows the floor sitting at the right edge of the missed-with-pair
+mode and just below the clean cluster. The
+\texttt{min\_pair\_abs\_a} sweep
+(Figure~\ref{fig:seg-eval-sweeps}, sub-figure
+\texttt{min\_pair\_abs\_a}) shows the characteristic U-shape
+around $0.30$: lower regresses through over-segmentation, higher
+regresses through lost recall.
+
+\textbf{Logic.} Walking artefacts and small accelerometer
+disturbances live below $0.20$~m/s$^2$; real elevator-ride lobes
+on every phone in our dataset (except the three damped sessions
+of \S\ref{sec:seg-eval-cleaned}) sit at $0.4$--$1.0$~m/s$^2$.
+$0.30$~m/s$^2$ is the inter-cluster gap. Crucially, this is a
+\emph{pair}-level floor, not a per-lobe floor: the per-lobe floor
+(\texttt{min\_peak\_abs\_a}) is more permissive at
+$0.20$~m/s$^2$, which lets one weak lobe survive as long as its
+partner is strong enough that the geometric-mean pair amplitude
+clears $0.30$.
+
+\newpage
+
+\paragraph{5.\ \texttt{heatmap\_energy\_thresh} = 0.40 ---
+mean clamped joint $R^2$ across the $(W, f)$ grid.}
+
+\textbf{Need.} A real elevator ride matches the trapezoid
+template across a band of nearby $(W, f)$ combinations --- the
+joint-$R^2$ heatmap has a wide peak. A walking-step or other
+short-time impulsive artefact may match one specific
+$(W^\star, f^\star)$ combination by coincidence but yields a
+fragmentary heatmap (high at one cell, near zero everywhere
+else). The mean clamped joint-$R^2$ over the heatmap is a single
+scalar that captures this multi-template consistency, and the gate
+rejects pairs whose heatmap fails to spread.
+
+\textbf{Examples.} \texttt{iter\_03} introduced the heatmap-energy
+gate at threshold $0.20$ initially, then settled on $0.40$ ---
+FPs dropped $145 \to 99$, the second-largest single gate win in
+the project after \texttt{quiet\_middle\_ratio}. The
+constraint distribution
+(Figure~\ref{fig:seg-eval-pair-constraints}, bottom-left) shows
+clean GTs filling a broad density between $0.4$ and $0.9$, with
+the rejected tail of fragmentary-heatmap pairs sitting below
+$0.4$. The narrow tail explains why this gate has only the
+moderate footprint visible in the reject-reason bar
+(Figure~\ref{fig:seg-eval-reject-reasons}): joint-$R^2$ catches
+most of the obvious bad pairs first, and heatmap energy catches
+the residual tail of pairs that cleared joint-$R^2$ but only on
+a single template cell.
+
+\textbf{Logic.} The mean is taken over a $30 \times 15$ grid
+($n_W \times n_f$) of clamped joint-$R^2$ values; clamping to
+$[0, 1]$ before averaging means a few rogue $R^2 < 0$ values
+cannot drag the mean below threshold artificially. The threshold
+$0.40$ is far enough above the $\sim 0.05$--$0.20$ noise
+background, but well below the $0.6$--$0.9$ that real rides
+produce, so it sits in the empty band between the two
+populations.
+
+\newpage
+
+\paragraph{6.\ \texttt{quiet\_middle\_ratio} = 0.5 --- inter-lobe
+plateau RMS limit.}
+
+\textbf{Need.} A real elevator ride has a quiet cruise interval
+between its acceleration and deceleration lobes --- once cruise
+speed is reached, the accelerometer reading is dominated by
+gravity alone and the residual after gravity removal is small.
+A walking-step pair, by contrast, has continuous body motion
+between the two lobes and the inter-lobe interval is loud. The
+quiet-middle gate rejects pairs whose plateau RMS is comparable
+to the lobe peak amplitude --- there is no real ``cruise''
+between them.
+
+\textbf{Examples.} This is the single biggest change in the
+project's iteration record. \texttt{iter\_04} introduced the
+filter at \texttt{ratio = 0.5}; FPs dropped $99 \to 50$
+(a $-49$ swing in a single iteration, the largest in the
+twenty-four-iteration history). \texttt{iter\_20} tried tightening
+to $0.45$; the change lost clean rides on a few experiments
+where the cruise interval had genuinely loud micro-vibration ---
+the floor at $0.5$ has the right balance between rejecting
+walking artefacts and tolerating realistic cruise noise. Looking
+at the rejected mistake PNGs in the iter\_04 directory makes the
+visual story concrete: the rejected pairs are walking steps where
+the inter-step interval shows continuous oscillation at amplitudes
+similar to the step itself, exactly the regime the gate targets.
+
+\textbf{Logic.} The metric is
+$\mathrm{RMS}(\text{plateau}) / |\hat A_{\text{pair}}|$ rather
+than an absolute RMS so it scales with the ride amplitude --- a
+fast-moving express elevator can tolerate slightly louder cruise
+RMS than a slow residential one because the lobe amplitude is
+itself larger. Choosing $0.5$ as the dimensionless ratio means
+the cruise can have at most half the lobe amplitude in RMS terms,
+which corresponds (for a sinusoidal residual) to about $35\%$
+peak-to-peak. Above that you are not looking at cruise; you are
+looking at body motion.
+
+\newpage
+
+\paragraph{7.\ \texttt{segment\_pad\_eps\_s} = 0.25~s --- emitted
+ride interval pad.}
+
+\textbf{Need.} The pair filter outputs ride intervals as
+$[t_{c,1} - W - \varepsilon, \; t_{c,2} + W + \varepsilon]$, where
+$t_{c,*}$ are the lobe centres and $W$ is the half-width. The
+$\varepsilon$ pad gives downstream integrators (ZUPT and the
+trapezoid prediction in \S\ref{sec:height-prediction}) a small
+margin of pre-ride and post-ride stationary data on either side
+of the detected envelope. Without it, the integrator's gravity
+calibration would have to use the very edge of the ride itself,
+where the lobe is not yet finished decaying --- and gravity
+estimation in turn drives the eventual height-difference
+estimate.
+
+\textbf{Examples.} \texttt{iter\_12} swept this knob over
+$\varepsilon \in \{0.00, 0.10, 0.25, 0.50, 1.00\}$ measuring the
+\emph{predictor} MAE on the train set rather than the segmentation
+$F1^\ast$, because the knob is a downstream-aware tuning. The
+sweep produced a clean optimum at $0.25$~s: at zero the predictor
+loses its pre/post stationary windows; at $0.50$~s and beyond the
+extra padding starts to include neighbouring outside-ride motion,
+introducing bias in the gravity calibration. The
+prediction section's per-experiment table
+(Table~\ref{tab:per-exp-train}) reports the MAE numbers achieved
+with the deployed $\varepsilon = 0.25$.
+
+\textbf{Logic.} A symmetric pad is the right shape because the
+gravity-calibration step uses both pre-ride and post-ride
+windows; an asymmetric pad would bias the calibration toward
+whichever side has more data. The size of the pad is set by the
+phone sample rate ($\sim 100$~Hz) and the gravity-calibration
+filter time constant ($\sim 0.3$~Hz cutoff requires
+$\sim 0.25$--$0.30$~s of data to settle). $0.25$~s is the
+minimum pad that buys reliable settling; longer pads buy
+diminishing returns and risk reaching into adjacent activity.
+
 
 % --- Accelerometer-based prediction, quality filter, CI, evaluation ---
 \IfFileExists{figures/prediction/results_macros.tex}
   {\input{figures/prediction/results_macros.tex}}{}
 \input{prediction_sections.tex}
+
+
+% --- End-to-end pipeline evaluation ---
+\IfFileExists{figures/pipeline/results_macros.tex}
+  {\input{figures/pipeline/results_macros.tex}}{}
+
+\section{Pipeline}
+\label{sec:pipeline}
+
+The two preceding chapters describe the segmenter
+(\S\ref{sec:segmentation-detection}) and the predictor
+(\S\ref{sec:height-prediction}) as standalone components. In
+deployment they form a single sensor-to-height pipeline; this
+chapter walks the end-to-end flow, then evaluates the joint output
+under three different definitions of the input set --- each
+answering a different operational question about how the system
+behaves once the segmenter's output is fed into the predictor.
+
+\subsection{Flow: Sensors $\to$ Segmenter $\to$ Predictor $\to$
+$\Delta h$}
+\label{sec:pipeline-diagram}
+
+The pipeline takes a single phone recording and emits a list of
+predicted rides, each with a signed $\Delta h$ in meters and a
+$90\,\%$ confidence interval. Figure~\ref{fig:pipeline-flow}
+captures the chain. The loader hydrates per-sensor frames from raw
+sensor logs and (when a barometer was present) derives the
+ground-truth ride list. The active accelerometer segmenter
+(\texttt{ACC\_TEMPLATE\_MATCH}, iter\_16 config) reads the
+accelerometer frame and emits ride intervals. For each ride
+interval the active predictor (\texttt{TRAPEZOID\_ACCEL}) consumes
+a slice of the accelerometer frame plus a $\pm 3$~s pre/post
+stationary window and emits a \texttt{PredictionOutput} carrying
+the signed $\Delta h$, the conformal CI half-width, and a quality
+verdict.
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  node distance=6mm and 8mm,
+  every node/.style={font=\small},
+  block/.style={
+    rectangle, draw=black!70, thick, rounded corners=2pt,
+    minimum width=3.0cm, minimum height=0.95cm, align=center,
+    fill=blue!5,
+  },
+  data/.style={
+    rectangle, draw=black!50, dashed, rounded corners=2pt,
+    minimum width=2.4cm, minimum height=0.8cm, align=center,
+    fill=gray!8,
+  },
+  output/.style={
+    rectangle, draw=black!70, thick, rounded corners=2pt,
+    minimum width=3.0cm, minimum height=0.95cm, align=center,
+    fill=green!7,
+  },
+  truth/.style={
+    rectangle, draw=black!50, dotted, rounded corners=2pt,
+    minimum width=2.6cm, minimum height=0.75cm, align=center,
+    fill=orange!7,
+  },
+  arr/.style={-{Latex[length=2mm]}, thick, draw=black!70},
+  garr/.style={-{Latex[length=2mm]}, thick, dotted, draw=black!50},
+]
+  \node[data] (raw) {Raw sensor log\\
+    \texttt{ACC, PRS, GYR, $\ldots$}};
+  \node[block, right=of raw] (loader) {Loader\\
+    \texttt{getExperimentData}};
+  \node[data, right=of loader] (acc) {ACC frame\\
+    ($x, y, z$ at $\sim 100$~Hz)};
+  \node[truth, below=4mm of acc] (gt) {GT ride list\\
+    + GT $\Delta h$\\ (barometer-derived)};
+  \node[block, right=of acc] (seg) {Segmenter\\
+    \texttt{ACC\_TEMPLATE\_MATCH}\\ (iter\_16)};
+  \node[data, below=4mm of seg] (segs) {Predicted intervals\\
+    $[t_s, t_e]$};
+  \node[block, right=of segs] (pred) {Predictor\\
+    \texttt{TRAPEZOID\_ACCEL}\\ ($\pm 3$~s pre/post)};
+  \node[output, right=of pred] (out) {$\Delta h$ + 90\% CI\\
+    per ride};
+
+  \draw[arr] (raw)    -- (loader);
+  \draw[arr] (loader) -- (acc);
+  \draw[garr] (loader.south) |- (gt.west);
+  \draw[arr] (acc)    -- (seg);
+  \draw[arr] (seg)    -- (segs);
+  \draw[arr] (segs)   -- (pred);
+  \draw[arr] (acc.south) |- ([yshift=2mm]pred.north west) -- (pred.north west);
+  \draw[arr] (pred)   -- (out);
+\end{tikzpicture}%
+}
+\caption{End-to-end pipeline flow. Solid blue blocks are deployed
+algorithm stages; dashed gray nodes are passive data; the dotted
+orange node belongs to the offline evaluation track only (the
+deployed system never sees the GT). The predictor consumes both
+the segmenter's interval and the surrounding $\pm 3$~s of ACC
+for gravity calibration.}
+\label{fig:pipeline-flow}
+\end{figure}
+
+\subsection{Three Evaluation Views}
+\label{sec:pipeline-views}
+
+We evaluate the pipeline under three different definitions of
+\emph{which intervals get sent to the predictor} and \emph{which
+truth source we score against}. In every view the prediction
+itself comes from the same deployed predictor; only the input set
+changes.
+
+\begin{itemize}
+  \item \textbf{GT-segments view.} Bypass the segmenter entirely:
+    the predictor reads each \emph{ground-truth} interval
+    directly. Truth is the GT row's \texttt{height\_diff\_m}
+    (barometer-derived). One score per GT ride; FPs and missed
+    rides do not appear by construction. Tells us \emph{how good
+    is the predictor itself when given perfect segmentation}.
+
+  \item \textbf{Matched-segmenter view (``segmenter when
+    correct'').} Run the segmenter; for every prediction that
+    cleanly matches a GT (\S\ref{sec:trapezoid-evaluation}), feed
+    the \emph{segmenter's} interval to the predictor. Truth is
+    the matched GT row's \texttt{height\_diff\_m}. One score per
+    matched (clean) prediction; missed and false-positive
+    predictions do not appear. Tells us \emph{how good is the
+    prediction when the segmenter has actually identified a ride,
+    using the segmenter's slightly imperfect edges}.
+
+  \item \textbf{All-segments-vs-barometer view.} Run the
+    segmenter; feed \emph{every} prediction to the predictor,
+    including false positives. Truth is the barometer-derived
+    $\Delta h$ integrated over the same predicted interval (the
+    barometer can answer ``what altitude change actually happened
+    here'' on any window, with no need for a label). One score
+    per prediction the segmenter emitted. Tells us \emph{how well
+    the accelerometer-only predictor agrees with the barometer
+    on every window the segmenter actually emits in production},
+    independent of whether that window corresponds to a real
+    ride.
+\end{itemize}
+
+The three views together separate three failure modes the
+pipeline can suffer: (1)~the predictor's intrinsic error on a
+clean ride (visible in the GT view), (2)~the additional error the
+predictor incurs because the segmenter's interval edges are not
+exactly the GT edges (the gap between the matched and GT views
+isolates this), and (3)~the cost of the segmenter inventing rides
+that aren't there (the gap between the matched and all-vs-barometer
+views isolates this).
+
+\subsection{Headline Numbers}
+\label{sec:pipeline-headline}
+
+\begin{table}[H]
+\centering
+\input{figures/pipeline/headline_pooled.tex}
+\caption{Pooled headline metrics across all $26$ experiments.}
+\label{tab:pipeline-headline-pooled}
+\end{table}
+
+\begin{table}[H]
+\centering
+\input{figures/pipeline/headline_train.tex}
+\caption{Same on the train split alone.}
+\label{tab:pipeline-headline-train}
+\end{table}
+
+\begin{table}[H]
+\centering
+\input{figures/pipeline/headline_test.tex}
+\caption{Same on the held-out cross-building test split
+(\texttt{beitYitzchakiRaanana}).}
+\label{tab:pipeline-headline-test}
+\end{table}
+
+The pooled story
+(Table~\ref{tab:pipeline-headline-pooled}). The matched-segmenter
+view scores the best of the three: $\PipePooledMatchedFloor$ of
+clean predictions land within $\pm 1.5$~m of the matched GT
+$\Delta h$, with median absolute error
+$\PipePooledMatchedMedian$~m and mean
+$\PipePooledMatchedMae$~m. The GT-segments view, despite
+``perfect'' segmentation, is slightly worse along the floor-hit
+axis ($\PipePooledGtFloor$ within $\pm 1.5$~m) because it
+includes hard rides on damped phones the segmenter would have
+rejected --- the matched view's restriction to clean predictions
+implicitly filters those out. The all-vs-barometer view is the
+hardest at $\PipePooledAllFloor$ within $\pm 1.5$~m and mean
+$\PipePooledAllMae$~m; the gap to the matched view is the
+contribution of false positives, which produce a non-zero
+predicted $\Delta h$ on intervals where the barometer says the
+phone barely moved.
+
+The held-out test split (Table~\ref{tab:pipeline-headline-test})
+mirrors the pattern: matched-segmenter is the strongest with
+$\PipeTestMatchedFloor$ within one floor (better than train,
+consistent with \S\ref{sec:seg-eval-headline}), and the
+all-vs-barometer view actually \emph{outperforms} train at
+$\PipeTestAllFloor$ within one floor because the held-out site
+has fewer FPs per recording.
+
+\subsection{MAE at a Glance}
+\label{sec:pipeline-mae-bar}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.9\linewidth]{pipeline/bar_mae_overall.png}
+  \caption{Mean absolute $\Delta h$ error per view, broken into
+  pooled / train / test. The matched-segmenter bar is the lowest
+  in every split; the all-vs-barometer bar is the tallest because
+  it pays the FP cost.}
+  \label{fig:pipeline-bar-mae}
+\end{figure}
+
+\subsection{Error Distributions}
+\label{sec:pipeline-distributions}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{pipeline/cdf_pooled.png}
+    \caption{Pooled, full range.}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{pipeline/cdf_pooled_zoom.png}
+    \caption{Pooled, zoom on $0$--$3$~m.}
+  \end{subfigure}
+  \caption{Empirical CDF of $|\Delta h$ error$|$ for the three
+  views, pooled across all experiments. The dashed vertical line
+  is the $\pm 1.5$~m one-floor target. The matched (green) curve
+  climbs fastest in the bulk; the GT (blue) and all (red) curves
+  diverge because of two different mechanisms (hard-ride inclusion
+  vs FP cost).}
+  \label{fig:pipeline-cdf-pooled}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{pipeline/cdf_train.png}
+    \caption{Train split.}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{pipeline/cdf_test.png}
+    \caption{Held-out test split.}
+  \end{subfigure}
+  \caption{Per-split CDFs of $|\Delta h$ error$|$ for the three
+  views. The test split (right) keeps essentially the same shape
+  as train (left), with all three views climbing past the
+  $\pm 1.5$~m mark by the $80$--$95\,\%$ percentile --- evidence
+  the pipeline generalises across buildings.}
+  \label{fig:pipeline-cdf-split}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{pipeline/signed_error_pdf.png}
+  \caption{Signed predicted-minus-truth $\Delta h$ density per
+  view (densities, three panels). All three are centred near
+  zero, so the predictor itself is not biased in any of the
+  three regimes; the spread differs.}
+  \label{fig:pipeline-signed-pdf}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{pipeline/scatter_three.png}
+  \caption{Predicted vs truth $\Delta h$ scatter, one panel per
+  view. The dashed black line is $y = x$. In the matched view
+  (green, middle) the points hug the diagonal cleanly; in the
+  all-vs-barometer view (red, right) the FPs sit near the
+  $x = 0$ axis (barometer says no altitude change), and any
+  predicted $|\Delta h| > 0$ on those segments is a phantom
+  altitude.}
+  \label{fig:pipeline-scatter}
+\end{figure}
+
+\subsection{Phantom Altitude: $\Delta h$ on False-Positive
+Segments}
+\label{sec:pipeline-fps}
+
+False positives are the most consequential failure mode in
+deployment. A naive consumer of the output stream would integrate
+\emph{every} predicted $\Delta h$ into a running altitude
+estimate; an FP whose predicted $|\Delta h|$ is large would
+contaminate that estimate even though no ride happened.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{pipeline/fp_predicted_dh.png}
+  \caption{Predicted $\Delta h$ on the $\PipeFpN$ false-positive
+  segments. Left: signed; centred near zero (median
+  $\PipeFpMedianSigned$~m), so FPs are not systematically biased
+  up or down. Right: absolute; median $\PipeFpMedianAbs$~m, mean
+  $\PipeFpMeanAbs$~m. The mean is dragged up by a few large FPs
+  on damped-phone sessions where the spurious trapezoid pair fit
+  a sustained motion.}
+  \label{fig:pipeline-fp-dh}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{pipeline/fp_predicted_altitude.png}
+  \caption{Phantom \emph{altitude} (not $\Delta h$) injected by
+  false-positive predictions. \textbf{Left:} the system's running
+  cumulative altitude --- summing every prior predicted $\Delta h$
+  from $t = 0$ --- evaluated at the moment each FP fires. This is
+  the absolute-altitude analogue of
+  Figure~\ref{fig:pipeline-fp-dh}: it answers \emph{where would
+  the system claim the user is at the time of each FP}, rather
+  than how big the FP step itself was. \textbf{Right:}
+  per-experiment total altitude that FPs alone would inject into
+  a naive running tally (positive bars: net upward bias, negative
+  bars: net downward bias). On most experiments the FP-only
+  contribution stays under one floor, but a handful of damped
+  sessions drift several meters in either direction.}
+  \label{fig:pipeline-fp-altitude}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{pipeline/fp_vs_clean_dh.png}
+  \caption{Can a height-magnitude rule alone catch the
+  false-positive predictions? \textbf{Left two panels:} predicted
+  $\Delta h$ density on FP segments and on clean (true-positive)
+  segments separately, both clipped to $\pm 5$~m and binned at
+  $0.5$~m. \textbf{Right:} the same two densities overlaid for
+  direct comparison. The FP density concentrates sharply around
+  zero --- their median $|\Delta h|$ is substantially smaller
+  than that of clean predictions --- so a downstream filter that
+  rejects predictions with $|\Delta h|$ below a small threshold
+  (say $\sim 0.5$~m) would catch a meaningful share of the FPs
+  while losing only a small tail of the shortest real rides.
+  Conversely, a few FPs do reach $\pm 2$--$3$~m, so the rule
+  cannot remove them all without also dropping legitimate
+  one-floor rides; it is a useful filter, not a complete fix.}
+  \label{fig:pipeline-fp-vs-clean}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{pipeline/clean_predicted_altitude.png}
+  \caption{Phantom altitude's positive analogue: the system's
+  predicted cumulative altitude at each \emph{correct}
+  prediction. \textbf{Left:} histogram of the running pred-$\Delta h$
+  cumulative sum (from $t = 0$) at the end of every clean
+  prediction --- this is what the system would tell the user as
+  their current altitude after each successful ride.
+  \textbf{Centre:} the same predicted altitude scattered against
+  the true cumulative altitude at the matched GT's end; clean
+  predictions hug the $y = x$ line and the spread is the
+  accumulated drift from prior errors. \textbf{Right:} residual
+  histogram (predicted $-$ true cumulative altitude) at each
+  clean prediction --- the bulk sits inside $\pm 1.5$~m even
+  after summing dozens of rides, with the tail driven mostly by
+  earlier FPs that have already polluted the running tally by
+  the time a clean prediction fires.}
+  \label{fig:pipeline-clean-altitude}
+\end{figure}
+
+\subsection{Per-Experiment View}
+\label{sec:pipeline-perexp}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{pipeline/per_exp_mae.png}
+  \caption{Per-experiment MAE for the three views, sorted by GT
+  count descending. Recordings where the green (matched) bar is
+  short and the red (all vs barometer) bar is tall are the ones
+  driving the FP-cost gap; recordings where the green bar is
+  tall are the ones where even successful matches have large
+  $\Delta h$ errors (typically damped-accelerometer sessions
+  where the predictor's own integration drifts).}
+  \label{fig:pipeline-perexp}
+\end{figure}
+
+\subsection{Sanity Check: Barometer-on-Predicted-Interval vs
+Snapped GT}
+\label{sec:pipeline-baro-sanity}
+
+The all-vs-barometer view depends on the barometer-derived
+$\Delta h$ over an arbitrary predicted interval being a faithful
+truth signal. Figure~\ref{fig:pipeline-baro-sanity} confirms that
+the integration is consistent: on clean-matched intervals the
+barometer-on-predicted-interval $\Delta h$ tracks the
+gramushka-snapped GT $\Delta h$ on the diagonal, with the small
+spread expected from edge slack at the segmenter's interval
+boundaries.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.6\linewidth]{pipeline/baro_vs_gt_sanity.png}
+  \caption{On clean-matched predictions, the barometer-derived
+  $\Delta h$ over the segmenter's interval (this section's truth
+  signal for the all-vs-barometer view) tracks the
+  gramushka-snapped GT $\Delta h$ that defines the rest of the
+  evaluation. Off-diagonal scatter is dominated by the segmenter's
+  edge inaccuracy, not by barometer noise.}
+  \label{fig:pipeline-baro-sanity}
+\end{figure}
+
+\subsection{Adding the Quality Filter: Pipeline = Segmentation
+$+$ Prediction $+$ Quality}
+\label{sec:pipeline-quality}
+
+Every \texttt{PredictionOutput} the predictor emits carries an
+\texttt{accepted} boolean (\S\ref{sec:height-prediction}, the
+quality filter). A downstream consumer that only trusts accepted
+predictions sees a different output stream than the raw one ---
+fewer rides, but each one vetted. This subsection re-derives the
+three views with the quality filter applied, so we can compare
+the deployed system as-a-whole (segmentation $+$ prediction $+$
+quality) against the unfiltered baseline of
+\S\ref{sec:pipeline-headline}.
+
+\paragraph{Accept-rate breakdown.} On the
+$\PipeSegTotalN$ segmenter predictions across the full dataset
+the quality filter accepts $\PipeSegAcceptedN$ ($\PipeAcceptRateAll$
+overall). Stratified by segmentation status:
+
+\begin{itemize}
+  \item \textbf{Clean (true-positive) predictions:}
+    $\PipeCleanAcceptedN$ of $\PipePooledMatchedN$ pass
+    ($\PipeAcceptRateClean$). The handful of clean rejections
+    are mostly short rides on damped phones where the trapezoid
+    fit is genuinely poor.
+  \item \textbf{False-positive predictions:}
+    $\PipeFpAcceptedN$ of $\PipeFpN$ pass
+    ($\PipeAcceptRateFp$). \emph{Every single false positive is
+    rejected by the quality filter.} The phantom-altitude
+    problem of \S\ref{sec:pipeline-fps} essentially disappears
+    when the consumer respects the \texttt{accepted} flag.
+  \item \textbf{GT-direct predictions} (oracle view, never
+    deployed but useful for the GT-segments comparison):
+    $\PipeGtAcceptedN$ of $\PipeGtTotalN$ pass
+    ($\PipeAcceptRateGt$). The lower acceptance rate here is
+    because the oracle includes hard rides on damped phones
+    that the segmenter would not have emitted in the first
+    place.
+\end{itemize}
+
+For the rest of this subsection ``FP'' means \emph{a prediction
+that the segmenter labelled as a ride with no GT match
+\textbf{and} that the quality filter accepted}, i.e., a phantom
+prediction the deployed system actually exposes to its consumer.
+Under that definition the dataset has $\PipeFpAcceptedN$ FPs.
+
+\subsubsection*{Headline numbers, accepted-only}
+\label{sec:pipeline-quality-headline}
+
+\begin{table}[H]
+\centering
+\input{figures/pipeline/headline_pooled_acc.tex}
+\caption{Pooled headline metrics, restricted to predictions the
+quality filter accepted.}
+\label{tab:pipeline-headline-pooled-acc}
+\end{table}
+
+\begin{table}[H]
+\centering
+\input{figures/pipeline/headline_train_acc.tex}
+\caption{Same on the train split.}
+\label{tab:pipeline-headline-train-acc}
+\end{table}
+
+\begin{table}[H]
+\centering
+\input{figures/pipeline/headline_test_acc.tex}
+\caption{Same on the held-out test split.}
+\label{tab:pipeline-headline-test-acc}
+\end{table}
+
+The \emph{end-to-end pipeline output number} the deployed system
+delivers is the all-segments-vs-barometer row, accepted-only:
+mean absolute error of $\PipePooledAllMaeAcc$~m with
+$\PipePooledAllFloorAcc$ of accepted predictions inside the
+$\pm 1.5$~m one-floor target. Compare to the unfiltered
+$\PipePooledAllMae$~m / $\PipePooledAllFloor$ of
+\S\ref{sec:pipeline-headline} --- the quality filter cuts mean
+error nearly in half and lifts the floor-hit rate by roughly
+ten percentage points. The matched-segmenter view also tightens
+to $\PipePooledMatchedMaeAcc$~m mean and
+$\PipePooledMatchedFloorAcc$ within one floor, because the few
+cleans the filter does reject are the ones that were dragging the
+unfiltered MAE upward in the first place.
+
+\subsubsection*{MAE comparison, accepted-only}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.9\linewidth]{pipeline/bar_mae_overall_acc.png}
+  \caption{MAE per view on the accepted-only subset, broken into
+  pooled / train / test. Compare to
+  Figure~\ref{fig:pipeline-bar-mae}: every bar is shorter, with
+  the all-vs-barometer bar (red) seeing the largest drop because
+  the quality filter eliminates the FP contribution entirely.}
+  \label{fig:pipeline-bar-mae-acc}
+\end{figure}
+
+\subsubsection*{Error distributions, accepted-only}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{pipeline/cdf_pooled_acc.png}
+    \caption{Pooled, full range.}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{pipeline/cdf_pooled_zoom_acc.png}
+    \caption{Pooled, zoom on $0$--$3$~m.}
+  \end{subfigure}
+  \caption{Empirical CDFs of $|\Delta h$ error$|$, accepted-only.
+  All three curves climb noticeably faster than their unfiltered
+  counterparts (Figure~\ref{fig:pipeline-cdf-pooled}); the
+  all-vs-barometer (red) curve in particular has lost its
+  long-error tail.}
+  \label{fig:pipeline-cdf-pooled-acc}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{pipeline/cdf_train_acc.png}
+    \caption{Train split.}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{pipeline/cdf_test_acc.png}
+    \caption{Held-out test split.}
+  \end{subfigure}
+  \caption{Per-split CDFs, accepted-only.}
+  \label{fig:pipeline-cdf-split-acc}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{pipeline/signed_error_pdf_acc.png}
+  \caption{Signed predicted-minus-truth $\Delta h$ density per
+  view, accepted-only.}
+  \label{fig:pipeline-signed-pdf-acc}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{pipeline/scatter_three_acc.png}
+  \caption{Predicted vs truth $\Delta h$ scatter per view,
+  accepted-only.}
+  \label{fig:pipeline-scatter-acc}
+\end{figure}
+
+\subsubsection*{FP and altitude diagnostics, accepted-only}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{pipeline/fp_predicted_dh_acc.png}
+  \caption{Phantom $\Delta h$ on the accepted FP segments. With
+  $\PipeFpAcceptedN$ of $\PipeFpN$ FPs surviving the filter,
+  this distribution is reduced to whatever phantom predictions
+  remain --- empty or near-empty by design.}
+  \label{fig:pipeline-fp-dh-acc}
+\end{figure}
+
+\paragraph{Phantom-altitude figure, accepted-only --- omitted.}
+The per-FP cumulative phantom-altitude figure of
+Figure~\ref{fig:pipeline-fp-altitude} has no analogue here:
+$\PipeFpAcceptedN$ false-positive predictions survive the
+quality filter, so the per-experiment phantom-altitude bias
+plot would be empty by construction. The single most
+operationally important consequence of the quality filter is
+exactly that emptiness.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{pipeline/fp_vs_clean_dh_acc.png}
+  \caption{FP-vs-clean $\Delta h$ density comparison, restricted
+  to predictions the quality filter accepted. The FP panel
+  collapses to its surviving members; the clean panel keeps
+  essentially all of its mass.}
+  \label{fig:pipeline-fp-vs-clean-acc}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{pipeline/clean_predicted_altitude_acc.png}
+  \caption{Per-correct-prediction altitude diagnostics on the
+  accepted-only subset. The residual histogram (right) is
+  noticeably tighter than its unfiltered counterpart
+  (Figure~\ref{fig:pipeline-clean-altitude}) because the
+  cumulative tally is no longer being polluted by upstream
+  rejected (low-quality) predictions.}
+  \label{fig:pipeline-clean-altitude-acc}
+\end{figure}
+
+\subsubsection*{Per-experiment view, accepted-only}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{pipeline/per_exp_mae_acc.png}
+  \caption{Per-experiment MAE on the accepted-only subset.}
+  \label{fig:pipeline-perexp-acc}
+\end{figure}
+
+\subsection{What These Numbers Say About Trust}
+\label{sec:pipeline-verdict}
+
+The picture changes once the quality filter is in the loop. The
+deployed system, taken as a whole (segmentation
+$+$ prediction $+$ quality), gives the user a $\Delta h$ stream
+whose pooled mean absolute error against the barometer is
+$\PipePooledAllMaeAcc$~m, with $\PipePooledAllFloorAcc$ of
+accepted predictions inside the $\pm 1.5$~m one-floor target ---
+sharply better than the $\PipePooledAllMae$~m
+/ $\PipePooledAllFloor$ of the unfiltered output. The single
+biggest contributor to that improvement is the elimination of
+\emph{every} false positive: $\PipeFpAcceptedN$ of $\PipeFpN$
+FPs survive the filter, so the phantom-altitude problem
+of \S\ref{sec:pipeline-fps} effectively disappears for any
+consumer that trusts the \texttt{accepted} flag.
+
+The trade-off is recall on the prediction side: the filter
+rejects $\PipeCleanRejectedN$ of $\PipePooledMatchedN$ clean
+predictions, leaving $\PipeAcceptRateClean$ of clean rides
+visible to the consumer. Combined with the segmenter's own
+$\sim 75$--$85\%$ recall (\S\ref{sec:seg-eval-headline}), the
+full pipeline recall measured against GT rides is therefore
+roughly $0.8 \times 0.92 \approx 0.74$ --- the user sees about
+three out of every four real elevator rides, but each one with
+high-confidence height numbers and essentially no phantom rides
+in between. That is the right operating point for an altitude
+estimator that doubles as input to a downstream floor-detection
+model: false positives are far worse than missed rides, and the
+quality filter trades the former for a small additional helping
+of the latter.
+
+The matched-segmenter view shows the predictor performs well
+whenever the segmenter has identified a real ride: $\PipePooledMatchedFloor$
+of matched predictions land within one floor with median absolute
+error $\PipePooledMatchedMedian$~m. The GT-segments view shows
+that giving the predictor perfect intervals does \emph{not}
+materially improve the floor-hit rate
+($\PipePooledGtFloor$ at $\pm 1.5$~m) --- the segmenter's edge
+inaccuracy is not the bottleneck. The all-vs-barometer view,
+which includes false positives, is what an end-user would
+experience as the running altitude estimate, and its
+$\PipePooledAllFloor$ within one floor is the unfiltered bar
+that the quality flag closes most of the gap on.
+
+%%% --- legacy first-draft content removed below; new section ends here ---
+\iffalse
+The previous chapters describe the segmenter
+(\S\ref{sec:segmentation-detection}) and the predictor
+(\S\ref{sec:height-prediction}) as standalone components. In
+deployment they form a single sensor-to-height pipeline; this
+chapter walks the end-to-end flow, then evaluates the joint output
+against the ground-truth $\Delta h$ on a per-ride basis. The
+question we answer here is operational: \emph{can a user trust the
+system as-is, or do they need to hand-correct the segmentation
+before reading the height numbers?}
+
+\subsection{The Flow: Sensors $\to$ Segmentation $\to$ Prediction
+$\to$ $\Delta h$}
+\label{sec:pipeline-diagram}
+
+The pipeline takes the raw sensor stream of a single phone
+recording and emits a list of predicted rides, each with a signed
+$\Delta h$ in meters and a 90\,\% confidence interval. The chain is
+shown in Figure~\ref{fig:pipeline-flow}: the loader hydrates per-
+sensor frames and (when a barometer was present) derives the GT
+ride list; the active accelerometer segmenter
+(\texttt{ACC\_TEMPLATE\_MATCH}, iter\_16 config) reads the ACC
+frame and emits ride intervals; for each ride interval the active
+predictor (\texttt{TRAPEZOID\_ACCEL}) consumes a slice of the ACC
+frame plus a 3-second pre-ride and 3-second post-ride stationary
+window (used for gravity calibration) and emits a
+\texttt{PredictionOutput} with the signed $\Delta h$, conformal
+CI half-width, and a quality verdict.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  node distance=8mm and 8mm,
+  every node/.style={font=\small},
+  block/.style={
+    rectangle, draw=black!70, thick, rounded corners=2pt,
+    minimum width=3.4cm, minimum height=1.0cm, align=center,
+    fill=blue!5,
+  },
+  data/.style={
+    rectangle, draw=black!50, dashed, rounded corners=2pt,
+    minimum width=2.6cm, minimum height=0.8cm, align=center,
+    fill=gray!8,
+  },
+  output/.style={
+    rectangle, draw=black!70, thick, rounded corners=2pt,
+    minimum width=3.4cm, minimum height=1.0cm, align=center,
+    fill=green!7,
+  },
+  gt/.style={
+    rectangle, draw=black!50, dotted, rounded corners=2pt,
+    minimum width=2.8cm, minimum height=0.8cm, align=center,
+    fill=orange!7,
+  },
+  arr/.style={-{Latex[length=2mm]}, thick, draw=black!70},
+  garr/.style={-{Latex[length=2mm]}, thick, dotted, draw=black!50},
+]
+  \node[data] (raw)  {Raw sensor log\\ \texttt{ACC, PRS, GYR, $\ldots$}};
+  \node[block, right=of raw] (loader) {Loader\\
+    \texttt{getExperimentData}};
+  \node[data, right=of loader] (acc) {ACC frame\\ ($x, y, z$ at $\sim 100$~Hz)};
+  \node[gt,   below=4mm of acc] (gt) {GT ride list\\
+    (barometer-derived\\ + manual edits)};
+
+  \node[block, right=of acc] (seg) {Segmenter\\
+    \texttt{ACC\_TEMPLATE\_MATCH}\\ (iter\_16 config)};
+  \node[data, below=4mm of seg]   (segs) {Predicted intervals\\
+    $[t_s, t_e]$ per ride};
+
+  \node[block, right=of segs] (pred) {Predictor\\
+    \texttt{TRAPEZOID\_ACCEL}\\
+    (with $\pm 3$~s pre/post)};
+  \node[output, right=of pred] (out) {$\Delta h$ + 90\% CI\\
+    per ride, signed};
+
+  \draw[arr] (raw)    -- (loader);
+  \draw[arr] (loader) -- (acc);
+  \draw[garr] (loader.south) |- (gt.west);
+  \draw[arr] (acc)    -- (seg);
+  \draw[arr] (seg)    -- (segs);
+  \draw[arr] (segs)   -- (pred);
+  \draw[arr] (acc.south) |- ([yshift=2mm]pred.north west) -- (pred.north west);
+  \draw[arr] (pred)   -- (out);
+
+  % Evaluation hook
+  \node[gt, below=12mm of pred] (eval) {Evaluation\\
+    GT $\Delta h$ vs predicted $\Delta h$};
+  \draw[garr] (gt.south)  |- (eval.west);
+  \draw[garr] (out.south) |- (eval.east);
+\end{tikzpicture}
+\caption{End-to-end pipeline flow. Solid blocks are deployed
+algorithm stages; dashed gray nodes are passive data; dotted
+orange nodes belong to the offline evaluation track only (the
+deployed system never sees the GT). The predictor consumes both
+the segmenter's interval and the surrounding $\pm 3$~s of ACC for
+gravity calibration --- without those pre/post windows the
+gravity vector is estimated from the ride itself, which biases
+the projected vertical channel.}
+\label{fig:pipeline-flow}
+\end{figure}
+
+\subsection{Three Error Views: Clean, Oracle, and System-Total}
+\label{sec:pipeline-views}
+
+Per-ride errors split into three views, each answering a different
+operational question:
+
+\begin{itemize}
+  \item \textbf{Clean autonomous} ($n = \PipePooledCleanautoN$).
+    Restrict to GT rides the segmenter cleanly matched
+    (\S\ref{sec:trapezoid-evaluation}); the predictor ran on the
+    segmenter's interval. Tells us \emph{when the segmenter
+    works, how good is the height number?}
+  \item \textbf{Oracle / user-corrected segmentation}
+    ($n = \PipePooledOracleN$). Predictor ran directly on every
+    GT interval. Tells us \emph{what does the system look like
+    once a human fixes the segmentation?}
+  \item \textbf{System-total per GT}
+    ($n = \PipePooledSystemtotalN$). For each GT ride, error
+    $= |\Delta h_{\rm gt} - \Delta h_{\rm pred}|$ when the
+    segmenter caught it, and $|\Delta h_{\rm gt}|$ when it didn't
+    (a missed ride contributes its full magnitude to the system's
+    error budget --- the autonomous system simply does not estimate
+    that ride). Tells us \emph{what does the user actually
+    experience, including the cost of missed rides?}
+\end{itemize}
+
+False positives sit in a fourth bucket and are accounted
+separately: they have no GT $\Delta h$ to compare against, so we
+report the magnitude of the spurious $\Delta h$ predictions
+themselves --- the ``phantom altitude'' a naive consumer of the
+output stream would integrate.
+
+\subsection{Headline Numbers}
+\label{sec:pipeline-headline}
+
+\begin{table}[H]
+\centering
+\input{figures/pipeline/headline_pooled.tex}
+\caption{Pipeline headline metrics, pooled across all
+$26$ experiments.}
+\label{tab:pipeline-headline-pooled}
+\end{table}
+
+\begin{table}[H]
+\centering
+\input{figures/pipeline/headline_train.tex}
+\caption{Pipeline metrics on the train split alone
+($\PipeTrainOracleN$ predictable GT rides).}
+\label{tab:pipeline-headline-train}
+\end{table}
+
+\begin{table}[H]
+\centering
+\input{figures/pipeline/headline_test.tex}
+\caption{Pipeline metrics on the held-out
+\texttt{beitYitzchakiRaanana} test split
+($\PipeTestOracleN$ predictable GT rides).}
+\label{tab:pipeline-headline-test}
+\end{table}
+
+The pooled story (Table~\ref{tab:pipeline-headline-pooled}) is
+striking in three ways. First, on rides the segmenter cleanly
+matches, the predicted height is tight: median absolute error is
+$\PipePooledCleanautoMedian$~m and
+$\PipePooledCleanautoWithinFloor$ of clean-matched rides land
+inside the $\pm 1.5$~m one-floor target. Second, the oracle view
+--- where a human supplies the segmentation --- has comparable
+median accuracy ($\PipePooledOracleMedian$~m) but a heavier mean
+($\PipePooledOracleMae$~m) because it includes a long tail of
+edge-case rides on damped phones the segmenter would have rejected
+anyway. Third, and the operational headline: the system-total view
+balloons to $\PipePooledSystemtotalMae$~m mean and
+$\PipePooledSystemtotalMedian$~m median, with only
+$\PipePooledSystemtotalWithinFloor$ of GT rides captured to
+within one floor --- because every missed ride contributes its
+entire $|\Delta h|$ (median $\PipeMissedMedianDh$~m) to the error.
+
+The held-out test split (Table~\ref{tab:pipeline-headline-test})
+reproduces the pattern: clean-autonomous MAE is
+$\PipeTestCleanautoMae$~m with
+$\PipeTestCleanautoWithinFloor$ within one floor (\emph{better}
+than train, consistent with the segmentation generalisation
+result of \S\ref{sec:seg-eval-headline}), while system-total
+sits at $\PipeTestSystemtotalMae$~m. The conclusion is the same
+on both splits: the predictor is trustworthy whenever it
+\emph{runs}; the cost is concentrated on the rides the segmenter
+fails to detect.
+
+\subsection{Error Distributions}
+\label{sec:pipeline-distributions}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{pipeline/cdf_abs_dh_error.png}
+    \caption{Full range, $|\Delta h|$ error up to $10$~m.}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{pipeline/cdf_abs_dh_error_zoom.png}
+    \caption{Zoom on $0$--$3$~m to resolve the bulk.}
+  \end{subfigure}
+  \caption{Empirical CDF of absolute $\Delta h$ error for the
+  three views. The clean (green) and oracle (blue) curves climb
+  steeply through the sub-half-meter region; the system-total
+  (red) curve has a visible plateau in the $1$--$10$~m range that
+  is exactly the missed-ride contribution. The vertical dashed
+  line marks the $\pm 1.5$~m one-floor target.}
+  \label{fig:pipeline-cdf}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{pipeline/signed_error_pdf.png}
+  \caption{Signed predicted-minus-true $\Delta h$ density for the
+  oracle and clean-autonomous views. Both are centred near zero
+  with median bias inside the cm range --- the predictor itself
+  is unbiased in both regimes. The width of the autonomous
+  histogram is what the trapezoid algorithm's CI is calibrated to
+  (\S\ref{sec:conformal-calibration}).}
+  \label{fig:pipeline-signed-error}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{pipeline/scatter_oracle.png}
+    \caption{Oracle view: every GT.}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{pipeline/scatter_autonomous.png}
+    \caption{Autonomous view: predicted intervals only.}
+  \end{subfigure}
+  \caption{Predicted vs true $\Delta h$ scatter, coloured by GT
+  status. Points hug the $y = x$ line for both views; the
+  largest off-diagonal points in the oracle view are GT rides on
+  damped phones whose accelerometer integration is dominated by
+  drift (long-tail rides).}
+  \label{fig:pipeline-scatter}
+\end{figure}
+
+\subsection{The Cost of Misses and the Phantom-Altitude Problem}
+\label{sec:pipeline-misses-fps}
+
+The system-total MAE is dominated by two error sources the clean
+or oracle views never see: the $|\Delta h|$ of every missed ride
+(the autonomous system implicitly estimates zero, which is wrong
+by exactly the ride height) and the phantom $\Delta h$ produced
+on every false-positive segment (the autonomous system invents a
+ride that wasn't there).
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\linewidth]{pipeline/missed_dh_hist.png}
+  \caption{Distribution of $|\Delta h|$ on the
+  $\PipeMissedTrain$ + $\PipeMissedTest$ missed-by-segmenter GT
+  rides. The median missed height is
+  $\PipeMissedMedianDh$~m, and the right tail extends past
+  $30$~m --- these are real elevator rides whose absence from the
+  output stream the user would never know to ask about without
+  external context.}
+  \label{fig:pipeline-missed}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\linewidth]{pipeline/fp_dh_hist.png}
+  \caption{Predicted $\Delta h$ on the $\PipeFpN$
+  false-positive rides. Median magnitude is
+  $\PipeFpMedianAbs$~m (most are short, sub-meter ``noise
+  rides''); the mean magnitude of $\PipeFpMeanAbs$~m is dragged
+  up by a few large-magnitude phantom rides where the spurious
+  trapezoid pair fit a non-elevator motion. A consumer who
+  integrates raw $\Delta h$ outputs would accumulate this
+  altitude bias.}
+  \label{fig:pipeline-fp}
+\end{figure}
+
+\subsection{Per-Experiment View}
+\label{sec:pipeline-perexp}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{pipeline/per_exp_mae.png}
+  \caption{Per-experiment MAE for the three views, sorted by GT
+  count. Where the green (clean autonomous) and blue (oracle)
+  bars are close, the segmenter is not the bottleneck; where the
+  red (system total) bar dominates, the recording sits on a
+  damped/noisy phone and the segmenter's missed rides drive the
+  error.}
+  \label{fig:pipeline-perexp}
+\end{figure}
+
+\subsection{Trust Verdict: When to Run Autonomously and When a
+Human Should Step In}
+\label{sec:pipeline-verdict}
+
+The numbers point to a clear two-mode operating recipe:
+
+\begin{enumerate}
+  \item \textbf{On phones with a clean accelerometer trace}
+    (every device in the dataset \emph{except} the three damped
+    sessions of \S\ref{sec:seg-eval-cleaned}), the autonomous
+    pipeline is trustworthy: $\PipePooledCleanautoWithinFloor$ of
+    its predictions land inside the one-floor target with median
+    absolute error $\PipePooledCleanautoMedian$~m. A user reading
+    the output stream gets the right floor count almost every
+    time. No human-in-the-loop is required.
+
+  \item \textbf{On damped/noisy-phone recordings}, the
+    bottleneck is segmentation, not prediction --- the median
+    missed-ride magnitude of $\PipeMissedMedianDh$~m alone
+    drives the system-total MAE from
+    $\PipePooledOracleMae$~m (oracle) to
+    $\PipePooledSystemtotalMae$~m (autonomous). For these
+    recordings the right pattern is human-in-the-loop: the
+    segmenter offers a candidate ride list, the user adds the
+    rides it missed (visible in the GT editor of
+    \S\ref{sec:gt-editor}), and the predictor re-runs on the
+    edited list --- collapsing the system-total error toward
+    the oracle baseline.
+\end{enumerate}
+
+The diagnostic that tells the two regimes apart is observable at
+runtime without GT: the per-experiment density of
+\emph{candidate-pair rejections} from the pair filter
+(\S\ref{sec:trapezoid-pair}) jumps by an order of magnitude on
+the damped sessions. A future product UI could surface that
+density to the user as a trust score, recommending the
+human-correction loop only when it crosses a threshold. The
+session-adaptive amplitude floor proposed in
+\S\ref{sec:trapezoid-detect-tuning} is the algorithmic alternative
+to this UX: if it lands, the autonomous regime extends to the
+damped phones and the human-in-the-loop second mode collapses to
+a niche.
+\fi
+
 
 \end{document}

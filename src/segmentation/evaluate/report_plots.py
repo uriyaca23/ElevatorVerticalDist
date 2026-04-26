@@ -557,7 +557,9 @@ def constraint_2d_scatter(
     if df_v.empty:
         return
 
-    fig, ax = plt.subplots(figsize=(7, 5))
+    # Wider canvas leaves room for an external legend (right side) so
+    # the legend never overlaps the scatter cloud.
+    fig, ax = plt.subplots(figsize=(9, 5))
     for status in _HIST_STATUS_ORDER:
         mask = df_v["status"] == status
         if not mask.any():
@@ -585,7 +587,13 @@ def constraint_2d_scatter(
     ax.set_ylabel(ylabel)
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
-    ax.legend(loc="lower right", fontsize=8)
+    # Park the legend outside the right edge so it can never occlude
+    # the data cloud — the missed mass extends across most of the lower
+    # half of the plot.
+    ax.legend(
+        loc="upper left", bbox_to_anchor=(1.02, 1.0),
+        fontsize=8, frameon=True, borderaxespad=0.0,
+    )
     fig.tight_layout()
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
