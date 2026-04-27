@@ -3325,6 +3325,58 @@ experience as the running altitude estimate, and its
 $\PipePooledAllFloor$ within one floor is the unfiltered bar
 that the quality flag closes most of the gap on.
 
+\subsection{Runtime}
+\label{sec:pipeline-runtime}
+
+The pipeline is fast enough to run online on a phone-class CPU.
+We measure per-segment cost on a fixed pool of $8$ representative
+experiments ($135$ detected segments total) using
+\texttt{benchmarks/bench\_inference.py}. The unit of interest is
+``time to process one detected ride'', amortising whole-signal
+work (the trapezoid template-bank scan) across all rides in the
+recording.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lrrr}
+\toprule
+Stage & Baseline (ms/seg) & Current (ms/seg) & Speedup \\
+\midrule
+Segmentation (matched filter + pair filter) & $569$ & $172$ & $3.3\times$ \\
+Prediction --- trapezoid (per-ride scan)    & $489$ & $470$ & $1.04\times$ \\
+Prediction --- ZUPT (double integration)    & $\phantom{00}3$ & $\phantom{00}3$ & $1.0\times$ \\
+\midrule
+\textbf{End-to-end (seg + trap + zupt)}     & $\mathbf{1061}$ & $\mathbf{645}$ & $\mathbf{1.6\times}$ \\
+\bottomrule
+\end{tabular}
+\caption{Per-segment runtime, averaged over the
+$135$-segment benchmark pool. ``Baseline'' is the pre-optimisation
+build (commit \texttt{ef479b0}). ``Current'' is the post-optimisation
+build with the vectorised pair filter (commit \texttt{8350ca9}). Numbers
+are wall-clock on a desktop CPU and exclude data-loading overhead.}
+\label{tab:pipeline-runtime}
+\end{table}
+
+The end-to-end speedup is dominated by the segmentation
+optimisation. The original \texttt{joint\_pair\_score} routine had
+an inner Python loop over every $(W, f, \text{pair})$ candidate;
+the vectorised replacement
+(\texttt{src/utils/trapezoid\_fast.py}) precomputes a single
+matched-filter inner-product matrix per template width $W$, so
+per-pair scoring degenerates to a closed-form $(W, f)$ lookup. The
+speedup is verified to be \emph{lossless}: across all $135$
+benchmark segments the pre- and post-optimisation builds produce
+byte-identical $\Delta h$ values and accept verdicts. The
+trapezoid prediction stage was not retargeted by this iteration ---
+its remaining $\sim 470$~ms/seg cost is the per-ride
+$(W, f)$ template-bank fit, which is the obvious next optimisation
+target if real-time on-device inference becomes the bottleneck.
+
+The $\sim 645$~ms/seg total puts the deployed pipeline well
+inside the latency budget for a passive logger that processes a
+ride window once the post-ride stationary period has been
+observed (typically several seconds after the doors open).
+
 %%% --- legacy first-draft content removed below; new section ends here ---
 \iffalse
 The previous chapters describe the segmenter

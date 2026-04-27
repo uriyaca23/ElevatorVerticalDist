@@ -777,9 +777,10 @@ Table~\ref{tab:headline-train} summarises the train-set metrics. The
 two algorithms complement each other: the ZUPT integrator is fast and
 robust on any ride shape; the trapezoid pulse-pair fitter is more
 accurate on rides with a well-formed $(+,-)$ accel pattern and
-exploits the shared-shape physical constraint to cut the error in
-half at matched coverage (median $0.36$~m vs.\ $0.56$~m on clean train
-segments).
+exploits the shared-shape physical constraint to tighten the
+median absolute error by roughly a quarter at matched coverage
+(median \ResultTrainTrapezoidCleanmed~m vs.\
+\ResultTrainZuptCleanmed~m on clean train segments).
 
 \begin{table}[H]
 \centering
@@ -1257,9 +1258,11 @@ The evaluation answers two separate questions: ``how accurate is the
 point estimate'' and ``how calibrated is the interval estimate''.
 
 \paragraph{Point estimates.} Median absolute error on the train
-split is $0.36$~m for the trapezoid fitter and $0.56$~m for ZUPT
-($\Delta\approx 35\%$), and $72.5\%$ of clean trapezoid predictions
-land within $\pm 1.5$~m (a floor) vs.\ $69.6\%$ for ZUPT. The
+split is \ResultTrainTrapezoidCleanmed~m for the trapezoid fitter
+and \ResultTrainZuptCleanmed~m for ZUPT
+($\Delta\approx 24\%$), and \ResultTrainTrapezoidWithin{} of clean
+trapezoid predictions land within $\pm 1.5$~m (a floor) vs.\
+\ResultTrainZuptWithin{} for ZUPT. The
 velocity-anchored amplitude was the single largest contributor to
 the trapezoid improvement — before we wired it in, long rides at
 Millenium Hotel (40--45~m up rides) were systematically
@@ -1273,12 +1276,16 @@ comes from integrated physics. Blind-test numbers are in
 of model behaviour on a geographically held-out location.
 
 \paragraph{Conformal coverage calibration.} Train coverage on clean
-data clears the $90\%$ target with a buffer: $91.4\%$ ZUPT and
-$92.4\%$ trapezoid. Iteration on the trapezoid $\sigma$ model
-reduced the conformal multiplier from $\sim 21$ (datasheet $\sigma_a$,
-no velocity anchor) to $\sim 5.6$ (residual-RMS $\sigma_a^\mathrm{eff}$
-plus velocity-anchored $A$), which translates directly to a tighter
-typical CI of $\pm 2.69$~m at matched coverage. The $\ge 1-\alpha$
+data is \ResultTrainZuptCleancov{} for ZUPT (cleanly above the
+$90\%$ target) and \ResultTrainTrapezoidCleancov{} for trapezoid
+(slightly below on the GT-clean pool, but
+\ResultTrainTrapezoidAcccov{} once the quality filter rejects the
+segments where the matched-filter fit was poor). Iteration on the
+trapezoid $\sigma$ model reduced the conformal multiplier from
+$\sim 21$ (datasheet $\sigma_a$, no velocity anchor) to $\sim 5.3$
+(residual-RMS $\sigma_a^\mathrm{eff}$ plus velocity-anchored $A$),
+which translates directly to a typical clean-CI of
+$\pm$\ResultTrainTrapezoidCleanci~m (median). The $\ge 1-\alpha$
 guarantee of \eqref{eq:conformal-coverage} is exact only under
 exchangeability; our held-out-building split is as clean an
 exchangeability violation as one can engineer, so any coverage slip
@@ -1289,12 +1296,14 @@ dataset.
 
 \paragraph{Quality filter analysis.} The ZUPT multiplier
 (\texttt{multiplier} field of \texttt{calibration\_zupt.json}) is
-approximately $3.7$, and the trapezoid multiplier is $\sim 5.6$ —
+approximately $2.0$, and the trapezoid multiplier is $\sim 5.3$ —
 both indicating that the per-segment $\sigma$ model is still
-tighter than the empirical score quantile by a factor of $3$--$6$
+tighter than the empirical score quantile by a factor of $2$--$5$
 in the worst cases and that conformal absorbs the rest. The
-quality filter rejects $\sim 13\%$ of clean segments on train for
-ZUPT and $\sim 5.5\%$ for trapezoid; on the small dirty pool
+quality filter rejects $\sim 10\%$ of clean segments on train for
+ZUPT and $\sim 33\%$ for trapezoid (the trapezoid filter is
+intentionally stricter, trading recall against tighter
+accepted-only CIs); on the small dirty pool
 (33 segments, all train) ZUPT catches about two-thirds and
 trapezoid a third, the shift being a consequence of trapezoid's
 looser $R^2$ threshold — dirty noise-only segments still produce

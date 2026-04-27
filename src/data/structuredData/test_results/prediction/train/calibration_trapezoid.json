@@ -2,7 +2,7 @@
   "alpha": 0.08,
   "floor_multiplier": 1.645,
   "extra_margin_m": 0.0,
-  "n_calibration": 251,
-  "multiplier": 5.037124985598895,
-  "p95_score": 5.037124985598895
+  "n_calibration": 254,
+  "multiplier": 5.287153810499492,
+  "p95_score": 5.287153810499492
 }
