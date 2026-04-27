@@ -1,0 +1,4 @@
+label,exp,n_gt,n_matched,median_peak_A,median_pair_A,median_pair_R2,n_fail_low_peak_A,n_fail_low_peak_R2,n_fail_pair_R2,n_fail_pair_A,n_fail_heatmap,min_peak_abs_a,min_pair_abs_a,joint_r2_thresh
+BarIlan2_Pix10,UriyaCohenEliya_BarIlan2Herzelia_Pixel10_24-3-2026,44,13,0.6620775827680221,0.6154030162496352,0.8437441964060199,0,0,13,0,12,0.2,0.3,0.9
+milleniumHotel_Pix10,UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp2,31,1,0.09593039095840843,0.07383213327957239,0.7676729098682846,26,1,9,9,8,0.2,0.3,0.9
+milleniumHotel_A23,eyalyakir_milleniumHotel_SamsungSM-A235F_15-04-2026_exp1,10,0,0.20432653349626073,0.1948327216800962,0.9477594420050794,6,1,3,6,4,0.2,0.3,0.9

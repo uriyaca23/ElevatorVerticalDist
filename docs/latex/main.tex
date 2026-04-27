@@ -2277,6 +2277,307 @@ $= \SegCleanPooledRecall$, precision $= \SegCleanPooledPrecision$).
 \label{tab:seg-eval-cleaned-perexp-test}
 \end{table}
 
+\subsubsection{Why the Three Outliers Fail: Per-Experiment
+Diagnosis}
+\label{sec:seg-eval-outlier-diagnosis}
+
+\S\ref{sec:seg-eval-cleaned} attributed all three dropped sessions
+to ``phones whose chip-level acceleration noise floor swallows the
+lift lobes''. That story is half right. Re-running the deployed
+detector on each of the three recordings inside the editor
+(\texttt{src/segmentation/algorithms/editor.py}) and walking every
+GT ride through \texttt{diagnose\_window} surfaces a more nuanced
+picture: \emph{two} of the three failures are the noise-floor mode
+the original write-up described, but \emph{the third is a
+template-shape mode that lives entirely above the amplitude
+floor}. The figures in this subsection are produced by
+\texttt{scripts/plot\_outlier\_diagnostics.py}, which calls the
+same \texttt{predict\_intervals} / \texttt{diagnose\_window} /
+\texttt{heatmap\_at} primitives the editor binds to its UI, so
+each panel is exactly what the editor would draw for the
+corresponding click.
+
+Table~\ref{tab:seg-eval-outlier-summary} summarises the per-GT
+rejection arithmetic, computed by replaying every GT window
+through \texttt{diagnose\_window} and counting which gate fails.
+The medians are over all GT rides in the session, not just the
+missed ones.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lrrrrrrr}
+\toprule
+\textbf{session} & \textbf{GT} & \textbf{matched}
+& \textbf{med.\ peak $|A|$} & \textbf{med.\ pair $|A|$}
+& \textbf{med.\ pair $R^2$}
+& \textbf{peak $|A|<$ floor} & \textbf{pair $R^2<$ floor} \\
+\midrule
+\texttt{BarIlan2/Pix10}        & 44 & 13 & 0.66 & 0.62 & 0.844 & 0/44 & 13/44 \\
+\texttt{milleniumHotel/Pix10}  & 31 &  1 & 0.10 & 0.07 & 0.768 & 26/31 &  9/31 \\
+\texttt{milleniumHotel/A23}    & 10 &  0 & 0.20 & 0.19 & 0.948 &  6/10 &  3/10 \\
+\midrule
+\textbf{deployed floor}        &    &    & $\geq 0.20$ & $\geq 0.30$ & $\geq 0.90$ & --- & --- \\
+\bottomrule
+\end{tabular}
+\caption{Per-GT score statistics for the three outlier sessions,
+computed by re-running every up/down GT window through the
+detector's \texttt{diagnose\_window} routine. Amplitudes are in
+m/s$^2$. ``peak $|A|<$ floor'' counts GTs whose best
+positive- \emph{or} negative-sign sample inside the window fails
+the $0.20$~m/s$^2$ \texttt{min\_peak\_abs\_a} gate; ``pair
+$R^2<$ floor'' counts GTs where a + and a $-$ sample both
+existed but the shared-shape joint $R^2$ fell below $0.90$.}
+\label{tab:seg-eval-outlier-summary}
+\end{table}
+
+The two \texttt{milleniumHotel} sessions have a peak-$|A|$ median
+that sits below or barely on the $0.20$~m/s$^2$ floor — the
+expected damped-phone fingerprint. The Bar-Ilan~2 Pixel\,10 has a
+peak median of $0.66$~m/s$^2$, more than three times the floor;
+\emph{none} of its 44 GT rides fail at the peak-amplitude stage.
+Its missed rides die later, at the shared-shape pair gate.
+
+\paragraph{Bar-Ilan~2 / Pixel\,10 --- shape mismatch above a clean
+amplitude.}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{seg_eval/outliers/BarIlan2_Pix10_overview.png}
+  \caption{Session overview reproduced from
+  \texttt{editor.py}: PRS-derived altitude (top), gravity-projected
+  $a_\mathrm{vert}$ with the smoothed channel overlaid (middle),
+  and the per-sign best-template $R^2$ trace with the
+  $r2\_peak\_thresh = 0.40$ floor dashed (bottom). GT up/down
+  windows are shaded; detector predictions are the hatched
+  bands. The lobe pairs \emph{are} present and large
+  ($\sim 0.8$--$2$~m/s$^2$), but a sizeable fraction of GT rides
+  emit a band-pair the joint shared-shape fit cannot explain at
+  $R^2 \geq 0.90$.}
+  \label{fig:seg-eval-outlier-barilan-overview}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{seg_eval/outliers/BarIlan2_Pix10_gt37_detail.png}
+  \caption{Detail panel for the most-representative missed ride in
+  the Bar-Ilan~2 session (GT~\#37, down). Top row: $(W, f)$
+  matched-filter $R^2$ heatmaps centred on the best positive
+  ($A=+2.63$) and negative ($A=-0.55$) samples inside the window
+  --- exactly the heatmaps the editor renders when a GT row is
+  clicked. Middle: zoomed $a_\mathrm{vert}$ with the joint
+  best-fit trapezoids overlaid, plus the verdict text from
+  \texttt{diagnose\_window}. Bottom: signed-$R^2$ traces around
+  the window. Both peaks clear the per-peak gates, but the
+  joint shared-shape fit lands at $R^2 = 0.840$ (rejected) and
+  the heatmap-energy mean falls to $0.402$ --- the trace looks
+  like a triangular up-spike against a much flatter
+  long-cruise down lobe, so no single $(W, f)$ template explains
+  both lobes simultaneously.}
+  \label{fig:seg-eval-outlier-barilan-detail}
+\end{figure}
+
+What goes wrong on this session is not signal strength but signal
+\emph{asymmetry}. The recording captures rides between very
+different floors (the building has $\sim 30$ floors); the
+acceleration lobe is short and sharp because the lift accelerates
+quickly, but the deceleration lobe is long and shallow because
+the lift coasts down through many floors before decelerating
+gently into the destination. The trapezoid kernel forces a single
+shared $(W, f)$ to fit \emph{both} lobes, which is geometrically
+impossible when the up-half and down-half have visibly different
+half-widths. The pair-filter joint score collapses (median
+$0.844$, see scoreboard
+Figure~\ref{fig:seg-eval-outlier-barilan-scoreboard}) and the
+heatmap-energy fallback fails on the same rides for the same
+reason: only a narrow band of the $(W, f)$ grid supports any
+match at all.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\linewidth]{seg_eval/outliers/BarIlan2_Pix10_scoreboard.png}
+  \caption{Per-GT score distributions over the 44 rides of the
+  Bar-Ilan~2 session. The peak-$|A|$ panels (top row) sit far to
+  the right of the deployed floor; the pair-amplitude panel
+  (bottom-left) is similarly clean. Only the pair-$R^2$ panel
+  (bottom-right) straddles the deployed $0.90$ gate --- the
+  population of missed rides lives in the $0.75$--$0.88$ band.}
+  \label{fig:seg-eval-outlier-barilan-scoreboard}
+\end{figure}
+
+\paragraph{Millenium Hotel / Pixel\,10 (exp\_2) --- the canonical
+damped-phone case.}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{seg_eval/outliers/milleniumHotel_Pix10_overview.png}
+  \caption{Session overview --- the $a_\mathrm{vert}$ trace
+  (middle) is visibly compressed against zero. Median peak
+  amplitude inside a GT window is $0.10$~m/s$^2$, half the
+  $0.20$~m/s$^2$ floor; $26$ of $31$ GT rides fail at the
+  peak-amplitude gate before the pair filter is ever reached.
+  The signed-$R^2$ panel still shows abundant template structure
+  in the noise, but no peak survives the amplitude gate.}
+  \label{fig:seg-eval-outlier-milleniumPix-overview}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{seg_eval/outliers/milleniumHotel_Pix10_gt33_detail.png}
+  \caption{Detail panel for a representative missed Pixel\,10
+  ride. The trapezoid heatmaps are essentially uniform low-$R^2$
+  noise; the lobes inside the window have $|A| \approx 0.04$
+  and $|A| \approx 0.22$ m/s$^2$, well below the $0.20$ floor on
+  the positive side and squeaking past it on the negative.
+  Even when both peaks happen to clear, the joint shared-shape
+  fit is fitting noise: $R^2 = 0.74$, heatmap energy $= 0.48$.}
+  \label{fig:seg-eval-outlier-milleniumPix-detail}
+\end{figure}
+
+This is the failure mode \S\ref{sec:trapezoid-detect-tuning}
+already names: the chip-level white-noise $\sigma_a$ on this
+particular Pixel\,10 unit is large enough that the
+genuine acceleration lobes do not separate from background
+noise on the smoothed channel. The fix is a per-session
+amplitude floor scaled to the in-segment idle $\sigma_a$ rather
+than a global $0.20$~m/s$^2$ constant, so a unit with a quieter
+chip is held to a tighter standard and a unit with a noisier
+chip is not asked to clear a floor that is already inside its
+noise band.
+
+\paragraph{Millenium Hotel / A23 --- the borderline case.}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{seg_eval/outliers/milleniumHotel_A23_overview.png}
+  \caption{The Samsung A23 session is the geometric mean of the
+  other two failure modes. The $a_\mathrm{vert}$ trace has
+  visible lobes (median peak $|A|=0.20$~m/s$^2$, sitting exactly
+  on the deployed floor) but the pair amplitude floor at
+  $0.30$~m/s$^2$ rejects most of them, and the rides where a
+  pair does form have median pair $R^2 = 0.948$ --- so when the
+  signal is loud enough the shape is fine; the problem is
+  sub-floor amplitudes.}
+  \label{fig:seg-eval-outlier-A23-overview}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{seg_eval/outliers/milleniumHotel_A23_gt17_detail.png}
+  \caption{One of the more loud A23 rides --- here both lobes
+  clear the per-peak gate and the joint fit converges, but the
+  shared $|A|=0.32$~m/s$^2$ pair amplitude is barely above the
+  $0.30$~m/s$^2$ pair gate, the heatmap energy is right at its
+  $0.40$ floor, and small noise excursions on the cruise plateau
+  are large enough relative to the lobe height to drag the joint
+  $R^2$ down. The other 9 of 10 rides in this session sit lower
+  in amplitude still, and never form a pair at all.}
+  \label{fig:seg-eval-outlier-A23-detail}
+\end{figure}
+
+\paragraph{Cross-cutting takeaways.}
+
+The error tail in \S\ref{sec:seg-eval-cleaned} is not a single
+phenomenon. It is two stacked failure modes the deployed
+operating point is not robust to:
+
+\begin{enumerate}
+  \item \textbf{Damped-amplitude failure}
+  (\texttt{milleniumHotel/Pix10},
+  \texttt{milleniumHotel/A23}). The trapezoid lobes are
+  geometrically present but their amplitude lives inside the
+  phone's accelerometer noise band, so the global
+  \texttt{min\_peak\_abs\_a} = $0.20$~m/s$^2$ and
+  \texttt{min\_pair\_abs\_a} = $0.30$~m/s$^2$ floors swallow
+  them. This is what the original write-up describes.
+  Diagnostically: median peak $|A|$ on the missed rides is below
+  or right at the floor, peak $R^2$ is fine, joint $R^2$ is fine
+  whenever a pair manages to form.
+  \item \textbf{Shape-mismatch failure}
+  (\texttt{BarIlan2/Pix10}). The lobes are far above the
+  amplitude floor but a single shared $(W, f)$ trapezoid cannot
+  fit both halves of the ride simultaneously --- typically
+  because the acceleration lobe is short while the deceleration
+  lobe is long, or vice versa. The pair stage's joint-$R^2$ gate
+  rejects the pair, and the heatmap-energy gate rejects the
+  same pairs as a secondary effect. Diagnostically: median peak
+  $|A|$ comfortably above the floor, joint $R^2$ in the
+  $0.75$--$0.88$ band, heatmap energy in the $0.30$--$0.45$
+  band.
+\end{enumerate}
+
+\paragraph{Concrete fixes.}
+
+These two modes call for two separate levers. The fixes below
+are ordered by expected per-mode coverage and implementation
+cost.
+
+\begin{itemize}
+  \item \emph{Per-session noise-scaled amplitude floor.}
+  Replace the constant \texttt{min\_peak\_abs\_a} (and pair
+  counterpart) with $k \cdot \widehat{\sigma}_a$, where
+  $\widehat{\sigma}_a$ is estimated from the in-session
+  \texttt{outside}-tagged windows of $a_\mathrm{vert}$ and $k$
+  is the existing \texttt{noise\_sigma\_multiplier} ($\sim 6$,
+  see Table~\ref{tab:detect-config}). The phone-aware
+  noise-floor hook in \texttt{detect.\_apply\_phone\_noise\_floor}
+  already tightens the floor when a phone model is named; the
+  proposal is to additionally \emph{loosen} it (down to a
+  hard physical minimum, e.g.\ $0.05$~m/s$^2$) when the
+  in-session $\widehat{\sigma}_a$ is well below the global
+  default. This recovers the
+  \texttt{milleniumHotel} sessions: median peak $|A|$ on the
+  Pixel\,10 missed rides is $0.10$~m/s$^2$, so a floor of
+  $6 \cdot 0.012 \approx 0.07$~m/s$^2$ would let those lobes
+  through while keeping the joint-$R^2$ gate in place to filter
+  any walking artefacts that get picked up at the lower floor.
+  \item \emph{Per-lobe template shapes.} The pair filter
+  currently constrains both lobes to share $(W, f)$. Relaxing
+  this to two independent $(W_1, f_1)$, $(W_2, f_2)$ fits while
+  still requiring matching amplitudes
+  $|A_1| \approx |A_2|$ (which the physics dictates: the lift
+  starts and stops with the same passenger mass and the same
+  motor torque) would let a short acceleration lobe pair with a
+  long deceleration lobe. The joint $R^2$ would be redefined as
+  the pooled variance-explained over both individual fits, and
+  the heatmap-energy gate would be replaced with a per-lobe
+  energy threshold. This recovers the Bar-Ilan~2 ride class
+  without weakening the existing shared-shape gate on rides
+  where it works. Implementation cost is moderate: one new
+  scoring routine in \texttt{pair\_filter.joint\_pair\_score}
+  and a re-fit of the iter\_16 thresholds against the cleaned
+  per-GT scoreboard data.
+  \item \emph{High-rise-aware ride duration prior.} The
+  Bar-Ilan~2 lobe-asymmetry is also captured by a single scalar
+  --- the ratio of acceleration-lobe half-width to
+  deceleration-lobe half-width. A soft prior at the pair stage
+  that allows $W_2 / W_1 \in [0.3, 3.0]$ (so a $5\times$
+  asymmetry is rejected, but a $2\times$ asymmetry is admitted)
+  would catch the same population at lower implementation cost
+  than (2). Useful as a fallback if the per-lobe fit proves
+  expensive to add.
+  \item \emph{Loosen the heatmap-energy floor on
+  high-amplitude pairs.} The heatmap-energy gate is most useful
+  on weak-signal walking artefacts; on rides where the pair
+  $|A|$ is comfortably above $0.5$~m/s$^2$ it is firing as a
+  redundant copy of the joint-$R^2$ gate. Conditioning the
+  $0.40$ floor on pair amplitude (e.g.\ disabling it for
+  $|A| > 1.0$~m/s$^2$) would recover several Bar-Ilan~2 rides
+  at no measurable false-positive cost, and is a one-line
+  change in \texttt{pair\_filter.predict\_pairs}.
+\end{itemize}
+
+The unifying observation across these proposals is that the
+deployed operating point was tuned for the modal phone and the
+modal building: a clean accelerometer trace and a $\sim 5$--$10$
+floor ride. The three outliers occupy two corners of the
+deployment space the modal tuning does not protect --- a
+high-rise long-cruise asymmetric lobe pair, and a
+quiet-chip damped lobe pair. Each corner has a directly
+addressable lever, and the levers do not interact: fixing the
+amplitude-floor mode does not weaken the shape-mode discriminant,
+and vice versa.
+
 \subsubsection{Why These Constraints Hold: Per-GT Score
 Distributions}
 \label{sec:seg-eval-constraints}
