@@ -26,6 +26,9 @@ import numpy as np
 from ..fit_elevator_parameters.common import (
     LobeFit, trapezoid_kernel,
 )
+from src.utils.trapezoid_fast import (
+    build_template_bank, gather_inner_at_peaks, score_pair_at_peaks,
+)
 
 
 def joint_pair_score(
@@ -137,6 +140,35 @@ def predict_pairs(state: dict, config) -> list[dict]:
     pos = [i for i in peaks if signs[i] > 0]
     neg = [i for i in peaks if signs[i] < 0]
 
+    # Vectorized matched-filter precompute. Build the template bank once
+    # for the signal's sample step, then batch-gather inner / power /
+    # validity at every candidate peak — score_pair_at_peaks then becomes
+    # a closed-form per-pair lookup instead of recomputing 30×16 templates
+    # per pair (the original joint_pair_score hot path).
+    fast_state = state.get("_fast_pair_state")
+    peaks_arr = np.asarray(peaks, dtype=np.int64)
+    if fast_state is None or fast_state.get("peaks_id") is not id(peaks):
+        dt = float(np.median(np.diff(t))) if t.size > 1 else 0.01
+        bank = build_template_bank(np.asarray(grid_w_s), np.asarray(grid_f), dt)
+        inner_pk, power_pk, valid_pk = gather_inner_at_peaks(
+            a_smooth, bank, peaks_arr,
+        )
+        # Index map peak_index_in_signal -> column in inner_pk arrays.
+        peak_to_col = {int(p): k for k, p in enumerate(peaks_arr)}
+        fast_state = {
+            "bank": bank, "inner_pk": inner_pk, "power_pk": power_pk,
+            "valid_pk": valid_pk, "peak_to_col": peak_to_col,
+            "peaks_id": id(peaks),
+        }
+        # Cache on state so :func:`diagnose_window` and other callers
+        # that reuse the same state dict don't pay the cost twice.
+        state["_fast_pair_state"] = fast_state
+    bank = fast_state["bank"]
+    inner_pk = fast_state["inner_pk"]
+    power_pk = fast_state["power_pk"]
+    valid_pk = fast_state["valid_pk"]
+    peak_to_col = fast_state["peak_to_col"]
+
     candidates: list[
         tuple[float, int, int, float, float, float, float, float, float, float]
     ] = []
@@ -147,10 +179,19 @@ def predict_pairs(state: dict, config) -> list[dict]:
         gap = t[i2] - t[i1]
         if gap < config.min_ride_s or gap > config.max_ride_s:
             return
-        res = joint_pair_score(a_smooth, t, i1, i2, s1, s2, grid_w_s, grid_f)
+        k1 = peak_to_col.get(int(i1))
+        k2 = peak_to_col.get(int(i2))
+        if k1 is None or k2 is None:
+            return
+        res = score_pair_at_peaks(
+            inner_pk, power_pk, valid_pk, bank.norm_t,
+            k1=k1, k2=k2, s1=s1, s2=s2,
+        )
         if res is None:
             return
-        score, W, f, A_abs, r2_1, r2_2, heatmap_energy = res
+        score, wi_star, fi_star, A_abs, r2_1, r2_2, heatmap_energy = res
+        W = float(bank.grid_W[wi_star])
+        f = float(bank.grid_F[fi_star])
         if score < config.joint_r2_thresh:
             return
         if A_abs < config.min_pair_abs_a:

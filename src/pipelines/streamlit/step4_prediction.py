@@ -49,6 +49,47 @@ def _slice_acc(acc: pd.DataFrame, t0_ms: float, t_lo: float, t_hi: float) -> pd.
     return acc.loc[mask].reset_index(drop=True)
 
 
+# Stationary windows around a ride are used by the prediction algorithms
+# to calibrate the phone's gravity vector before vertical projection. The
+# segmenter's output can be tight (hugging the pulse) or loose (GT-style),
+# so we always slice these from the *session-level* ACC stream rather than
+# the segment dataframe — and we clip by neighbour-segment boundaries so
+# back-to-back rides don't pollute each other's calibration window.
+PRE_POST_WINDOW_SEC = 5.0
+PRE_POST_MIN_SEC = 1.0
+
+
+def _slice_pre_post(
+    acc: pd.DataFrame, t0_ms: float,
+    seg_lo: float, seg_hi: float,
+    prev_hi: float | None, next_lo: float | None,
+    window_sec: float = PRE_POST_WINDOW_SEC,
+    min_sec: float = PRE_POST_MIN_SEC,
+) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+    """Cut ``window_sec`` of session ACC before ``seg_lo`` and after
+    ``seg_hi``, clipped not to overlap the neighbouring segments
+    (``prev_hi``, ``next_lo``). Returns ``(pre_df, post_df)``; either
+    side can be ``None`` if the available stationary window is shorter
+    than ``min_sec``.
+    """
+    pre_lo = max(seg_lo - window_sec, prev_hi if prev_hi is not None else seg_lo - window_sec)
+    pre_hi = seg_lo
+    post_lo = seg_hi
+    post_hi = min(seg_hi + window_sec, next_lo if next_lo is not None else seg_hi + window_sec)
+
+    pre_df: pd.DataFrame | None = None
+    if pre_hi - pre_lo >= min_sec:
+        pre_df = _slice_acc(acc, t0_ms, pre_lo, pre_hi)
+        if pre_df.empty:
+            pre_df = None
+    post_df: pd.DataFrame | None = None
+    if post_hi - post_lo >= min_sec:
+        post_df = _slice_acc(acc, t0_ms, post_lo, post_hi)
+        if post_df.empty:
+            post_df = None
+    return pre_df, post_df
+
+
 def _empty_pred_row(base: dict, reason: str) -> dict:
     return {**base,
         "delta_height_m": float("nan"),
@@ -70,10 +111,21 @@ def _run_predictions(
     predictors = _build_predictors()
     rows_by_algo: dict[str, list[dict]] = {aid: [] for aid in predictors}
 
-    for i, row in segments.iterrows():
+    # Pre-compute segment timing once so each ride can clip its pre/post
+    # window by the immediate neighbour boundaries (works for both loose
+    # GT-style intervals and tight matched-filter intervals).
+    seg_starts = segments["start_s"].astype(float).to_numpy()
+    seg_ends = segments["end_s"].astype(float).to_numpy()
+
+    for pos, (i, row) in enumerate(segments.iterrows()):
         t_lo = float(row["start_s"]); t_hi = float(row["end_s"])
         rt = str(row["type"]).lower()
         seg = _slice_acc(loaded.acc, t0_ms, t_lo, t_hi)
+        prev_hi = float(seg_ends[pos - 1]) if pos > 0 else None
+        next_lo = float(seg_starts[pos + 1]) if pos + 1 < len(seg_starts) else None
+        pre_df, post_df = _slice_pre_post(
+            loaded.acc, t0_ms, t_lo, t_hi, prev_hi, next_lo,
+        )
         base = {
             "segment":        int(i), "type": rt,
             "start_s":        t_lo, "end_s": t_hi,
@@ -85,7 +137,9 @@ def _run_predictions(
             continue
         for aid, predictor in predictors.items():
             try:
-                out = predictor.predict(seg, phone_model="")
+                out = predictor.predict(
+                    seg, phone_model="", pre=pre_df, post=post_df,
+                )
                 dh = float(out.height_diff)
                 ci = (float(out.ci_half_width)
                       if np.isfinite(out.ci_half_width) else float("nan"))

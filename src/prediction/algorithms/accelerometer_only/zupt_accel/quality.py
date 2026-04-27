@@ -104,6 +104,20 @@ def assess(
         pp_angle = float("inf")
     features["pre_post_angle_deg"] = pp_angle if np.isfinite(pp_angle) else -1.0
 
+    # When neither stationary window is usable (tight segmenter
+    # intervals or back-to-back rides), the estimator falls back to
+    # in-ride gravity. Mirror that check here so the quality gate
+    # certifies the same projection the estimator actually used. The
+    # in-ride estimate is accepted with a 2× stability cap because we
+    # are estimating on partially non-stationary samples.
+    ride_g, ride_mag, ride_stab = estimate_gravity_stationary(
+        ride_ax, ride_ay, ride_az, fs=fs, window_sec=grav_window_sec,
+    )
+    ride_ok = 8.0 < ride_mag < 12.0 and ride_stab < 2.0 * grav_stability_max
+    features["ride_g_mag"] = ride_mag
+    features["ride_stability"] = ride_stab
+    has_calibration = pre_ok or post_ok or ride_ok
+
     # --- During-ride gravity drift ---
     max_drift, drift_std = _ride_gravity_drift(ride_ax, ride_ay, ride_az, fs)
     features["max_gravity_drift_deg"] = max_drift
@@ -133,10 +147,13 @@ def assess(
     # Score (lower = better)
     # ============================================================
     score = 0.0
-    # Pre-ride gravity quality (the more trust we can put on projection,
-    # the better; if no gravity calibration is available at all, penalise)
+    # Pre-ride gravity quality. Tiered by what the estimator actually
+    # used: clean pre+post is the gold standard; one-sided is mid-tier;
+    # in-ride fallback gets a moderate penalty (still signed and axis-
+    # aware, just noisier on the gravity *direction*); magnitude is
+    # rejected outright below so the score branch never fires for it.
     if not pre_ok and not post_ok:
-        score += 3.5
+        score += 2.0 if has_calibration else 3.5
     elif not pre_ok:
         score += 1.2
     else:
@@ -161,7 +178,10 @@ def assess(
     # ============================================================
     # Rejection rules
     # ============================================================
-    if not pre_ok and not post_ok:
+    # Reject only when the estimator truly has no orientation reference
+    # (neither pre/post nor a usable in-ride estimate). Otherwise trust
+    # the projection with the score-side penalty applied above.
+    if not has_calibration:
         return ZuptQuality(False, "no_gravity_calibration", score, features)
 
     if np.isfinite(pp_angle) and pp_angle > grav_pre_post_angle_deg:

@@ -117,7 +117,26 @@ class TrapezoidAccelEstimator:
 
     def _vertical(self, inp: _SegInp) -> tuple[np.ndarray, str]:
         """Project 3-axis accel onto vertical using the best-available
-        gravity reference. Returns (a_vert_signed, method_used)."""
+        gravity reference. Returns (a_vert_signed, method_used).
+
+        Order of preference:
+          1. ``projected_pre_post`` — average of pre & post gravity vectors,
+             stability-weighted. Best when both stationary windows are clean.
+          2. ``projected_pre`` / ``projected_post`` — only one side usable.
+          3. ``projected_ride`` — neither pre nor post is stationary, so
+             estimate gravity from the ride itself. The
+             ``estimate_gravity_stationary`` helper takes per-window means
+             and then a per-axis median, which is robust to elevator-ride
+             content because a) the ride starts and ends at rest so the
+             vertical component time-averages near zero and b) the
+             phone-fixed gravity direction is constant across a single
+             ride. Validated only when |g| ∈ (8, 12) and stability is
+             below twice the configured cap (relaxed because we are
+             estimating on non-stationary samples).
+          4. ``magnitude`` — last-resort orientation-blind fallback. Only
+             used when in-ride estimation produces something that can't
+             plausibly be gravity.
+        """
         c = self.config
         pre_g, pre_mag, pre_s = estimate_gravity_stationary(
             inp.pre_ax, inp.pre_ay, inp.pre_az, fs=inp.fs,
@@ -137,6 +156,17 @@ class TrapezoidAccelEstimator:
             return vertical_accel_projected(inp.ax, inp.ay, inp.az, pre_g), "projected_pre"
         if post_ok:
             return vertical_accel_projected(inp.ax, inp.ay, inp.az, post_g), "projected_post"
+
+        # In-ride gravity: median of per-window means is robust to the
+        # bipolar pulse content. We accept it when the magnitude looks
+        # like Earth's gravity and stability is at most 2× the configured
+        # cap (we are estimating on partially non-stationary samples).
+        ride_g, ride_mag, ride_s = estimate_gravity_stationary(
+            inp.ax, inp.ay, inp.az, fs=inp.fs,
+            window_sec=c.grav_window_sec,
+        )
+        if 8.0 < ride_mag < 12.0 and ride_s < 2.0 * c.grav_stability_max:
+            return vertical_accel_projected(inp.ax, inp.ay, inp.az, ride_g), "projected_ride"
         return vertical_accel_magnitude(inp.ax, inp.ay, inp.az), "magnitude"
 
     # ------------------------------------------------------------------
@@ -388,6 +418,7 @@ class TrapezoidAccelEstimator:
             A_anchor_ratio=A_anchor_ratio,
             out_of_lobe_residual_frac=out_of_lobe_frac,
             cruise_v_cv=cruise_v_cv,
+            vert_method=vert_method,
             min_segment_samples=c.min_segment_samples,
             grav_window_sec=c.grav_window_sec,
             grav_stability_max=c.grav_stability_max,
