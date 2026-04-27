@@ -18,23 +18,28 @@ import pandas as pd
 import streamlit as st
 
 from src.data.loadFromDB import LoadedSignal, PhoneType, loadDataFromS3
-from src.prediction.algorithms import (
-    PREDICT_ALGORITHM_CONFIG, PredictAlgorithm, Predictor,
-)
 from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (
     detect as _detect,
 )
 from src.segmentation.algorithms.accelerometer_only.template_match.fit_elevator_parameters.common import (
     trapezoid_kernel,
 )
+from ui import api_client
 
-# Re-export detector internals — the figure builders in step3 / step5
-# need them, and importing through `common` keeps each step file from
-# duplicating the long module path.
-predict_intervals = _detect.predict_intervals
+# Display-only helpers that operate on the detector state dict (heatmap
+# rasters, signed-R² peak classification, simple local-maxima finder).
+# These are pure-numpy and do not run any detection — the UI is allowed
+# to call them client-side. The actual detection / prediction logic now
+# lives behind the HTTP API in ``api/``.
 heatmap_at = _detect.heatmap_at
 classify_peak = _detect.classify_peak
 find_local_maxima = _detect.find_local_maxima
+
+# Algorithm short ids accepted by /predict. Keep in sync with
+# ``api/main.py::_ACCEL_ALGO_MAP`` — the boutique UI labels them and
+# their colours below.
+ALGO_TRAP = "trap"
+ALGO_ZUPT = "zupt"
 
 
 # ---------------------------------------------------------------------------
@@ -49,14 +54,13 @@ SELECTED_COLOR = "#e67e22"
 # Accelerometer-only prediction algorithms run side-by-side on the Predict
 # step. The first entry is the "primary" — its rows feed the sidebar, the
 # single-Δh column, and the PDF report (so existing paths keep working).
-ACCEL_ALGOS: list[tuple[PredictAlgorithm, str, str, str]] = [
-    # (enum, short id, human label, colour)
-    (PredictAlgorithm.TRAPEZOID_ACCEL, "trap",
-     "Trapezoid pulse-pair",          "#1f6feb"),
-    (PredictAlgorithm.ZUPT_ACCEL,      "zupt",
-     "ZUPT (zero-velocity update)",   "#27ae60"),
+# Short ids must match those accepted by the API's /predict endpoint.
+ACCEL_ALGOS: list[tuple[str, str, str]] = [
+    # (short id, human label, colour)
+    (ALGO_TRAP, "Trapezoid pulse-pair",        "#1f6feb"),
+    (ALGO_ZUPT, "ZUPT (zero-velocity update)", "#27ae60"),
 ]
-PRIMARY_ALGO_ID = ACCEL_ALGOS[0][1]
+PRIMARY_ALGO_ID = ACCEL_ALGOS[0][0]
 
 # Peak-status palette — matches the editor's legend so the visuals the
 # user sees in the desktop tool and in the app are 1-to-1.

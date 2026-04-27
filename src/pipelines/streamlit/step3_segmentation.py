@@ -12,6 +12,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from ui import api_client
+
 from .common import (
     LoadedSignal,
     PEAK_STATUS_COLORS,
@@ -25,7 +27,6 @@ from .common import (
     goto,
     heatmap_at,
     peak_status_legend_html,
-    predict_intervals,
     render_segment_sidebar,
     render_trapezoid_params,
     trapezoid_kernel,
@@ -35,7 +36,14 @@ from .common import (
 
 def _run_detector(loaded: LoadedSignal) -> None:
     with st.spinner("Running trapezoid-template detector…"):
-        preds, state = predict_intervals(loaded.acc)
+        try:
+            preds, state, _t0_ms = api_client.segment(loaded.acc)
+        except Exception as e:  # noqa: BLE001 — surface the error to the user
+            st.error(
+                f"Segmentation API call failed ({type(e).__name__}: {e}). "
+                f"Is the API service reachable at {api_client.API_URL}?"
+            )
+            preds, state = [], None
     st.session_state["detector_state"] = state if state else None
     st.session_state["predictions"] = preds
     rows = [

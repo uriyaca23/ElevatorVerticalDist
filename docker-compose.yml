@@ -1,0 +1,51 @@
+# Local / single-host stack: API + Streamlit boutique UI.
+#
+# The two services are independent — the dev team can deploy ``api`` on
+# its own to a Kubernetes pod and build their app around it. The ``ui``
+# service is the reference Streamlit client and is optional in prod.
+#
+#     docker compose up --build
+#
+# Streamlit will be on http://localhost:8501, the API on
+# http://localhost:8000 (with auto-generated docs at /docs).
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    image: elevator-api:latest
+    container_name: elevator-api
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=2).status==200 else sys.exit(1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  ui:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+    image: elevator-ui:latest
+    container_name: elevator-ui
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      # Inside the docker network the API service is reachable by name.
+      API_URL: http://api:8000
+    ports:
+      - "8501:8501"
+    volumes:
+      # The default ``loadDataFromS3`` stub reads from
+      # src/data/structuredData/. The dataset is large (>1 GB) and not
+      # part of the image — mount it read-only from the host. Comment
+      # this out / replace with the real S3 backend once the function
+      # is rewritten.
+      - ./src/data/structuredData:/app/src/data/structuredData:ro
+    restart: unless-stopped

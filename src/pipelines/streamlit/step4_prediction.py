@@ -13,12 +13,12 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from ui import api_client
+
 from .common import (
     ACCEL_ALGOS,
     LoadedSignal,
-    PREDICT_ALGORITHM_CONFIG,
     PRIMARY_ALGO_ID,
-    Predictor,
     RIDE_COLORS,
     SELECTED_COLOR,
     STEP_REPORT,
@@ -31,129 +31,23 @@ from .common import (
 )
 
 
-def _build_predictors() -> dict[str, Predictor]:
-    """Build one Predictor per accelerometer-only algorithm in
-    ``ACCEL_ALGOS``. Keyed by the short id (e.g. ``"trap"``, ``"zupt"``).
-    """
-    out: dict[str, Predictor] = {}
-    for algo, algo_id, _label, _color in ACCEL_ALGOS:
-        out[algo_id] = Predictor(PREDICT_ALGORITHM_CONFIG(algorithm=algo))
-    return out
-
-
-def _slice_acc(acc: pd.DataFrame, t0_ms: float, t_lo: float, t_hi: float) -> pd.DataFrame:
-    ts = acc["timestamp_ms"].astype(float).to_numpy()
-    lo_ms = t0_ms + t_lo * 1000.0
-    hi_ms = t0_ms + t_hi * 1000.0
-    mask = (ts >= lo_ms) & (ts < hi_ms)
-    return acc.loc[mask].reset_index(drop=True)
-
-
-# Stationary windows around a ride are used by the prediction algorithms
-# to calibrate the phone's gravity vector before vertical projection. The
-# segmenter's output can be tight (hugging the pulse) or loose (GT-style),
-# so we always slice these from the *session-level* ACC stream rather than
-# the segment dataframe — and we clip by neighbour-segment boundaries so
-# back-to-back rides don't pollute each other's calibration window.
-PRE_POST_WINDOW_SEC = 5.0
-PRE_POST_MIN_SEC = 1.0
-
-
-def _slice_pre_post(
-    acc: pd.DataFrame, t0_ms: float,
-    seg_lo: float, seg_hi: float,
-    prev_hi: float | None, next_lo: float | None,
-    window_sec: float = PRE_POST_WINDOW_SEC,
-    min_sec: float = PRE_POST_MIN_SEC,
-) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
-    """Cut ``window_sec`` of session ACC before ``seg_lo`` and after
-    ``seg_hi``, clipped not to overlap the neighbouring segments
-    (``prev_hi``, ``next_lo``). Returns ``(pre_df, post_df)``; either
-    side can be ``None`` if the available stationary window is shorter
-    than ``min_sec``.
-    """
-    pre_lo = max(seg_lo - window_sec, prev_hi if prev_hi is not None else seg_lo - window_sec)
-    pre_hi = seg_lo
-    post_lo = seg_hi
-    post_hi = min(seg_hi + window_sec, next_lo if next_lo is not None else seg_hi + window_sec)
-
-    pre_df: pd.DataFrame | None = None
-    if pre_hi - pre_lo >= min_sec:
-        pre_df = _slice_acc(acc, t0_ms, pre_lo, pre_hi)
-        if pre_df.empty:
-            pre_df = None
-    post_df: pd.DataFrame | None = None
-    if post_hi - post_lo >= min_sec:
-        post_df = _slice_acc(acc, t0_ms, post_lo, post_hi)
-        if post_df.empty:
-            post_df = None
-    return pre_df, post_df
-
-
-def _empty_pred_row(base: dict, reason: str) -> dict:
-    return {**base,
-        "delta_height_m": float("nan"),
-        "abs_height_m":   float("nan"),
-        "accepted":       False,
-        "quality_score":  float("nan"),
-        "reject_reason":  reason,
-        "ci_half_width":  float("nan")}
-
-
 def _run_predictions(
     loaded: LoadedSignal, segments: pd.DataFrame,
 ) -> dict[str, list[dict]]:
-    """Run every accelerometer-only algorithm over the segment list and
+    """Run every accelerometer-only algorithm via the prediction API and
     return one row-list per algorithm, keyed by short id.
+
+    The /predict endpoint owns the per-segment slicing and the gravity
+    pre/post window logic — the UI just hands over the full session ACC
+    and the finalised segment list.
     """
-    state = st.session_state["detector_state"]
-    t0_ms = float(state["t0_ms"])
-    predictors = _build_predictors()
-    rows_by_algo: dict[str, list[dict]] = {aid: [] for aid in predictors}
-
-    # Pre-compute segment timing once so each ride can clip its pre/post
-    # window by the immediate neighbour boundaries (works for both loose
-    # GT-style intervals and tight matched-filter intervals).
-    seg_starts = segments["start_s"].astype(float).to_numpy()
-    seg_ends = segments["end_s"].astype(float).to_numpy()
-
-    for pos, (i, row) in enumerate(segments.iterrows()):
-        t_lo = float(row["start_s"]); t_hi = float(row["end_s"])
-        rt = str(row["type"]).lower()
-        seg = _slice_acc(loaded.acc, t0_ms, t_lo, t_hi)
-        prev_hi = float(seg_ends[pos - 1]) if pos > 0 else None
-        next_lo = float(seg_starts[pos + 1]) if pos + 1 < len(seg_starts) else None
-        pre_df, post_df = _slice_pre_post(
-            loaded.acc, t0_ms, t_lo, t_hi, prev_hi, next_lo,
-        )
-        base = {
-            "segment":        int(i), "type": rt,
-            "start_s":        t_lo, "end_s": t_hi,
-            "duration_s":     t_hi - t_lo,
-        }
-        if seg.empty:
-            for aid in predictors:
-                rows_by_algo[aid].append(_empty_pred_row(base, "empty_slice"))
-            continue
-        for aid, predictor in predictors.items():
-            try:
-                out = predictor.predict(
-                    seg, phone_model="", pre=pre_df, post=post_df,
-                )
-                dh = float(out.height_diff)
-                ci = (float(out.ci_half_width)
-                      if np.isfinite(out.ci_half_width) else float("nan"))
-                signed = abs(dh) if rt == "up" else -abs(dh)
-                rows_by_algo[aid].append({**base,
-                    "delta_height_m": signed,
-                    "abs_height_m":   abs(dh),
-                    "accepted":       bool(out.accepted),
-                    "quality_score":  float(out.quality_score),
-                    "reject_reason":  str(out.reject_reason or ""),
-                    "ci_half_width":  ci})
-            except Exception as e:
-                rows_by_algo[aid].append(
-                    _empty_pred_row(base, f"{type(e).__name__}: {e}"))
+    seg_dicts = [
+        {"type":    str(row["type"]).lower(),
+         "start_s": float(row["start_s"]),
+         "end_s":   float(row["end_s"])}
+        for _, row in segments.iterrows()
+    ]
+    rows_by_algo, _primary = api_client.predict(loaded.acc, seg_dicts)
     return rows_by_algo
 
 
@@ -203,12 +97,12 @@ def _prediction_bar_figure(
     legend stays meaningful.
     """
     fig = go.Figure()
-    primary_id = ACCEL_ALGOS[0][1]
+    primary_id = ACCEL_ALGOS[0][0]
     rows_template = rows_by_algo.get(primary_id, [])
     xs = [f"#{r['segment']}" for r in rows_template]
     seg_ids = [int(r["segment"]) for r in rows_template]
 
-    for _algo, algo_id, label, color in ACCEL_ALGOS:
+    for algo_id, label, color in ACCEL_ALGOS:
         rows = rows_by_algo.get(algo_id, [])
         if not rows:
             continue
@@ -254,7 +148,7 @@ def _build_comparison_table(rows_by_algo: dict[str, list[dict]]) -> pd.DataFrame
             "end_s":      float(base["end_s"]),
             "duration_s": float(base["duration_s"]),
         }
-        for _algo, algo_id, _label, _color in ACCEL_ALGOS:
+        for algo_id, _label, _color in ACCEL_ALGOS:
             rows_a = rows_by_algo.get(algo_id, [])
             r = rows_a[i] if i < len(rows_a) else None
             if r is None:
@@ -291,7 +185,7 @@ def render() -> None:
         f'<span style="display:inline-block;width:0.55rem;height:0.55rem;'
         f'border-radius:50%;background:{color};margin-right:0.35rem;'
         f'vertical-align:middle;"></span>{label}</span>'
-        for _algo, _aid, label, color in ACCEL_ALGOS
+        for _aid, label, color in ACCEL_ALGOS
     )
     st.markdown(
         '<div class="hero">'
@@ -344,7 +238,7 @@ def render() -> None:
     # Per-algorithm metrics for the selected segment.
     st.markdown(f"#### Detail — segment #{selected}")
     metric_cols = st.columns(len(ACCEL_ALGOS))
-    for col, (_algo, algo_id, label, color) in zip(metric_cols, ACCEL_ALGOS):
+    for col, (algo_id, label, color) in zip(metric_cols, ACCEL_ALGOS):
         rows_a = rows_by_algo.get(algo_id, [])
         sel = next((r for r in rows_a if int(r["segment"]) == selected), None)
         with col:
@@ -401,7 +295,7 @@ def render() -> None:
             "end_s":      st.column_config.NumberColumn("end (s)",      format="%.1f"),
             "duration_s": st.column_config.NumberColumn("duration (s)", format="%.1f"),
         }
-        for _algo, algo_id, label, _color in ACCEL_ALGOS:
+        for algo_id, label, _color in ACCEL_ALGOS:
             cfg[f"{algo_id}_dh"]      = st.column_config.NumberColumn(
                 f"{label} · Δh (m)",        format="%+.2f")
             cfg[f"{algo_id}_ci"]      = st.column_config.NumberColumn(

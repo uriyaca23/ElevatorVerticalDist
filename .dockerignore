@@ -1,0 +1,43 @@
+# Keep the docker build context small — without these excludes, the 1.4 GB
+# of structuredData/ would be copied into every build context and the
+# multi-GB venv/ would explode image sizes.
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Virtualenvs
+venv/
+venv-old-apple-py39/
+.venv/
+
+# Datasets — UI mounts these as a volume instead.
+src/data/structuredData/
+src/data/rawData/
+src/data/gramushka/
+
+# Generated reports / temporary output
+elevator_reports/
+docs/latex/main.pdf
+docs/latex/*.aux
+docs/latex/*.log
+docs/latex/*.out
+mistake/
+tmp_boutique_capture/
+
+# Editor / OS junk
+.DS_Store
+.idea/
+.vscode/
+.claude/
+
+# Git
+.git/
+.gitignore
+
+# Existing docker stack itself doesn't need to be in build contexts
+docker-compose.yml
+DOCKER.md
