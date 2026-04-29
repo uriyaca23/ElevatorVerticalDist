@@ -56,6 +56,7 @@ from .parsing import (
     _parse_metadata_file,
     _parse_sensor_log,
 )
+from .resampling import prepare_sensors_uniform_50hz
 
 
 # --------------------------------------------------------------------------
@@ -183,6 +184,11 @@ def getExperimentRawParsed(
     else:
         _shift_timestamps_inplace(frames, offset_ms)
 
+    # Algorithms downstream assume a uniform 50 Hz grid with no >1 s holes.
+    # Apply gap-split + linear-interp resample now, before GT derivation, so
+    # the cached CSVs and any caller of getExperimentRawParsed both see the
+    # same 50 Hz contract.
+    frames = prepare_sensors_uniform_50hz(frames)
     return frames
 
 
@@ -616,6 +622,11 @@ def _load_structured_triplet(
         if stem not in SENSOR_COLUMNS:
             continue
         data[stem] = pd.read_csv(csv_path)
+    # Older caches were written before the loader-side 50 Hz resampler. The
+    # call below is a no-op (returns the input identity) when frames are
+    # already uniform at 50 Hz (the common case for newly-built caches), so
+    # this only does real work the first time a legacy cache is opened.
+    data = prepare_sensors_uniform_50hz(data)
 
     gt = pd.read_csv(out_dir / GT_CSV)
     # Backfill the description column if loading an older gt.csv that predates it.
