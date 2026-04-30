@@ -23,6 +23,8 @@ Thumbs.db
 *.synctex.gz
 *.fdb_latexmk
 *.fls
+*.nav
+*.snm
 
 # Heavy raw media (kept locally, not pushed)
 src/data/rawData/**/*.mp4
