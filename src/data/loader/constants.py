@@ -72,13 +72,21 @@ SENSOR_COLUMNS: dict[str, list[str]] = {
 METADATA_COLUMNS = [
     "exp_name", "experimenter", "phone", "location",
     "description", "date", "time", "experiment_type",
-    "temperature_c", "start_floor",
+    "temperature_c", "start_floor", "source",
 ]
 
 # Allowed values for the metadata `experiment_type` column.
 EXPERIMENT_TYPE_TEST = "test"
 EXPERIMENT_TYPE_TRAIN = "train"
 EXPERIMENT_TYPES = (EXPERIMENT_TYPE_TEST, EXPERIMENT_TYPE_TRAIN)
+
+# Allowed values for the metadata `source` column. `experiment` is the
+# default for everything that came from the team's controlled recordings;
+# `ido` and `realWorld` flag external traces.
+SOURCE_EXPERIMENT = "experiment"
+SOURCE_IDO = "ido"
+SOURCE_REAL_WORLD = "realWorld"
+VALID_SOURCES = (SOURCE_EXPERIMENT, SOURCE_IDO, SOURCE_REAL_WORLD)
 BAROMOSHKA_COLUMNS = ["floor", "height"]
 GT_COLUMNS = [
     "start_ms", "end_ms", "type", "description",

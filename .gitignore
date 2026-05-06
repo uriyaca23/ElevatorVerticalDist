@@ -12,6 +12,9 @@ desktop.ini
 Thumbs.db
 .claude/
 
+# Local snapshot of uncommitted files (copyUncommitedFileToChangeFolder skill)
+change/
+
 # Office temp files
 ~$*.docx
 

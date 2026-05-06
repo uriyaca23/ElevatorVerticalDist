@@ -46,6 +46,7 @@ from .constants import (
     METADATA_CSV,
     METADATA_FILENAME,
     RAW_DATA_ROOT,
+    SOURCE_EXPERIMENT,
     STRUCTURED_DATA_DIR,
     STRUCTURED_INDEX_CSV,
 )
@@ -86,6 +87,35 @@ def classify_experiment_type(exp_name: str) -> str:
     `list_experiments` / metadata stays consistent across reruns.
     """
     return EXPERIMENT_TYPE_TEST if "beityitzchaki" in exp_name.lower() else EXPERIMENT_TYPE_TRAIN
+
+
+def list_structured_experiments(
+    structured_root: Path | str = STRUCTURED_DATA_DIR,
+) -> list[str]:
+    """Return names of experiments that already live under
+    ``structuredData/data/<name>/``.
+
+    Distinct from :func:`list_experiments`, which scans ``rawData/`` for
+    folders that hold a raw sensorLog. An experiment that was materialised
+    directly into ``structuredData/`` (e.g. via the GT-editor S3 ingest)
+    won't appear in ``list_experiments`` because it has no raw log.
+    """
+    root = Path(structured_root)
+    if not root.is_dir():
+        return []
+    out: list[str] = []
+    for p in sorted(root.iterdir()):
+        if not p.is_dir():
+            continue
+        # Mirror the rawData filter: only count folders that look like a
+        # real experiment. Stray dirs (e.g. `__pycache__`, accidental
+        # `--help` from a CLI typo) lack any of the canonical files.
+        if not ((p / "ACC.csv").exists()
+                or (p / "metadata.csv").exists()
+                or (p / "gt.csv").exists()):
+            continue
+        out.append(p.name)
+    return out
 
 
 def list_experiments(
@@ -532,6 +562,7 @@ def _build_metadata_row(
         "experiment_type": classify_experiment_type(exp_name),
         "temperature_c":   _parse_temperature_c(raw_meta.get("Temperature", "")),
         "start_floor":     "",
+        "source":          SOURCE_EXPERIMENT,
     }
 
 
@@ -658,8 +689,17 @@ def rebuild_metadata_index(structured_root: Path | str = STRUCTURED_DATA_DIR) ->
                 row = {c: ("" if pd.isna(v) else str(v))
                        for c, v in df.iloc[0].to_dict().items()}
                 exp_name = row.get("exp_name") or exp_dir.name
+                needs_rewrite = False
                 if not row.get("experiment_type"):
                     row["experiment_type"] = classify_experiment_type(exp_name)
+                    needs_rewrite = True
+                # Default `source` to "experiment" for any pre-existing row
+                # that predates the column. New rows written via
+                # saveExperimentData / _build_metadata_row already set it.
+                if not row.get("source"):
+                    row["source"] = SOURCE_EXPERIMENT
+                    needs_rewrite = True
+                if needs_rewrite:
                     pd.DataFrame([row], columns=METADATA_COLUMNS).to_csv(mpath, index=False)
                 rows.append(row)
             except Exception as e:

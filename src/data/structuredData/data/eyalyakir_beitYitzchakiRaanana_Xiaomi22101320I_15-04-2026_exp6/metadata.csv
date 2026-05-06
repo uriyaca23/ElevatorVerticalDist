@@ -1,2 +1,2 @@
-exp_name,experimenter,phone,location,description,date,time,experiment_type,temperature_c,start_floor
-eyalyakir_beitYitzchakiRaanana_Xiaomi22101320I_15-04-2026_exp6,Eyal Yakir,Xiaomi 22101320I,בניין B בית יצחקי רעננה,"בניין B בית יצחקי רעננה. מעלית שדומה לבניין מגורים, ניתן ללחוץ על הרבה כפתורים, יחסית איטית וחלשה",15.4.2026,15:06,test,30,Ground Floor
+exp_name,experimenter,phone,location,description,date,time,experiment_type,temperature_c,start_floor,source
+eyalyakir_beitYitzchakiRaanana_Xiaomi22101320I_15-04-2026_exp6,Eyal Yakir,Xiaomi 22101320I,בניין B בית יצחקי רעננה,"בניין B בית יצחקי רעננה. מעלית שדומה לבניין מגורים, ניתן ללחוץ על הרבה כפתורים, יחסית איטית וחלשה",15.4.2026,15:06,test,30,Ground Floor,experiment

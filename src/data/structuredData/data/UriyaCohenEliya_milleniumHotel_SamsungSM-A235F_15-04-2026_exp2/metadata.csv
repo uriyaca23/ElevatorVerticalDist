@@ -1,2 +1,2 @@
-exp_name,experimenter,phone,location,description,date,time,experiment_type,temperature_c,start_floor
-UriyaCohenEliya_milleniumHotel_SamsungSM-A235F_15-04-2026_exp2,Uriya Cohen-Eliya,Samsung SM-A235F,מלון פרמיה מלניום,רק בבניין בלי מדרגות מגוון קומות ואוטיזם במעלית,15.4.2026,13:21,train,30,Floor 12
+exp_name,experimenter,phone,location,description,date,time,experiment_type,temperature_c,start_floor,source
+UriyaCohenEliya_milleniumHotel_SamsungSM-A235F_15-04-2026_exp2,Uriya Cohen-Eliya,Samsung SM-A235F,מלון פרמיה מלניום,רק בבניין בלי מדרגות מגוון קומות ואוטיזם במעלית,15.4.2026,13:21,train,30,Floor 12,experiment

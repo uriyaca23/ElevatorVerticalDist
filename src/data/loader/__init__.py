@@ -45,9 +45,13 @@ from .constants import (
     METADATA_FILENAME,
     RAW_DATA_ROOT,
     SENSOR_COLUMNS,
+    SOURCE_EXPERIMENT,
+    SOURCE_IDO,
+    SOURCE_REAL_WORLD,
     STRUCTURED_DATA_DIR,
     STRUCTURED_INDEX_CSV,
     STRUCTURED_ROOT,
+    VALID_SOURCES,
 )
 from .legacy import (
     loadBasicData,
@@ -66,6 +70,7 @@ from .pipeline import (
     getExperimentData,
     getExperimentRawParsed,
     list_experiments,
+    list_structured_experiments,
     rebuild_metadata_index,
     saveExperimentData,
 )
@@ -92,6 +97,10 @@ __all__ = [
     "EXPERIMENT_TYPE_TEST",
     "EXPERIMENT_TYPE_TRAIN",
     "EXPERIMENT_TYPES",
+    "SOURCE_EXPERIMENT",
+    "SOURCE_IDO",
+    "SOURCE_REAL_WORLD",
+    "VALID_SOURCES",
     # Pipeline
     "ExperimentPipeline",
     "classify_experiment_type",
@@ -99,6 +108,7 @@ __all__ = [
     "getExperimentData",
     "saveExperimentData",
     "list_experiments",
+    "list_structured_experiments",
     "rebuild_metadata_index",
     # Legacy
     "loadBasicData",

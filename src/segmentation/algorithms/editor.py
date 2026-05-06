@@ -164,7 +164,21 @@ class PredictionEditor(tk.Tk):
             self.exp_var.set(preselect)
             self.after(50, self.load_experiment)
 
+        # Set the trees ↔ detail divider once the window has a real size,
+        # so the GT-rides table gets a usable share of vertical space even
+        # though the detail pane now hosts a tabbed notebook.
+        self.after(150, self._fit_right_pane_sash)
+
         self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+    def _fit_right_pane_sash(self) -> None:
+        try:
+            self.update_idletasks()
+            h = self._right_pane.winfo_height()
+            if h > 200:
+                self._right_pane.sashpos(0, int(h * 0.50))
+        except (tk.TclError, AttributeError):
+            pass
 
     # ---------- UI construction ----------
 
@@ -257,6 +271,7 @@ class PredictionEditor(tk.Tk):
         # --- Right: (predictions + GT) stacked over detail pane ---
         right_pane = ttk.Panedwindow(main, orient=tk.VERTICAL)
         main.add(right_pane, weight=2)
+        self._right_pane = right_pane
 
         # Trees frame with two treeviews stacked vertically.
         trees_frame = ttk.Frame(right_pane, padding=4)
@@ -330,9 +345,49 @@ class PredictionEditor(tk.Tk):
         ttk.Button(detail_header, text="▶ Predict all algorithms",
                    command=self._on_predict_clicked)\
             .pack(side=tk.LEFT, padx=(2, 0))
+        # Tabbed detail area: Segmentation (default — heatmaps, signal,
+        # signed-R²) and Prediction (per-algorithm CI, quality, trapezoid
+        # template, ZUPT position). verdict_text stays shared below.
+        self.detail_nb = ttk.Notebook(detail_frame)
+        self.detail_nb.pack(fill=tk.BOTH, expand=True)
+
+        seg_tab = ttk.Frame(self.detail_nb)
+        self.detail_nb.add(seg_tab, text="Segmentation")
         self.detail_fig = Figure(figsize=(6, 5))
-        self.detail_canvas = FigureCanvasTkAgg(self.detail_fig, master=detail_frame)
+        self.detail_canvas = FigureCanvasTkAgg(self.detail_fig, master=seg_tab)
         self.detail_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        pred_tab = ttk.Frame(self.detail_nb)
+        self.detail_nb.add(pred_tab, text="Prediction")
+        pred_split = ttk.Panedwindow(pred_tab, orient=tk.VERTICAL)
+        pred_split.pack(fill=tk.BOTH, expand=True)
+        pred_table_frame = ttk.Frame(pred_split, padding=2)
+        pred_split.add(pred_table_frame, weight=1)
+        self.pred_table = self._make_tree(
+            pred_table_frame,
+            columns=[
+                ("algo",    "algorithm",  170, tk.W),
+                ("dh",      "Δh (m)",      80, tk.E),
+                ("ci",      "CI ± (m)",    80, tk.E),
+                ("sigma",   "σ (m)",       70, tk.E),
+                ("q",       "q",           60, tk.E),
+                ("verdict", "verdict",     90, tk.W),
+                ("reason",  "reason",     220, tk.W),
+            ],
+            on_select=lambda _e: None,
+        )
+        self.pred_table.configure(height=4)
+        self.pred_table.tag_configure("ok",     foreground="#1e7a3a")
+        self.pred_table.tag_configure("reject", foreground="#a04000")
+        self.pred_table.tag_configure("error",  foreground="#7f0000")
+        self.pred_table.tag_configure("gt",     foreground="#555")
+
+        pred_canvas_frame = ttk.Frame(pred_split, padding=2)
+        pred_split.add(pred_canvas_frame, weight=3)
+        self.pred_fig = Figure(figsize=(6, 7))
+        self.pred_canvas = FigureCanvasTkAgg(self.pred_fig, master=pred_canvas_frame)
+        self.pred_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
         self.verdict_text = tk.Text(
             detail_frame, height=7, wrap="word", font=("Menlo", 9),
             background="#fafafa", foreground="#222", borderwidth=1, relief="solid",
@@ -340,6 +395,7 @@ class PredictionEditor(tk.Tk):
         self.verdict_text.pack(fill=tk.X, pady=(6, 0))
         self.verdict_text.configure(state="disabled")
         self._detail_placeholder()
+        self._pred_placeholder()
 
     def _make_tree(self, parent, columns, on_select):
         inner = ttk.Frame(parent)
@@ -687,6 +743,7 @@ class PredictionEditor(tk.Tk):
                     "accepted": bool(out.accepted),
                     "reason":   str(out.reject_reason),
                     "q":        float(out.quality_score),
+                    "meta":     dict(out.meta) if out.meta else {},
                 }
             except Exception as exc:
                 results[algo.value] = {
@@ -753,7 +810,8 @@ class PredictionEditor(tk.Tk):
 
         Runs every :class:`PredictAlgorithm` on the currently-selected
         prediction or GT interval, appends the results + GT Δh to the
-        verdict text, and overlays a summary on the detail signal panel.
+        verdict text, overlays a summary on the segmentation signal panel,
+        renders the per-algorithm Prediction tab, and auto-switches to it.
         """
         if self.sensors is None:
             self.status_var.set("Load an experiment first.")
@@ -775,7 +833,238 @@ class PredictionEditor(tk.Tk):
         combined = (current + "\n\n" + summary) if current else summary
         self._set_verdict(combined)
         self._annotate_detail_with_predictions(summary)
+        self._render_prediction_tab(results, label)
+        try:
+            self.detail_nb.select(1)  # switch to Prediction tab
+        except tk.TclError:
+            pass
         self.status_var.set(f"Predicted Δh for {label}.")
+
+    # ---------- Prediction tab rendering ----------
+
+    def _pred_placeholder(
+        self,
+        msg: str = "Click ▶ Predict all algorithms to populate.",
+    ) -> None:
+        if hasattr(self, "pred_table"):
+            for iid in self.pred_table.get_children():
+                self.pred_table.delete(iid)
+        self.pred_fig.clear()
+        ax = self.pred_fig.add_subplot(111)
+        ax.text(0.5, 0.5, msg, transform=ax.transAxes,
+                ha="center", va="center", fontsize=11, color="#666",
+                style="italic")
+        ax.set_axis_off()
+        self.pred_canvas.draw_idle()
+
+    def _render_prediction_tab(self, results: dict, label: str) -> None:
+        """Populate the Prediction tab table + 2-panel figure.
+
+        All scalar metrics (Δh, CI, σ, q, verdict, reason) live in the
+        table. The figure is reserved for the two visualisations that
+        actually need a plot: the trapezoid template overlay and the
+        ZUPT integrated position trace.
+        """
+        self._populate_pred_table(results, label)
+
+        self.pred_fig.clear()
+        gs = self.pred_fig.add_gridspec(
+            2, 1,
+            height_ratios=[2.0, 1.3],
+            hspace=0.55,
+            left=0.12, right=0.97, top=0.94, bottom=0.09,
+        )
+        ax_trap = self.pred_fig.add_subplot(gs[0, 0])
+        ax_zupt = self.pred_fig.add_subplot(gs[1, 0])
+
+        self._render_pred_trapezoid(ax_trap, results)
+        self._render_pred_zupt(ax_zupt, results)
+
+        self.pred_canvas.draw_idle()
+
+    def _populate_pred_table(self, results: dict, label: str) -> None:
+        for iid in self.pred_table.get_children():
+            self.pred_table.delete(iid)
+
+        def _fmt_float(v: float, fmt: str) -> str:
+            if not math.isfinite(v):
+                return "—"
+            return format(v, fmt)
+
+        for algo in PredictAlgorithm:
+            row = results.get(algo.value, {})
+            if "error" in row:
+                self.pred_table.insert(
+                    "", "end", iid=algo.value,
+                    values=(algo.value, "—", "—", "—", "—",
+                            "ERROR", str(row["error"])[:240]),
+                    tags=("error",),
+                )
+                continue
+            ci_str = (
+                f"±{row['ci']:.2f}" if math.isfinite(row["ci"]) else "±inf"
+            )
+            verdict = "OK" if row["accepted"] else "REJECT"
+            tag = "ok" if row["accepted"] else "reject"
+            self.pred_table.insert(
+                "", "end", iid=algo.value,
+                values=(
+                    algo.value,
+                    _fmt_float(row["dh"], "+.2f"),
+                    ci_str,
+                    _fmt_float(row["sigma"], ".2f"),
+                    _fmt_float(row["q"], ".2f"),
+                    verdict,
+                    (row["reason"] or "")[:240],
+                ),
+                tags=(tag,),
+            )
+
+        gt_dh = results.get("gt_dh")
+        gt_str = "—" if gt_dh is None else f"{gt_dh:+.2f}"
+        gt_reason = (
+            f"PRS-derived Δh for {label}" if gt_dh is not None
+            else "no PRS data"
+        )
+        self.pred_table.insert(
+            "", "end", iid="gt_dh",
+            values=("GT (PRS Δh)", gt_str, "—", "—", "—", "—", gt_reason),
+            tags=("gt",),
+        )
+
+    # Algorithm draw order kept consistent across all panels.
+    _PRED_ALGO_ORDER = (
+        PredictAlgorithm.BAROMETER_HEIGHT_DIFF,
+        PredictAlgorithm.ZUPT_ACCEL,
+        PredictAlgorithm.TRAPEZOID_ACCEL,
+    )
+    _PRED_ALGO_COLORS = {
+        PredictAlgorithm.BAROMETER_HEIGHT_DIFF: "#2980b9",
+        PredictAlgorithm.ZUPT_ACCEL:            "#27ae60",
+        PredictAlgorithm.TRAPEZOID_ACCEL:       "#c0392b",
+    }
+
+    def _render_pred_trapezoid(self, ax, results: dict) -> None:
+        """Plot the fitted trapezoid template overlaid on the smoothed
+        accel signal, with the fitted parameters annotated.
+        """
+        ax.set_title("Trapezoid fit on accelerometer signal",
+                     fontsize=9, loc="left")
+        ax.grid(True, alpha=0.25)
+        ax.set_xlabel("t (s, ride-local)", fontsize=8)
+        ax.set_ylabel("a (m/s²)", fontsize=8)
+
+        row = results.get(PredictAlgorithm.TRAPEZOID_ACCEL.value, {})
+        if "error" in row:
+            ax.text(0.5, 0.5, f"trapezoid_accel error: {row['error']}",
+                    transform=ax.transAxes, ha="center", va="center",
+                    fontsize=9, color="#7f0000", style="italic")
+            return
+        meta = row.get("meta") or {}
+        t_sec = meta.get("t_sec")
+        a_smooth = meta.get("a_smooth")
+        a_template = meta.get("a_template")
+        params = meta.get("params") or {}
+
+        if t_sec is None or a_smooth is None or a_template is None:
+            ax.text(0.5, 0.5,
+                    "no trapezoid fit (algorithm did not return template)",
+                    transform=ax.transAxes, ha="center", va="center",
+                    fontsize=9, color="#888", style="italic")
+            return
+
+        t_arr = np.asarray(t_sec, dtype=float)
+        a_smooth_arr = np.asarray(a_smooth, dtype=float)
+        a_tpl_arr = np.asarray(a_template, dtype=float)
+        ax.plot(t_arr, a_smooth_arr, color="#2c3e50", lw=0.9,
+                label="a_smooth")
+        ax.plot(t_arr, a_tpl_arr, color="#c0392b", lw=1.6, alpha=0.9,
+                label="trapezoid template")
+        ax.axhline(0.0, color="gray", lw=0.4, ls="--", alpha=0.5)
+
+        t_c1 = params.get("t_c1")
+        t_c2 = params.get("t_c2")
+        if t_c1 is not None:
+            ax.axvline(float(t_c1), color="#c0392b", lw=0.6, ls=":",
+                       alpha=0.7)
+        if t_c2 is not None:
+            ax.axvline(float(t_c2), color="#c0392b", lw=0.6, ls=":",
+                       alpha=0.7)
+
+        if params:
+            sign = int(params.get("sign", 0))
+            txt = (
+                f"A_used={params.get('A_used', float('nan')):.2f} m/s²  "
+                f"W={params.get('W', float('nan')):.2f}s  "
+                f"f={params.get('f', float('nan')):.2f}  "
+                f"sign={sign:+d}\n"
+                f"t_c1={params.get('t_c1', float('nan')):.2f}s  "
+                f"t_c2={params.get('t_c2', float('nan')):.2f}s  "
+                f"joint_R²={params.get('joint_r2', float('nan')):.3f}  "
+                f"v_peak={params.get('v_peak_measured', float('nan')):+.2f}m/s"
+            )
+            ax.text(
+                0.01, 0.98, txt, transform=ax.transAxes,
+                ha="left", va="top", fontsize=7, family="monospace",
+                bbox=dict(facecolor="#ffffff", alpha=0.85,
+                          edgecolor="#888", boxstyle="round,pad=0.3"),
+                zorder=20,
+            )
+        ax.legend(fontsize=7, loc="lower right", framealpha=0.85)
+
+    def _render_pred_zupt(self, ax, results: dict) -> None:
+        """ZUPT integrated position curve with motion-window shading."""
+        ax.set_title("ZUPT integrated position", fontsize=9, loc="left")
+        ax.grid(True, alpha=0.25)
+        ax.set_xlabel("sample index", fontsize=8)
+        ax.set_ylabel("pos (m)", fontsize=8)
+
+        row = results.get(PredictAlgorithm.ZUPT_ACCEL.value, {})
+        if "error" in row:
+            ax.text(0.5, 0.5, f"zupt_accel error: {row['error']}",
+                    transform=ax.transAxes, ha="center", va="center",
+                    fontsize=9, color="#7f0000", style="italic")
+            return
+        meta = row.get("meta") or {}
+        pos = meta.get("pos_curve")
+        if pos is None:
+            ax.text(0.5, 0.5,
+                    "no ZUPT trajectory (algorithm did not return pos_curve)",
+                    transform=ax.transAxes, ha="center", va="center",
+                    fontsize=9, color="#888", style="italic")
+            return
+        pos_arr = np.asarray(pos, dtype=float)
+        idx = np.arange(pos_arr.size)
+        ax.plot(idx, pos_arr, color="#27ae60", lw=1.1, label="pos(t)")
+
+        start = meta.get("start_idx")
+        end = meta.get("end_idx")
+        if start is not None and end is not None and end > start:
+            ax.axvspan(int(start), int(end), color="#27ae60", alpha=0.15,
+                       label="motion window")
+        ax.axhline(0.0, color="gray", lw=0.4, ls="--", alpha=0.5)
+
+        n_active = meta.get("n_active")
+        method = meta.get("method", "")
+        active_frac = meta.get("active_fraction")
+        info_bits = []
+        if math.isfinite(row.get("dh", float("nan"))):
+            info_bits.append(f"final Δh={row['dh']:+.2f} m")
+        if n_active is not None:
+            info_bits.append(f"n_active={int(n_active)}")
+        if active_frac is not None:
+            info_bits.append(f"active_frac={float(active_frac):.2f}")
+        if method:
+            info_bits.append(f"method={method}")
+        if info_bits:
+            ax.text(
+                0.01, 0.98, "  ".join(info_bits), transform=ax.transAxes,
+                ha="left", va="top", fontsize=7, family="monospace",
+                bbox=dict(facecolor="#ffffff", alpha=0.85,
+                          edgecolor="#888", boxstyle="round,pad=0.3"),
+                zorder=20,
+            )
+        ax.legend(fontsize=7, loc="lower right", framealpha=0.85)
 
     # ---------- Detail window pad ----------
 

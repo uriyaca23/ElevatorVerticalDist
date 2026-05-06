@@ -92,6 +92,14 @@ HEB = {
     "duration":       "משך",
     "page":           "עמוד",
     "of":             "מתוך",
+    "trap_fit_heading":  "התאמת טרפז לאות התאוצה",
+    "zupt_pos_heading":  "מסלול אינטגרציה (ZUPT) — מיקום משולב",
+    "no_trap_fit":       "אין התאמת טרפז זמינה למקטע זה",
+    "no_zupt_curve":     "אין מסלול ZUPT זמין למקטע זה",
+    "per_algo_heading":  "מדדים לכל אלגוריתם",
+    "col_algo":          "אלגוריתם",
+    "trap_label":        "טרפז (זוג פולסים)",
+    "zupt_label":        "ZUPT (אינטגרציה כפולה)",
     "how_to_read":    "איך לקרוא את הדוח",
     "how_to_read_body": (
         "כל מקטע נסיעה הותאם בפרופיל תנועה מסוג S (S-curve) "
@@ -414,6 +422,128 @@ def _build_segment_page_pngs(
     plt.close(fig2)
 
     return buf1.getvalue(), buf2.getvalue()
+
+
+def _build_trap_fit_png(meta: dict) -> bytes:
+    """PNG of the fitted trapezoid template overlaid on the smoothed accel
+    signal (matching editor.py's Prediction-tab top panel).
+    """
+    if not meta:
+        return b""
+    t_sec = meta.get("t_sec")
+    a_smooth = meta.get("a_smooth")
+    a_template = meta.get("a_template")
+    if t_sec is None or a_smooth is None or a_template is None:
+        return b""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception:
+        return b""
+    t = np.asarray(t_sec, dtype=float)
+    s = np.asarray(a_smooth, dtype=float)
+    tpl = np.asarray(a_template, dtype=float)
+    if t.size == 0:
+        return b""
+
+    fig, ax = plt.subplots(figsize=(7.6, 2.7), dpi=180)
+    fig.patch.set_facecolor("white")
+    ax.plot(t, s, color="#2c3e50", lw=0.9, label="a_smooth")
+    ax.plot(t, tpl, color="#c0392b", lw=1.6, alpha=0.9,
+            label="trapezoid template")
+    ax.axhline(0.0, color="#888", lw=0.4, ls="--", alpha=0.6)
+
+    params = meta.get("params") or {}
+    for key in ("t_c1", "t_c2"):
+        v = params.get(key)
+        if v is not None and np.isfinite(v):
+            ax.axvline(float(v), color="#c0392b", lw=0.6, ls=":", alpha=0.7)
+    if params:
+        sign = int(params.get("sign", 0))
+        annot = (
+            f"A_used={params.get('A_used', float('nan')):.2f} m/s²  "
+            f"W={params.get('W', float('nan')):.2f}s  "
+            f"f={params.get('f', float('nan')):.2f}  "
+            f"sign={sign:+d}\n"
+            f"t_c1={params.get('t_c1', float('nan')):.2f}s  "
+            f"t_c2={params.get('t_c2', float('nan')):.2f}s  "
+            f"R²={params.get('joint_r2', float('nan')):.3f}  "
+            f"v_peak={params.get('v_peak_measured', float('nan')):+.2f} m/s"
+        )
+        ax.text(
+            0.01, 0.98, annot, transform=ax.transAxes,
+            ha="left", va="top", fontsize=7, family="monospace",
+            bbox=dict(facecolor="#ffffff", alpha=0.85,
+                      edgecolor="#888", boxstyle="round,pad=0.3"),
+            zorder=20,
+        )
+    ax.set_xlabel("t (s, ride-local)"); ax.set_ylabel("a (m/s²)")
+    ax.legend(loc="lower right", fontsize=7, frameon=False, ncol=2)
+    _style_axes(ax)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=180, facecolor="white")
+    plt.close(fig)
+    return buf.getvalue()
+
+
+def _build_zupt_pos_png(meta: dict) -> bytes:
+    """PNG of the ZUPT integrated position curve with the motion window
+    shaded (matching editor.py's Prediction-tab bottom panel).
+    """
+    if not meta:
+        return b""
+    pos = meta.get("pos_curve")
+    if pos is None:
+        return b""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception:
+        return b""
+    pos_arr = np.asarray(pos, dtype=float)
+    if pos_arr.size == 0:
+        return b""
+
+    fig, ax = plt.subplots(figsize=(7.6, 2.4), dpi=180)
+    fig.patch.set_facecolor("white")
+    idx = np.arange(pos_arr.size)
+    ax.plot(idx, pos_arr, color="#27ae60", lw=1.1, label="pos(t)")
+    start = meta.get("start_idx"); end = meta.get("end_idx")
+    if (start is not None and end is not None
+            and np.isfinite(start) and np.isfinite(end)
+            and int(end) > int(start)):
+        ax.axvspan(int(start), int(end), color="#27ae60", alpha=0.15,
+                   label="motion window")
+    ax.axhline(0.0, color="#888", lw=0.4, ls="--", alpha=0.6)
+    info_bits: list[str] = []
+    n_active = meta.get("n_active")
+    active_frac = meta.get("active_fraction")
+    method = meta.get("method", "")
+    if n_active is not None:
+        info_bits.append(f"n_active={int(n_active)}")
+    if active_frac is not None and np.isfinite(active_frac):
+        info_bits.append(f"active_frac={float(active_frac):.2f}")
+    if method:
+        info_bits.append(f"method={method}")
+    if info_bits:
+        ax.text(
+            0.01, 0.98, "  ".join(info_bits), transform=ax.transAxes,
+            ha="left", va="top", fontsize=7, family="monospace",
+            bbox=dict(facecolor="#ffffff", alpha=0.85,
+                      edgecolor="#888", boxstyle="round,pad=0.3"),
+            zorder=20,
+        )
+    ax.set_xlabel("sample index"); ax.set_ylabel("pos (m)")
+    ax.legend(loc="lower right", fontsize=7, frameon=False, ncol=2)
+    _style_axes(ax)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=180, facecolor="white")
+    plt.close(fig)
+    return buf.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -811,6 +941,76 @@ def _segment_metric_cards(r: dict, font: str, bold_font: str,
     return outer
 
 
+def _per_algo_metrics_table(rows_for_seg: list[tuple[str, dict | None]],
+                            font: str, bold_font: str, width_cm: float):
+    """Per-algorithm Δh / CI / quality / accepted table for one segment.
+
+    Argument is a list of ``(label, row | None)`` pairs in display order
+    (typically trap then zupt). ``None`` means the algorithm did not
+    return a row for this segment.
+    """
+    from reportlab.lib import colors as rl_colors
+    from reportlab.lib.units import cm
+    from reportlab.platypus import Table, TableStyle
+
+    header = [HEB["col_accepted"], HEB["col_quality"], HEB["col_ci"],
+              HEB["col_dh"], HEB["col_algo"]]
+    data = [[_rtl(h) for h in header]]
+    accept_col_styles: list[tuple] = []
+    for ridx, (label, r) in enumerate(rows_for_seg, start=1):
+        if r is None:
+            data.append([
+                "—", "—", "—", "—", _rtl(label),
+            ])
+            continue
+        dh = r.get("delta_height_m", float("nan"))
+        ci = r.get("ci_half_width", float("nan"))
+        q = r.get("quality_score", float("nan"))
+        accepted = bool(r.get("accepted"))
+        yn = HEB["yes"] if accepted else HEB["no"]
+        data.append([
+            _rtl(yn),
+            f"{q:.2f}" if np.isfinite(q) else "—",
+            f"±{ci:.2f}" if np.isfinite(ci) else "—",
+            f"{dh:+.2f}" if np.isfinite(dh) else "—",
+            _rtl(label),
+        ])
+        accept_color = _OK_COLOR if accepted else _WARN_COLOR
+        accept_col_styles.append(("TEXTCOLOR", (0, ridx), (0, ridx),
+                                  rl_colors.HexColor(accept_color)))
+
+    n_cols = len(header)
+    label_w = 4.6 * cm
+    metric_w = ((width_cm * cm) - label_w) / (n_cols - 1)
+    col_widths = [metric_w] * (n_cols - 1) + [label_w]
+
+    tbl = Table(data, repeatRows=1, hAlign="RIGHT", colWidths=col_widths)
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND",   (0, 0), (-1, 0), rl_colors.HexColor(_PRIMARY)),
+        ("TEXTCOLOR",    (0, 0), (-1, 0), rl_colors.white),
+        ("FONTNAME",     (0, 0), (-1, 0), bold_font),
+        ("FONTSIZE",     (0, 0), (-1, 0), 9),
+        ("BOTTOMPADDING",(0, 0), (-1, 0), 6),
+        ("TOPPADDING",   (0, 0), (-1, 0), 6),
+        ("FONTNAME",     (0, 1), (-1, -1), font),
+        ("FONTNAME",     (-1, 1), (-1, -1), bold_font),
+        ("FONTSIZE",     (0, 1), (-1, -1), 9),
+        ("ALIGN",        (0, 0), (-1, -1), "CENTER"),
+        ("ALIGN",        (-1, 0), (-1, -1), "RIGHT"),
+        ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+            [rl_colors.white, rl_colors.HexColor(_BG_SOFT)]),
+        ("LINEBELOW",    (0, 0), (-1, 0), 1,
+                         rl_colors.HexColor(_ACCENT)),
+        ("INNERGRID",    (0, 1), (-1, -1), 0.25,
+                         rl_colors.HexColor(_BORDER_SOFT)),
+        ("BOX",          (0, 0), (-1, -1), 0.4,
+                         rl_colors.HexColor(_BORDER_SOFT)),
+        *accept_col_styles,
+    ]))
+    return tbl
+
+
 def _peak_legend(font: str, bold_font: str, width_cm: float):
     """Coloured-dot legend for peak status, laid out as a wide table."""
     from reportlab.lib import colors as rl_colors
@@ -904,6 +1104,7 @@ def _build_pdf(
     predictions: list[dict],
     segments: pd.DataFrame,
     rows: list[dict],
+    rows_by_algo: dict[str, list[dict]] | None = None,
 ) -> bytes:
     from reportlab.lib import colors as rl_colors
     from reportlab.lib.enums import TA_RIGHT
@@ -988,11 +1189,22 @@ def _build_pdf(
         story.append(_overview_table(rows, font, bold_font, content_w_cm))
 
     # ---------------- Per-segment pages ----------------
+    rows_by_algo = rows_by_algo or {}
+    trap_rows = rows_by_algo.get("trap", [])
+    zupt_rows = rows_by_algo.get("zupt", [])
+
+    def _row_for(rs: list[dict], seg_id: int) -> dict | None:
+        return next(
+            (x for x in rs if int(x.get("segment", -1)) == seg_id), None,
+        )
+
     for r in rows:
+        seg_id = int(r["segment"])
+        trap_r = _row_for(trap_rows, seg_id) or r
+        zupt_r = _row_for(zupt_rows, seg_id)
+
         story.append(PageBreak())
         story.append(_segment_header(r, font, bold_font, content_w_cm))
-        story.append(Spacer(1, 0.35 * cm))
-        story.append(_segment_metric_cards(r, font, bold_font, content_w_cm))
 
         if r.get("reject_reason"):
             story.append(Spacer(1, 0.25 * cm))
@@ -1005,6 +1217,19 @@ def _build_pdf(
                     fontName=font, alignment=TA_RIGHT,
                 ),
             ))
+
+        # Per-algorithm metrics — Δh / CI / quality / accepted side-by-side
+        # so the report shows both estimators' verdicts, not just the
+        # primary's.
+        per_algo_pairs: list[tuple[str, dict | None]] = [
+            (HEB["trap_label"], trap_r),
+            (HEB["zupt_label"], zupt_r),
+        ]
+        story.append(Spacer(1, 0.35 * cm))
+        story.append(_section_heading(HEB["per_algo_heading"], bold_font))
+        story.append(_per_algo_metrics_table(
+            per_algo_pairs, font, bold_font, content_w_cm,
+        ))
 
         story.append(Spacer(1, 0.4 * cm))
         trap_png, corr_png = _build_segment_page_pngs(
@@ -1024,6 +1249,48 @@ def _build_pdf(
             story.append(Spacer(1, 0.2 * cm))
             story.extend(_peak_legend(font, bold_font, content_w_cm))
 
+        # Trapezoid template fit + ZUPT integrated position — same panels
+        # editor.py exposes in its Prediction tab. Both come straight from
+        # the prediction stage's `meta`, so they show what each estimator
+        # actually fitted, not the segmentation-stage match.
+        trap_meta = (trap_r or {}).get("meta") or {}
+        trap_fit_png = _build_trap_fit_png(trap_meta)
+        if trap_fit_png:
+            story.append(Spacer(1, 0.3 * cm))
+            story.append(_section_heading(
+                HEB["trap_fit_heading"], bold_font,
+            ))
+            story.append(Image(io.BytesIO(trap_fit_png),
+                               width=content_w_cm * cm,
+                               height=content_w_cm * cm * (2.7 / 7.6)))
+        else:
+            story.append(Spacer(1, 0.2 * cm))
+            story.append(_section_heading(
+                HEB["trap_fit_heading"], bold_font,
+            ))
+            story.append(Paragraph(
+                _rtl(_esc(HEB["no_trap_fit"])), body_style,
+            ))
+
+        zupt_meta = (zupt_r or {}).get("meta") or {}
+        zupt_pos_png = _build_zupt_pos_png(zupt_meta)
+        if zupt_pos_png:
+            story.append(Spacer(1, 0.25 * cm))
+            story.append(_section_heading(
+                HEB["zupt_pos_heading"], bold_font,
+            ))
+            story.append(Image(io.BytesIO(zupt_pos_png),
+                               width=content_w_cm * cm,
+                               height=content_w_cm * cm * (2.4 / 7.6)))
+        else:
+            story.append(Spacer(1, 0.2 * cm))
+            story.append(_section_heading(
+                HEB["zupt_pos_heading"], bold_font,
+            ))
+            story.append(Paragraph(
+                _rtl(_esc(HEB["no_zupt_curve"])), body_style,
+            ))
+
     # ---------------- How to read ----------------
     story.append(PageBreak())
     story.append(_section_heading(HEB["how_to_read"], bold_font))
@@ -1042,6 +1309,7 @@ def _build_pdf(
 def render() -> None:
     loaded: LoadedSignal | None = st.session_state["loaded"]
     rows = st.session_state.get("prediction_rows") or []
+    rows_by_algo = st.session_state.get("prediction_rows_by_algo") or {}
     segments = valid_segments(st.session_state.get("segments_df"))
     state = st.session_state.get("detector_state")
     predictions = st.session_state.get("predictions") or []
@@ -1063,7 +1331,9 @@ def render() -> None:
     )
 
     try:
-        pdf_bytes = _build_pdf(loaded, state, predictions, segments, rows)
+        pdf_bytes = _build_pdf(
+            loaded, state, predictions, segments, rows, rows_by_algo,
+        )
     except Exception as e:
         st.error(f"PDF build failed: {type(e).__name__}: {e}")
         return

@@ -34,6 +34,11 @@ from .common import (
 )
 
 
+# Algorithm short ids the diagnostic charts know how to render.
+_TRAP_ALGO_ID = "trap"
+_ZUPT_ALGO_ID = "zupt"
+
+
 def _run_predictions(
     loaded: LoadedSignal, segments: pd.DataFrame,
 ) -> dict[str, list[dict]]:
@@ -173,6 +178,128 @@ def _prediction_bar_figure(
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
     )
     fig.add_hline(y=0, line_color="#333", line_width=0.5)
+    return fig
+
+
+def _trapezoid_fit_figure(meta: dict) -> go.Figure | None:
+    """Plotly version of editor.py's "trapezoid fit on accel signal" panel.
+
+    Returns ``None`` when the algorithm did not return a fitted template
+    (e.g. the segment was rejected before the fit stage).
+    """
+    t_sec = meta.get("t_sec")
+    a_smooth = meta.get("a_smooth")
+    a_template = meta.get("a_template")
+    if t_sec is None or a_smooth is None or a_template is None:
+        return None
+    t = np.asarray(t_sec, dtype=float)
+    s = np.asarray(a_smooth, dtype=float)
+    tpl = np.asarray(a_template, dtype=float)
+    if t.size == 0:
+        return None
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=t, y=s, mode="lines", name="a_smooth",
+        line=dict(color="#2c3e50", width=1.0),
+        hovertemplate="t=%{x:.2f}s<br>a=%{y:.2f} m/s²<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=t, y=tpl, mode="lines", name="trapezoid template",
+        line=dict(color="#c0392b", width=2.0),
+        hovertemplate="t=%{x:.2f}s<br>tpl=%{y:.2f} m/s²<extra></extra>",
+    ))
+    params = meta.get("params") or {}
+    for key in ("t_c1", "t_c2"):
+        v = params.get(key)
+        if v is not None and np.isfinite(v):
+            fig.add_vline(x=float(v), line_color="#c0392b",
+                          line_width=1, line_dash="dot", opacity=0.7)
+    fig.add_hline(y=0.0, line_color="#888", line_width=0.5, line_dash="dash")
+    if params:
+        sign = int(params.get("sign", 0))
+        annotation = (
+            f"A_used={params.get('A_used', float('nan')):.2f} m/s² · "
+            f"W={params.get('W', float('nan')):.2f}s · "
+            f"f={params.get('f', float('nan')):.2f} · "
+            f"sign={sign:+d}<br>"
+            f"t_c1={params.get('t_c1', float('nan')):.2f}s · "
+            f"t_c2={params.get('t_c2', float('nan')):.2f}s · "
+            f"R²={params.get('joint_r2', float('nan')):.3f} · "
+            f"v_peak={params.get('v_peak_measured', float('nan')):+.2f} m/s"
+        )
+        fig.add_annotation(
+            xref="paper", yref="paper", x=0.01, y=0.99,
+            xanchor="left", yanchor="top",
+            text=annotation, showarrow=False,
+            font=dict(size=10, family="monospace", color="#1a2436"),
+            bgcolor="rgba(255,255,255,0.85)",
+            bordercolor="#888", borderwidth=0.5, borderpad=4,
+        )
+    fig.update_layout(
+        height=300, margin=dict(l=10, r=10, t=30, b=30),
+        title=dict(text="Trapezoid fit on accelerometer signal",
+                   x=0.0, font=dict(size=12)),
+        xaxis_title="t (s, ride-local)", yaxis_title="a (m/s²)",
+        plot_bgcolor="#fafbfc", hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+    )
+    return fig
+
+
+def _zupt_position_figure(meta: dict) -> go.Figure | None:
+    """Plotly version of editor.py's "ZUPT integrated position" panel."""
+    pos = meta.get("pos_curve")
+    if pos is None:
+        return None
+    pos_arr = np.asarray(pos, dtype=float)
+    if pos_arr.size == 0:
+        return None
+    idx = np.arange(pos_arr.size)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=idx, y=pos_arr, mode="lines", name="pos(t)",
+        line=dict(color="#27ae60", width=1.4),
+        hovertemplate="i=%{x}<br>pos=%{y:.2f} m<extra></extra>",
+    ))
+    start = meta.get("start_idx")
+    end = meta.get("end_idx")
+    if (start is not None and end is not None
+            and np.isfinite(start) and np.isfinite(end)
+            and int(end) > int(start)):
+        fig.add_vrect(
+            x0=int(start), x1=int(end),
+            fillcolor="#27ae60", opacity=0.15, line_width=0,
+            annotation_text="motion window", annotation_position="top left",
+            annotation_font_color="#1e7a3a", annotation_font_size=10,
+        )
+    fig.add_hline(y=0.0, line_color="#888", line_width=0.5, line_dash="dash")
+    info_bits: list[str] = []
+    n_active = meta.get("n_active")
+    active_frac = meta.get("active_fraction")
+    method = meta.get("method", "")
+    if n_active is not None:
+        info_bits.append(f"n_active={int(n_active)}")
+    if active_frac is not None and np.isfinite(active_frac):
+        info_bits.append(f"active_frac={float(active_frac):.2f}")
+    if method:
+        info_bits.append(f"method={method}")
+    if info_bits:
+        fig.add_annotation(
+            xref="paper", yref="paper", x=0.01, y=0.99,
+            xanchor="left", yanchor="top",
+            text=" · ".join(info_bits), showarrow=False,
+            font=dict(size=10, family="monospace", color="#1a2436"),
+            bgcolor="rgba(255,255,255,0.85)",
+            bordercolor="#888", borderwidth=0.5, borderpad=4,
+        )
+    fig.update_layout(
+        height=260, margin=dict(l=10, r=10, t=30, b=30),
+        title=dict(text="ZUPT integrated position",
+                   x=0.0, font=dict(size=12)),
+        xaxis_title="sample index", yaxis_title="pos (m)",
+        plot_bgcolor="#fafbfc", hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+    )
     return fig
 
 
@@ -319,6 +446,41 @@ def render() -> None:
             )
             if sel.get("reject_reason"):
                 st.caption(f"reject_reason: `{sel['reject_reason']}`")
+
+    # Per-algorithm diagnostic charts for the selected segment:
+    # the trapezoid template overlay (trap algo) and the ZUPT integrated
+    # position trace (zupt algo). Mirrors the editor's Prediction tab.
+    trap_rows = rows_by_algo.get(_TRAP_ALGO_ID, [])
+    zupt_rows = rows_by_algo.get(_ZUPT_ALGO_ID, [])
+    trap_sel = next(
+        (r for r in trap_rows if int(r["segment"]) == selected), None,
+    )
+    zupt_sel = next(
+        (r for r in zupt_rows if int(r["segment"]) == selected), None,
+    )
+    diag_cols = st.columns(2)
+    with diag_cols[0]:
+        trap_fig = _trapezoid_fit_figure(
+            (trap_sel or {}).get("meta") or {}
+        ) if trap_sel else None
+        if trap_fig is None:
+            st.caption("No trapezoid template for this segment.")
+        else:
+            st.plotly_chart(
+                trap_fig, use_container_width=True,
+                key=f"pred_trap_fig_{selected}",
+            )
+    with diag_cols[1]:
+        zupt_fig = _zupt_position_figure(
+            (zupt_sel or {}).get("meta") or {}
+        ) if zupt_sel else None
+        if zupt_fig is None:
+            st.caption("No ZUPT trajectory for this segment.")
+        else:
+            st.plotly_chart(
+                zupt_fig, use_container_width=True,
+                key=f"pred_zupt_fig_{selected}",
+            )
 
     # Trapezoid template parameters for the selected segment (from the
     # segmentation-step fits — same as before).

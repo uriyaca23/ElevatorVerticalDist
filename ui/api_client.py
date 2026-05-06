@@ -91,6 +91,7 @@ def _empty_pred_row(base: dict, reason: str) -> dict:
         "quality_score":  float("nan"),
         "reject_reason":  reason,
         "ci_half_width":  float("nan"),
+        "meta":           {},
     }
 
 
@@ -202,6 +203,7 @@ def predict(acc: pd.DataFrame,
                     "quality_score":  float(out.quality_score),
                     "reject_reason":  str(out.reject_reason or ""),
                     "ci_half_width":  ci,
+                    "meta":           dict(out.meta) if out.meta else {},
                 })
             except Exception as e:  # noqa: BLE001 — surface to caller as row
                 rows_by_algo[aid].append(

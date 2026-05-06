@@ -21,8 +21,9 @@ from __future__ import annotations
 
 import sys
 import tkinter as tk
+from datetime import datetime, timedelta
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 import matplotlib
 matplotlib.use("TkAgg")
@@ -34,25 +35,152 @@ from matplotlib.backends.backend_tkagg import (
     NavigationToolbar2Tk,
 )
 from matplotlib.figure import Figure
+from matplotlib.ticker import FuncFormatter
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.data.loader import (
     RAW_DATA_ROOT,
+    SOURCE_EXPERIMENT,
+    STRUCTURED_DATA_DIR,
+    VALID_SOURCES,
     ExperimentPipeline,
     getExperimentData,
     list_experiments,
+    list_structured_experiments,
     saveExperimentData,
 )
 from src.data.loader.alignment import _smoothed_velocity
-from src.data.loader.pipeline import _coerce_bool, addGTtoSegment, load_baramoshka
-from src.physics import calculate_velocity_from_accelerometer
+from src.data.loader.pipeline import (
+    _coerce_bool,
+    _derive_gt_from_prs,
+    _segments_to_full_gt,
+    addGTtoSegment,
+    load_baramoshka,
+)
+from src.data.loadFromDB import LoadedSignal, PhoneType, loadDataFromS3
+from src.physics import calculate_velocity_from_accelerometer, pressure_to_altitude
+from src.segmentation.algorithms import (
+    SEGMENT_ALGORITHM_CONFIG,
+    SegmentAlgorithm,
+    Segmenter,
+)
 
 
 VALID_TYPES = ["outside", "up", "down"]
 TYPE_COLORS = {"up": "#2ca02c", "down": "#d62728", "outside": "#b8b8b8"}
 HIGHLIGHT_COLOR = "#1f77b4"
+
+
+class _AddExperimentValidationError(ValueError):
+    """Raised by the add-experiment orchestrator when a form field is
+    malformed. Surfaces as `messagebox.showerror` rather than a crash."""
+
+
+# ----------------------------------------------------------------------
+# Upload-mode helpers
+# ----------------------------------------------------------------------
+
+# Per-sensor schema for the manual upload path. `data_cols` are the
+# non-time columns the user maps; `required` flags ACC as the only
+# non-optional sensor (matches the user's spec).
+_UPLOAD_SENSORS: list[tuple[str, list[str], bool]] = [
+    ("ACC", ["x", "y", "z"], True),
+    ("PRS", ["pressure"], False),
+    ("GYR", ["x", "y", "z"], False),
+    ("MAG", ["x", "y", "z"], False),
+    ("ORI", ["w", "x", "y", "z"], False),
+]
+
+
+def _read_tabular(path: Path) -> pd.DataFrame:
+    """Read a CSV or Excel file into a DataFrame, picking the reader by
+    extension. Mirrors :func:`src.pipelines.streamlit.step2_data._read_tabular_upload`.
+    """
+    suf = path.suffix.lower()
+    if suf == ".csv":
+        return pd.read_csv(path)
+    if suf in (".xlsx", ".xls"):
+        return pd.read_excel(path)
+    raise ValueError(
+        f"Unsupported file type: {path.suffix!r}. Use .csv, .xlsx, or .xls."
+    )
+
+
+def _guess_column(columns: list[str], candidates: list[str]) -> str:
+    """Return the first item in `columns` whose lowercased name matches any
+    of `candidates` (case-insensitive substring match), else the first
+    column. Used to pre-fill mapping comboboxes."""
+    if not columns:
+        return ""
+    lc = [c.lower() for c in columns]
+    for cand in candidates:
+        cand_lc = cand.lower()
+        for i, c in enumerate(lc):
+            if c == cand_lc:
+                return columns[i]
+        for i, c in enumerate(lc):
+            if cand_lc in c:
+                return columns[i]
+    return columns[0]
+
+
+def _parse_time_to_epoch_ms(series: pd.Series, day_first: bool) -> np.ndarray:
+    """Convert a user-supplied time column to int64 epoch ms.
+
+    The series **must not contain NaN** — the caller is expected to have
+    already dropped rows where any mapped column is missing (mirrors the
+    streamlit data form's pattern).
+
+    Numeric columns: same heuristic as
+    :func:`src.pipelines.streamlit.step2_data._detect_time_unit` —
+    ``> 1e12`` → epoch ms, ``> 1e9`` → epoch s, span ``< 1e4`` → relative
+    seconds, else relative ms.
+
+    String columns: pandas ``to_datetime`` with ``dayfirst=day_first``.
+    Raises ValueError if any value fails to parse.
+    """
+    if series.empty:
+        raise ValueError("Time column is empty.")
+
+    nums = pd.to_numeric(series, errors="coerce")
+    numeric_share = nums.notna().mean()
+    if numeric_share > 0.95:
+        ts = nums.to_numpy(dtype=float)
+        n_bad = int(np.isnan(ts).sum())
+        if n_bad:
+            raise ValueError(
+                f"{n_bad} numeric time values failed to parse — drop empty rows first."
+            )
+        mx = float(np.nanmax(ts))
+        span = mx - float(np.nanmin(ts))
+        if mx > 1e12:
+            return ts.astype("int64")
+        if mx > 1e9:
+            return (ts * 1000.0).astype("int64")
+        if span < 1e4:
+            return (ts * 1000.0).astype("int64")
+        return ts.astype("int64")
+
+    dts = pd.to_datetime(series, dayfirst=day_first, errors="coerce", utc=False)
+    n_bad = int(dts.isna().sum())
+    if n_bad:
+        raise ValueError(
+            f"Could not parse {n_bad} time values as datetime "
+            f"(try toggling 'Day-first?')."
+        )
+    # If the parsed series is tz-aware (e.g. 'Z' or '+HH:MM' suffix),
+    # convert to UTC and drop the tz so the int64 cast works — pandas
+    # rejects astype on tz-aware → tz-naive directly. Epoch ms is
+    # timezone-agnostic, so converting through UTC is lossless.
+    if getattr(dts.dt, "tz", None) is not None:
+        dts = dts.dt.tz_convert("UTC").dt.tz_localize(None)
+    # Cast to a fixed ms resolution before .astype('int64') — pandas 2.x
+    # parses to datetime64[us] by default, so a naive int64 cast would be
+    # microseconds (then //1e6 → seconds, not ms). The explicit step makes
+    # the unit unambiguous regardless of source precision.
+    return dts.astype("datetime64[ms]").astype("int64").to_numpy(dtype="int64")
 
 
 def _cell_str(v) -> str:
@@ -186,6 +314,9 @@ class GtEditor(tk.Tk):
         )
         self.exp_combo.pack(side=tk.LEFT, padx=6)
         ttk.Button(top, text="Load", command=self.load_experiment).pack(side=tk.LEFT)
+        ttk.Button(top, text="Add experiment…",
+                   command=self._open_add_experiment_dialog)\
+            .pack(side=tk.LEFT, padx=(4, 0))
         ttk.Button(top, text="Save (Ctrl+S)", command=self.save_gt).pack(side=tk.RIGHT)
 
         # Navigation controls live in a compact 2-row grid so the top bar
@@ -353,7 +484,13 @@ class GtEditor(tk.Tk):
         self.bind("<Shift-Down>",  lambda e: self._pan_y(-0.25))
 
     def _populate_experiments(self):
-        self.exp_combo["values"] = list_experiments(RAW_DATA_ROOT)
+        # Union of rawData experiments (have a sensorLog) and experiments
+        # that exist only under structuredData/ (e.g. S3-ingested ones).
+        raw = list_experiments(RAW_DATA_ROOT)
+        structured = list_structured_experiments(STRUCTURED_DATA_DIR)
+        seen = set(raw)
+        merged = list(raw) + [n for n in structured if n not in seen]
+        self.exp_combo["values"] = merged
 
     # ---------- Load / save ----------
 
@@ -440,7 +577,14 @@ class GtEditor(tk.Tk):
             drawer(ax, data, self._t0_ms)
             ax.grid(True, alpha=0.3)
             ax.set_title(name, fontsize=9, loc="left")
-        axes[-1].set_xlabel("time (s)")
+
+        # Bottom panel x-axis: each tick shows the offset in seconds AND
+        # the wall-clock equivalent (HH:MM:SS) on a second line. With
+        # sharex=True, only the bottom panel renders tick labels.
+        axes[-1].xaxis.set_major_formatter(
+            FuncFormatter(self._format_x_tick),
+        )
+        axes[-1].set_xlabel("time  (s since start · wall clock)")
         if prev_xlim is not None:
             axes[0].set_xlim(prev_xlim)  # sharex propagates to all panels
 
@@ -463,6 +607,30 @@ class GtEditor(tk.Tk):
         self._axes = list(axes)
         self.fig.tight_layout()
         self.canvas.draw()
+
+    def _wall_time_str(self, s_offset: float, *, sub_second: bool = False) -> str:
+        """Convert ``s_offset`` (seconds since the experiment start) to a
+        wall-clock string ``HH:MM:SS`` (or ``HH:MM:SS.mmm`` when
+        ``sub_second``). Returns ``""`` if no experiment is loaded or the
+        timestamp is out of range."""
+        if self._t0_ms <= 0:
+            return ""
+        try:
+            wall = datetime.fromtimestamp(self._t0_ms / 1000.0 + s_offset)
+        except (OverflowError, ValueError, OSError):
+            return ""
+        if sub_second:
+            return wall.strftime("%H:%M:%S.") + f"{wall.microsecond // 1000:03d}"
+        return wall.strftime("%H:%M:%S")
+
+    def _format_x_tick(self, s_offset: float, _pos: int | None = None) -> str:
+        """X-axis tick formatter: render the offset in seconds and (when
+        an experiment is loaded) the wall-clock equivalent on a second
+        line. Wired up via :class:`matplotlib.ticker.FuncFormatter` from
+        :meth:`_refresh_plot`."""
+        head = f"{s_offset:.0f}s"
+        wall = self._wall_time_str(s_offset)
+        return f"{head}\n{wall}" if wall else head
 
     def _highlight_on_plot(self, start_ms, end_ms):
         for h in self._hl_spans:
@@ -539,8 +707,11 @@ class GtEditor(tk.Tk):
         if (event.inaxes in self._axes and event.xdata is not None
                 and event.ydata is not None):
             ylab = event.inaxes.get_ylabel() or "y"
+            wall = self._wall_time_str(event.xdata, sub_second=True)
+            wall_part = f"  ({wall})" if wall else ""
             self.hover_var.set(
-                f"t = {event.xdata:8.2f} s    {ylab} = {event.ydata:.3f}"
+                f"t = {event.xdata:8.2f} s{wall_part}    "
+                f"{ylab} = {event.ydata:.3f}"
             )
         else:
             self.hover_var.set("")
@@ -917,6 +1088,559 @@ class GtEditor(tk.Tk):
         self._mark_dirty(f"Auto-fixed → {len(self.pipeline.gt)} intervals")
         self._refresh_plot(preserve_xlim=True)
         self._refresh_tree()
+
+    # ---------- Add experiment ----------
+
+    def _open_add_experiment_dialog(self):
+        """Pop up a modal form for adding a new experiment, either by
+        fetching ACC from S3 or by uploading per-sensor CSV/Excel files.
+        On success the new experiment is auto-loaded into the editor."""
+        dlg = tk.Toplevel(self)
+        dlg.title("Add experiment")
+        dlg.transient(self)
+        dlg.grab_set()
+        dlg.geometry("780x820")
+
+        now = datetime.now().replace(microsecond=0, second=0)
+
+        # Mode toggle (S3 vs Upload).
+        mode_var = tk.StringVar(value="s3")
+        mode_bar = ttk.Frame(dlg, padding=(8, 8, 8, 0))
+        mode_bar.pack(fill=tk.X)
+        ttk.Label(mode_bar, text="Source:", font=("", 10, "bold"))\
+            .pack(side=tk.LEFT)
+        ttk.Radiobutton(mode_bar, text="Fetch from S3", value="s3",
+                        variable=mode_var,
+                        command=lambda: _on_mode_change())\
+            .pack(side=tk.LEFT, padx=8)
+        ttk.Radiobutton(mode_bar, text="Upload CSV/Excel files",
+                        value="upload", variable=mode_var,
+                        command=lambda: _on_mode_change())\
+            .pack(side=tk.LEFT)
+
+        # ---- S3 fetch group (mode == "s3") ----
+        s3_group = ttk.LabelFrame(dlg, text="S3 fetch", padding=8)
+        s3_group.columnconfigure(1, weight=1)
+
+        ttk.Label(s3_group, text="Phone type:")\
+            .grid(row=0, column=0, sticky=tk.W, pady=2)
+        pt_var = tk.StringVar(value=PhoneType.A.value)
+        ttk.Combobox(s3_group, textvariable=pt_var,
+                     values=[p.value for p in PhoneType],
+                     state="readonly", width=22)\
+            .grid(row=0, column=1, sticky=tk.EW, padx=4, pady=2)
+
+        ttk.Label(s3_group, text="Phone ID:")\
+            .grid(row=1, column=0, sticky=tk.W, pady=2)
+        pid_var = tk.StringVar()
+        ttk.Entry(s3_group, textvariable=pid_var)\
+            .grid(row=1, column=1, sticky=tk.EW, padx=4, pady=2)
+
+        ttk.Label(s3_group, text="Start (YYYY-MM-DD HH:MM):")\
+            .grid(row=2, column=0, sticky=tk.W, pady=2)
+        ts_var = tk.StringVar(
+            value=(now - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M"),
+        )
+        ttk.Entry(s3_group, textvariable=ts_var)\
+            .grid(row=2, column=1, sticky=tk.EW, padx=4, pady=2)
+
+        ttk.Label(s3_group, text="End (YYYY-MM-DD HH:MM):")\
+            .grid(row=3, column=0, sticky=tk.W, pady=2)
+        te_var = tk.StringVar(value=now.strftime("%Y-%m-%d %H:%M"))
+        ttk.Entry(s3_group, textvariable=te_var)\
+            .grid(row=3, column=1, sticky=tk.EW, padx=4, pady=2)
+
+        ttk.Label(s3_group, text="Experiment override:")\
+            .grid(row=4, column=0, sticky=tk.W, pady=2)
+        eo_var = tk.StringVar()
+        ttk.Entry(s3_group, textvariable=eo_var)\
+            .grid(row=4, column=1, sticky=tk.EW, padx=4, pady=2)
+        ttk.Label(s3_group, text="(optional — local-stub only)",
+                  foreground="#888", font=("", 8))\
+            .grid(row=5, column=1, sticky=tk.W, padx=4)
+
+        # ---- Upload group (mode == "upload") ----
+        up_group = ttk.LabelFrame(
+            dlg,
+            text="Upload sensor files  (ACC required, others optional)",
+            padding=4,
+        )
+        up_notebook = ttk.Notebook(up_group)
+        up_notebook.pack(fill=tk.BOTH, expand=True)
+        upload_states: dict[str, dict] = {}
+        for sensor_name, data_cols, required in _UPLOAD_SENSORS:
+            tab, state = self._build_upload_tab(
+                up_notebook, sensor_name, data_cols, required,
+            )
+            label = f"{sensor_name}*" if required else sensor_name
+            up_notebook.add(tab, text=label)
+            upload_states[sensor_name] = state
+
+        # ---- Group 2: name parts ----
+        g2 = ttk.LabelFrame(
+            dlg, text="New experiment name  ({who}_{where}_{phone}_{date})",
+            padding=8,
+        )
+        g2.columnconfigure(1, weight=1)
+
+        ttk.Label(g2, text="Who:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        who_var = tk.StringVar()
+        ttk.Entry(g2, textvariable=who_var)\
+            .grid(row=0, column=1, sticky=tk.EW, padx=4, pady=2)
+
+        ttk.Label(g2, text="Where:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        where_var = tk.StringVar()
+        ttk.Entry(g2, textvariable=where_var)\
+            .grid(row=1, column=1, sticky=tk.EW, padx=4, pady=2)
+
+        ttk.Label(g2, text="Phone (folder):")\
+            .grid(row=2, column=0, sticky=tk.W, pady=2)
+        pfolder_var = tk.StringVar()
+        ttk.Entry(g2, textvariable=pfolder_var)\
+            .grid(row=2, column=1, sticky=tk.EW, padx=4, pady=2)
+
+        ttk.Label(g2, text="Date (DD-MM-YYYY):")\
+            .grid(row=3, column=0, sticky=tk.W, pady=2)
+        date_var = tk.StringVar(value=now.strftime("%d-%m-%Y"))
+        ttk.Entry(g2, textvariable=date_var)\
+            .grid(row=3, column=1, sticky=tk.EW, padx=4, pady=2)
+
+        name_preview = tk.StringVar(value="(fill in all four fields)")
+        ttk.Label(g2, textvariable=name_preview, foreground="#1f77b4",
+                  font=("Menlo", 10))\
+            .grid(row=4, column=0, columnspan=2, sticky=tk.W,
+                  padx=4, pady=(4, 0))
+
+        def _refresh_preview(*_):
+            parts = [who_var.get().strip(), where_var.get().strip(),
+                     pfolder_var.get().strip(), date_var.get().strip()]
+            name_preview.set(
+                f"→ {'_'.join(parts)}" if all(parts)
+                else "(fill in all four fields)"
+            )
+
+        for v in (who_var, where_var, pfolder_var, date_var):
+            v.trace_add("write", _refresh_preview)
+
+        # ---- Group 3: metadata fields ----
+        g3 = ttk.LabelFrame(dlg, text="Metadata", padding=8)
+        g3.columnconfigure(1, weight=1)
+
+        md_vars: dict[str, tk.StringVar] = {}
+
+        # `source` is an enum (experiment / ido / realWorld) — readonly combobox.
+        ttk.Label(g3, text="Source:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        source_var = tk.StringVar(value=SOURCE_EXPERIMENT)
+        ttk.Combobox(g3, textvariable=source_var,
+                     values=list(VALID_SOURCES),
+                     state="readonly", width=14)\
+            .grid(row=0, column=1, sticky=tk.W, padx=4, pady=2)
+        md_vars["source"] = source_var
+
+        md_fields = [
+            ("description", "Description:", ""),
+            ("time", "Time (HH:MM):", now.strftime("%H:%M")),
+            ("experiment_type", "Experiment type:", "train"),
+            ("temperature_c", "Temperature (°C):", ""),
+            ("start_floor", "Start floor:", ""),
+        ]
+        for i, (key, label, default) in enumerate(md_fields, start=1):
+            ttk.Label(g3, text=label).grid(row=i, column=0, sticky=tk.W, pady=2)
+            v = tk.StringVar(value=default)
+            ttk.Entry(g3, textvariable=v)\
+                .grid(row=i, column=1, sticky=tk.EW, padx=4, pady=2)
+            md_vars[key] = v
+
+        # ---- Buttons ----
+        btns = ttk.Frame(dlg, padding=8)
+        ttk.Button(btns, text="Cancel", command=dlg.destroy)\
+            .pack(side=tk.RIGHT, padx=4)
+
+        def _on_submit():
+            try:
+                self._finalize_add_experiment(
+                    mode=mode_var.get(),
+                    s3_inputs={
+                        "phone_type": pt_var.get(),
+                        "phone_id": pid_var.get().strip(),
+                        "t_start_str": ts_var.get().strip(),
+                        "t_end_str": te_var.get().strip(),
+                        "experiment_override": eo_var.get().strip(),
+                    },
+                    upload_states=upload_states,
+                    name_parts={
+                        "who": who_var.get().strip(),
+                        "where": where_var.get().strip(),
+                        "phone_folder": pfolder_var.get().strip(),
+                        "date_str": date_var.get().strip(),
+                    },
+                    metadata_extra={k: v.get() for k, v in md_vars.items()},
+                    dialog=dlg,
+                )
+            except _AddExperimentValidationError as e:
+                messagebox.showerror("Invalid input", str(e), parent=dlg)
+            except Exception as e:
+                messagebox.showerror(
+                    "Add experiment failed",
+                    f"{type(e).__name__}: {e}", parent=dlg,
+                )
+
+        ttk.Button(btns, text="Add experiment", command=_on_submit)\
+            .pack(side=tk.RIGHT)
+
+        # ---- Layout: re-pack the source-mode group when the toggle flips ----
+        def _on_mode_change():
+            for w in (s3_group, up_group, g2, g3, btns):
+                w.pack_forget()
+            mode = mode_var.get()
+            if mode == "s3":
+                s3_group.pack(fill=tk.X, padx=8, pady=4)
+            else:
+                up_group.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+            g2.pack(fill=tk.X, padx=8, pady=4)
+            g3.pack(fill=tk.X, padx=8, pady=4)
+            btns.pack(fill=tk.X)
+
+        _on_mode_change()
+
+    def _build_upload_tab(
+        self, parent: ttk.Notebook, sensor_name: str,
+        data_cols: list[str], required: bool,
+    ) -> tuple[ttk.Frame, dict]:
+        """Build one tab of the manual-upload notebook.
+
+        Returns ``(frame, state)`` where ``state`` is a mutable dict the
+        orchestrator inspects on submit:
+
+        * ``df`` — the raw uploaded DataFrame (or None)
+        * ``col_vars`` — ``{"time": StringVar, **{col: StringVar for col in data_cols}}``
+        * ``day_first`` — BooleanVar for ambiguous DD/MM dates
+        * ``required`` / ``data_cols`` / ``sensor`` — passthrough metadata
+        """
+        frame = ttk.Frame(parent, padding=10)
+        frame.columnconfigure(1, weight=1)
+
+        state: dict = {
+            "sensor": sensor_name,
+            "data_cols": list(data_cols),
+            "required": required,
+            "path_var": tk.StringVar(value=""),
+            "df": None,
+            "col_vars": {"time": tk.StringVar()},
+            "day_first": tk.BooleanVar(value=True),
+            "status_var": tk.StringVar(value="No file selected."),
+            "_combos": [],   # filled below; populated when a file loads
+        }
+        for c in data_cols:
+            state["col_vars"][c] = tk.StringVar()
+
+        header = (f"{sensor_name} — required" if required
+                  else f"{sensor_name} — optional")
+        ttk.Label(frame, text=header, font=("", 10, "bold"))\
+            .grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=(0, 6))
+
+        # File picker.
+        ttk.Label(frame, text="File:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        ttk.Entry(frame, textvariable=state["path_var"], state="readonly")\
+            .grid(row=1, column=1, sticky=tk.EW, padx=4, pady=2)
+
+        def _on_pick():
+            path = filedialog.askopenfilename(
+                title=f"Select {sensor_name} CSV/Excel",
+                filetypes=[
+                    ("CSV / Excel", "*.csv *.xlsx *.xls"),
+                    ("All files", "*.*"),
+                ],
+                parent=frame.winfo_toplevel(),
+            )
+            if not path:
+                return
+            try:
+                df = _read_tabular(Path(path))
+            except Exception as e:
+                state["df"] = None
+                state["status_var"].set(f"Read error: {e}")
+                state["path_var"].set(path)
+                return
+            state["df"] = df
+            state["path_var"].set(path)
+            cols = list(df.columns)
+
+            # Pre-fill mappings with sensible guesses; populate combobox values.
+            state["col_vars"]["time"].set(_guess_column(
+                cols, ["timestamp_ms", "time", "ts", "t"],
+            ))
+            for c in data_cols:
+                state["col_vars"][c].set(_guess_column(cols, [c]))
+            for cb in state["_combos"]:
+                cb["values"] = cols
+            state["status_var"].set(
+                f"Loaded {len(df):,} rows × {len(cols)} columns. "
+                f"Confirm column mapping below."
+            )
+
+        ttk.Button(frame, text="Browse…", command=_on_pick)\
+            .grid(row=1, column=2, padx=4, pady=2)
+
+        # Time column + day-first toggle.
+        ttk.Label(frame, text="Time column:")\
+            .grid(row=2, column=0, sticky=tk.W, pady=2)
+        cb_time = ttk.Combobox(frame, textvariable=state["col_vars"]["time"],
+                               values=[], state="readonly")
+        cb_time.grid(row=2, column=1, sticky=tk.EW, padx=4, pady=2)
+        state["_combos"].append(cb_time)
+
+        ttk.Checkbutton(frame, text="Day-first (DD/MM)?",
+                        variable=state["day_first"])\
+            .grid(row=2, column=2, sticky=tk.W, padx=4, pady=2)
+
+        # Data columns.
+        for i, col in enumerate(data_cols, start=3):
+            ttk.Label(frame, text=f"{col} column:")\
+                .grid(row=i, column=0, sticky=tk.W, pady=2)
+            cb = ttk.Combobox(frame, textvariable=state["col_vars"][col],
+                              values=[], state="readonly")
+            cb.grid(row=i, column=1, sticky=tk.EW, padx=4, pady=2)
+            state["_combos"].append(cb)
+
+        # Status footer.
+        ttk.Label(frame, textvariable=state["status_var"], foreground="#444",
+                  wraplength=620, justify=tk.LEFT)\
+            .grid(row=20, column=0, columnspan=3, sticky=tk.W, pady=(8, 0))
+        if not required:
+            ttk.Label(frame,
+                      text="(leave blank to skip — segmenter will fall "
+                           "back to ACC.)",
+                      foreground="#888", font=("", 8))\
+                .grid(row=21, column=0, columnspan=3, sticky=tk.W)
+
+        return frame, state
+
+    def _finalize_add_experiment(
+        self, *,
+        mode: str,
+        s3_inputs: dict,
+        upload_states: dict[str, dict],
+        name_parts: dict,
+        metadata_extra: dict[str, str],
+        dialog: tk.Toplevel,
+    ) -> None:
+        """Validate inputs, gather sensors (S3 or upload), auto-segment, and
+        persist as a new experiment under structuredData/. On success the
+        new experiment is auto-loaded into the editor."""
+        # --- Shared validation: name parts ---
+        who = name_parts["who"]
+        where = name_parts["where"]
+        phone_folder = name_parts["phone_folder"]
+        date_str = name_parts["date_str"]
+        parts = [who, where, phone_folder, date_str]
+        if not all(parts):
+            raise _AddExperimentValidationError(
+                "All four name parts (who, where, phone, date) are required."
+            )
+        name = "_".join(parts)
+        bad = set(name) & set("/\\:")
+        if bad:
+            raise _AddExperimentValidationError(
+                f"Name parts must not contain {sorted(bad)!r}."
+            )
+
+        if (STRUCTURED_DATA_DIR / name).exists():
+            if not messagebox.askyesno(
+                "Overwrite?",
+                f"{name} already exists under structuredData/data/. Overwrite?",
+                parent=dialog,
+            ):
+                return
+
+        # --- Mode-specific sensor loading ---
+        if mode == "s3":
+            sensors = self._fetch_sensors_from_s3(s3_inputs, name=name)
+        else:
+            sensors = self._sensors_from_uploads(upload_states)
+
+        if "ACC" not in sensors or sensors["ACC"].empty:
+            raise _AddExperimentValidationError(
+                "ACC data is required (S3 returned empty or no ACC file uploaded)."
+            )
+
+        # --- Auto-segment: PRS path if available, else ACC template-match. ---
+        self.status_var.set(f"Segmenting {name}…")
+        self.update_idletasks()
+        gt = self._auto_segment_for_new_experiment(sensors, phone_folder)
+
+        # --- Stamp exp_name (saveExperimentData does not auto-inject —
+        #     mirrors the first-time-build path in pipeline.py that calls
+        #     _inject_exp_name explicitly before _write_csvs). ---
+        for df in sensors.values():
+            df["exp_name"] = name
+        gt["exp_name"] = name
+
+        metadata = {
+            "exp_name":        name,
+            "experimenter":    who,
+            "phone":           phone_folder,
+            "location":        where,
+            "description":     metadata_extra.get("description", ""),
+            "date":            date_str,
+            "time":            metadata_extra.get("time", ""),
+            "experiment_type": metadata_extra.get("experiment_type", "train"),
+            "temperature_c":   metadata_extra.get("temperature_c", ""),
+            "start_floor":     metadata_extra.get("start_floor", ""),
+            "source":          metadata_extra.get("source", SOURCE_EXPERIMENT),
+        }
+
+        saved_dir = saveExperimentData(name, sensors, gt, metadata)
+
+        # Refresh the dropdown so the new experiment shows up, then load it.
+        self._populate_experiments()
+        self.exp_var.set(name)
+        dialog.destroy()
+        n_rides = int((gt["type"] != "outside").sum())
+        sensor_summary = ", ".join(
+            f"{k}:{len(v):,}" for k, v in sensors.items()
+        )
+        self.status_var.set(
+            f"Loaded [{sensor_summary}] → segmented {n_rides} rides "
+            f"→ saved to {saved_dir}"
+        )
+        self.load_experiment()
+
+    def _fetch_sensors_from_s3(
+        self, inp: dict, *, name: str,
+    ) -> dict[str, pd.DataFrame]:
+        """Validate the S3 form fields, call loadDataFromS3, return
+        ``{"ACC": df}`` (the stub backend returns ACC only)."""
+        phone_id = inp["phone_id"]
+        if not (phone_id and phone_id.isdigit()):
+            raise _AddExperimentValidationError("Phone ID must be digits only.")
+        try:
+            t_start = datetime.strptime(inp["t_start_str"], "%Y-%m-%d %H:%M")
+            t_end = datetime.strptime(inp["t_end_str"], "%Y-%m-%d %H:%M")
+        except ValueError as e:
+            raise _AddExperimentValidationError(
+                f"Datetime must be 'YYYY-MM-DD HH:MM' ({e})."
+            ) from None
+        if t_end <= t_start:
+            raise _AddExperimentValidationError("End must be after start.")
+
+        self.status_var.set(f"Fetching {name} from S3…")
+        self.update_idletasks()
+        loaded: LoadedSignal = loadDataFromS3(
+            PhoneType(inp["phone_type"]), phone_id, t_start, t_end,
+            experiment=inp["experiment_override"] or None,
+        )
+        return {"ACC": loaded.acc.copy()}
+
+    def _sensors_from_uploads(
+        self, upload_states: dict[str, dict],
+    ) -> dict[str, pd.DataFrame]:
+        """Read each uploaded file's column mapping into a canonical-schema
+        DataFrame. ACC is required; the rest are skipped if no file was
+        picked. PRS additionally derives ``GT_height_m`` via ISA inversion."""
+        out: dict[str, pd.DataFrame] = {}
+        for sensor_name, _, required in _UPLOAD_SENSORS:
+            state = upload_states[sensor_name]
+            if state["df"] is None:
+                if required:
+                    raise _AddExperimentValidationError(
+                        f"{sensor_name} file is required."
+                    )
+                continue
+            df = self._build_canonical_sensor_df(state)
+            if df.empty:
+                if required:
+                    raise _AddExperimentValidationError(
+                        f"{sensor_name} file produced no rows after parsing."
+                    )
+                continue
+            out[sensor_name] = df
+        return out
+
+    def _build_canonical_sensor_df(self, state: dict) -> pd.DataFrame:
+        """Apply the column mapping from one upload-tab state to its raw
+        DataFrame and return a canonical-schema DataFrame
+        (`timestamp_ms` + ``data_cols``). For PRS, also derives
+        `GT_height_m` from `pressure` via :func:`pressure_to_altitude`."""
+        sensor = state["sensor"]
+        data_cols = state["data_cols"]
+        time_col = state["col_vars"]["time"].get()
+        if not time_col:
+            raise _AddExperimentValidationError(
+                f"{sensor}: no time column selected."
+            )
+        col_map = {c: state["col_vars"][c].get() for c in data_cols}
+        missing = [c for c, v in col_map.items() if not v]
+        if missing:
+            raise _AddExperimentValidationError(
+                f"{sensor}: data columns not selected: {missing}."
+            )
+
+        used = [time_col, *col_map.values()]
+        if len(set(used)) != len(used):
+            raise _AddExperimentValidationError(
+                f"{sensor}: each canonical column must map to a different "
+                f"source column (got {used})."
+            )
+
+        raw = state["df"]
+        for c in used:
+            if c not in raw.columns:
+                raise _AddExperimentValidationError(
+                    f"{sensor}: column {c!r} not found in uploaded file."
+                )
+        sub = raw[used].dropna()
+        if sub.empty:
+            return pd.DataFrame(columns=["timestamp_ms", *data_cols])
+
+        try:
+            ts_ms = _parse_time_to_epoch_ms(
+                sub[time_col], day_first=bool(state["day_first"].get()),
+            )
+        except ValueError as e:
+            raise _AddExperimentValidationError(f"{sensor}: {e}") from None
+
+        df = pd.DataFrame({"timestamp_ms": ts_ms.astype("int64")})
+        for canon, src in col_map.items():
+            df[canon] = pd.to_numeric(sub[src], errors="coerce").to_numpy(dtype=float)
+        df = (df.dropna()
+                .sort_values("timestamp_ms")
+                .drop_duplicates("timestamp_ms", keep="first")
+                .reset_index(drop=True))
+
+        if sensor == "PRS" and "pressure" in df.columns:
+            # ISA inversion — the same conversion the raw-log loader uses
+            # (parsing.py:81). Temperature defaults to 15 °C; the metadata
+            # `temperature_c` field is consulted later when GT Δh is recomputed.
+            df["GT_height_m"] = pressure_to_altitude(df["pressure"].to_numpy())
+        return df
+
+    def _auto_segment_for_new_experiment(
+        self, sensors: dict[str, pd.DataFrame], phone_folder: str,
+    ) -> pd.DataFrame:
+        """Pick the segmenter based on which sensors are present.
+
+        Barometer-first: when PRS is present and has ``GT_height_m``, run
+        the pressure-filter segmenter via the existing
+        :func:`_derive_gt_from_prs` helper (used by the raw-log loader).
+        Else fall back to the accelerometer-only template-match detector.
+        """
+        prs = sensors.get("PRS")
+        if prs is not None and not prs.empty and "GT_height_m" in prs.columns:
+            return _derive_gt_from_prs(prs)
+
+        acc = sensors.get("ACC")
+        if acc is None or acc.empty:
+            raise _AddExperimentValidationError(
+                "Cannot segment: neither PRS nor ACC data was provided."
+            )
+        seg_cfg = SEGMENT_ALGORITHM_CONFIG(
+            algorithm=SegmentAlgorithm.ACC_TEMPLATE_MATCH,
+        )
+        segments = Segmenter(seg_cfg).detect(acc, phone_model=phone_folder)
+        t0_ms = int(acc["timestamp_ms"].iloc[0])
+        t_end_ms = int(acc["timestamp_ms"].iloc[-1])
+        return _segments_to_full_gt(segments, t0_ms, t_end_ms)
 
     # ---------- Housekeeping ----------
 
