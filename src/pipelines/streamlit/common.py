@@ -24,7 +24,6 @@ from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_ac
 from src.segmentation.algorithms.accelerometer_only.template_match.fit_elevator_parameters.common import (
     trapezoid_kernel,
 )
-from ui import api_client
 
 # Display-only helpers that operate on the detector state dict (heatmap
 # rasters, signed-R² peak classification, simple local-maxima finder).
@@ -100,6 +99,22 @@ html, body, [class*="css"]  {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 code, pre, kbd { font-family: 'JetBrains Mono', monospace; }
+
+/* Browser full-screen / Docker-served iframes can leave the app root
+   with a fixed height + overflow:hidden, which traps the page and
+   blocks scrolling. Force the scroll containers back to their natural
+   "grow with content + scroll the overflow" behaviour. */
+html, body { height: auto !important; overflow-y: auto !important; }
+[data-testid="stAppViewContainer"],
+[data-testid="stApp"] {
+    height: auto !important;
+    min-height: 100vh;
+    overflow-y: auto !important;
+}
+section.main, section[data-testid="stMain"] {
+    overflow-y: auto !important;
+    height: auto !important;
+}
 
 section.main > div.block-container {
     padding-top: 2.2rem; padding-bottom: 4rem; max-width: 1200px;
@@ -251,6 +266,62 @@ def goto(step: int) -> None:
 
 def utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+# ---------------------------------------------------------------------------
+# Time-axis helpers
+# ---------------------------------------------------------------------------
+#
+# The detector's ``state['t']`` is in seconds from the start of the
+# recording. Every chart in the wizard is more useful with the wall-clock
+# time on the x-axis instead, so these helpers turn relative seconds into
+# naive ``datetime64`` (in the system's local timezone) using
+# ``state['t0_ms']`` as the epoch origin.
+
+_LOCAL_TZ = datetime.now().astimezone().tzinfo
+
+# Plotly d3-format hover string for a datetime x-axis. Shown in the
+# tooltip when the user hovers any time-series chart.
+HOVER_DATETIME_FMT = "%Y-%m-%d %H:%M:%S.%L"
+
+
+def _t0_ms(t0_ms: float | None) -> float:
+    """Coerce ``state['t0_ms']`` to a finite number, falling back to 0.
+
+    A bad / missing origin still produces sensible plots — the dates
+    just sit at the start of the Unix epoch instead of the recording's
+    real wall-clock time. The user-visible message is "no date info" via
+    the 1970 ticks; nothing crashes.
+    """
+    if t0_ms is None:
+        return 0.0
+    try:
+        v = float(t0_ms)
+    except (TypeError, ValueError):
+        return 0.0
+    return v if np.isfinite(v) else 0.0
+
+
+def to_datetime_array(t_s, t0_ms: float | None) -> np.ndarray:
+    """Convert a relative-seconds array to local-time ``datetime64[ns]``.
+
+    Suitable for direct use as a Plotly x-axis or a matplotlib datetime
+    axis.
+    """
+    epoch_ms = _t0_ms(t0_ms) + np.asarray(t_s, dtype=float) * 1000.0
+    dt_utc = pd.to_datetime(epoch_ms, unit="ms", utc=True)
+    if _LOCAL_TZ is not None:
+        dt_utc = dt_utc.tz_convert(_LOCAL_TZ)
+    return dt_utc.tz_localize(None).values
+
+
+def to_datetime(t_s: float, t0_ms: float | None) -> pd.Timestamp:
+    """Scalar version of :func:`to_datetime_array` — single relative
+    second to a ``pandas.Timestamp`` in local time. Plotly accepts the
+    Timestamp directly anywhere a datetime is allowed.
+    """
+    arr = to_datetime_array(np.asarray([float(t_s)]), t0_ms)
+    return pd.Timestamp(arr[0])
 
 
 def reset_downstream_state() -> None:

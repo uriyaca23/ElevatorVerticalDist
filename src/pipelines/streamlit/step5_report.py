@@ -40,6 +40,8 @@ from .common import (
     find_local_maxima,
     find_matching_prediction,
     goto,
+    to_datetime,
+    to_datetime_array,
     trapezoid_kernel,
     utcnow_iso,
     valid_segments,
@@ -269,15 +271,18 @@ def _build_main_signal_png(state: dict, segments: pd.DataFrame,
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+        from matplotlib.dates import AutoDateFormatter, AutoDateLocator
     except Exception:
         return b""
     t = np.asarray(state["t"])
     a_vert = np.asarray(state["a_vert"])
     a_smooth = np.asarray(state["a_smooth"])
+    t0_ms = state.get("t0_ms")
+    dt = to_datetime_array(t, t0_ms)
     fig, ax = plt.subplots(figsize=(8.0, 2.9), dpi=180)
     fig.patch.set_facecolor("white")
-    ax.plot(t, a_vert, color="#233044", lw=0.6, alpha=0.85, label="a_vert")
-    ax.plot(t, a_smooth, color="#e67e22", lw=1.0, label="smoothed")
+    ax.plot(dt, a_vert, color="#233044", lw=0.6, alpha=0.85, label="a_vert")
+    ax.plot(dt, a_smooth, color="#e67e22", lw=1.0, label="smoothed")
     for i, row in segments.iterrows():
         try:
             s = float(row["start_s"]); e = float(row["end_s"])
@@ -285,12 +290,16 @@ def _build_main_signal_png(state: dict, segments: pd.DataFrame,
             continue
         color = RIDE_COLORS.get(str(row.get("type", "up")), "#777")
         is_sel = (selected is not None and int(i) == selected)
-        ax.axvspan(s, e,
+        ax.axvspan(to_datetime(s, t0_ms), to_datetime(e, t0_ms),
                    color=SELECTED_COLOR if is_sel else color,
                    alpha=0.30 if is_sel else 0.16, lw=0)
-    ax.set_xlabel("time (s)"); ax.set_ylabel("a_vert (m/s²)")
+    locator = AutoDateLocator()
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(AutoDateFormatter(locator))
+    ax.set_xlabel("time"); ax.set_ylabel("a_vert (m/s²)")
     ax.legend(loc="upper right", fontsize=7, frameon=False, ncol=2)
     _style_axes(ax)
+    fig.autofmt_xdate()
     fig.tight_layout()
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=180, facecolor="white")
@@ -311,25 +320,34 @@ def _build_segment_page_pngs(
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+        from matplotlib.dates import AutoDateFormatter, AutoDateLocator
     except Exception:
         return b"", b""
 
     t = np.asarray(state["t"])
     a_vert = np.asarray(state["a_vert"])
     a_smooth = np.asarray(state["a_smooth"])
+    t0_ms = state.get("t0_ms")
     match = find_matching_prediction(predictions, t_lo, t_hi)
+
+    def _date_axis(ax) -> None:
+        loc = AutoDateLocator()
+        ax.xaxis.set_major_locator(loc)
+        ax.xaxis.set_major_formatter(AutoDateFormatter(loc))
 
     # --- (1) trapezoid overlay ---
     pad_s = 4.0
     mask = (t >= t_lo - pad_s) & (t <= t_hi + pad_s)
+    dt_zoom = to_datetime_array(t[mask], t0_ms)
     fig1, ax1 = plt.subplots(figsize=(7.6, 2.7), dpi=180)
     fig1.patch.set_facecolor("white")
-    ax1.plot(t[mask], a_vert[mask], color="#233044", lw=0.6, alpha=0.85,
+    ax1.plot(dt_zoom, a_vert[mask], color="#233044", lw=0.6, alpha=0.85,
              label="a_vert")
-    ax1.plot(t[mask], a_smooth[mask], color="#e67e22", lw=1.0,
+    ax1.plot(dt_zoom, a_smooth[mask], color="#e67e22", lw=1.0,
              label="smoothed")
     ax1.axhline(0, color="#aaa", lw=0.4, ls="--")
-    ax1.axvspan(t_lo, t_hi, color=SELECTED_COLOR, alpha=0.10, lw=0)
+    ax1.axvspan(to_datetime(t_lo, t0_ms), to_datetime(t_hi, t0_ms),
+                color=SELECTED_COLOR, alpha=0.10, lw=0)
     if match is not None:
         for lobe_key, color in (("lobe1", "#c0392b"), ("lobe2", "#8e44ad")):
             L = match.get(lobe_key) or {}
@@ -340,12 +358,15 @@ def _build_segment_page_pngs(
                 continue
             tt = np.linspace(t_c - W, t_c + W, 200)
             yy = A * trapezoid_kernel(tt, t_c, W, f)
-            ax1.plot(tt, yy, color=color, lw=1.8)
-            ax1.scatter([t_c], [A], color=color, s=26, zorder=5,
+            ax1.plot(to_datetime_array(tt, t0_ms), yy, color=color, lw=1.8)
+            ax1.scatter([to_datetime(t_c, t0_ms)], [A],
+                        color=color, s=26, zorder=5,
                         edgecolor="#000", linewidth=0.4)
-    ax1.set_xlabel("t (s)"); ax1.set_ylabel("a (m/s²)")
+    _date_axis(ax1)
+    ax1.set_xlabel("time"); ax1.set_ylabel("a (m/s²)")
     ax1.legend(loc="upper right", fontsize=7, frameon=False, ncol=2)
     _style_axes(ax1)
+    fig1.autofmt_xdate()
     fig1.tight_layout()
     buf1 = io.BytesIO()
     fig1.savefig(buf1, format="png", dpi=180, facecolor="white")
@@ -359,29 +380,34 @@ def _build_segment_page_pngs(
     neg_r2 = np.asarray(state["best_neg_r2"])
     pos_plot = np.where(np.isfinite(pos_r2), pos_r2, np.nan)
     neg_plot = np.where(np.isfinite(neg_r2), neg_r2, np.nan)
+    dt_corr = to_datetime_array(t[mask2], t0_ms)
 
     fig2, ax2 = plt.subplots(figsize=(7.6, 2.7), dpi=180)
     fig2.patch.set_facecolor("white")
-    ax2.plot(t[mask2], pos_plot[mask2], color="#2980b9", lw=0.9,
+    ax2.plot(dt_corr, pos_plot[mask2], color="#2980b9", lw=0.9,
              label="max R² (+)")
-    ax2.plot(t[mask2], neg_plot[mask2], color="#c0392b", lw=0.9,
+    ax2.plot(dt_corr, neg_plot[mask2], color="#c0392b", lw=0.9,
              label="max R² (−)")
     cfg = state.get("config")
     if cfg is not None:
         ax2.axhline(cfg.r2_peak_thresh, color="#888", lw=0.5, ls="--")
-    ax2.axvspan(t_lo, t_hi, color=SELECTED_COLOR, alpha=0.10, lw=0)
+    ax2.axvspan(to_datetime(t_lo, t0_ms), to_datetime(t_hi, t0_ms),
+                color=SELECTED_COLOR, alpha=0.10, lw=0)
     peaks_pos = find_local_maxima(pos_r2, t, wlo, whi)
     peaks_neg = find_local_maxima(neg_r2, t, wlo, whi)
     for sign, peaks, arr in ((+1, peaks_pos, pos_r2), (-1, peaks_neg, neg_r2)):
         for i in peaks:
             tag = classify_peak(state, i, sign, predictions)
-            ax2.scatter([t[i]], [arr[i]],
+            ax2.scatter([to_datetime(t[i], t0_ms)], [arr[i]],
                         color=PEAK_STATUS_COLORS.get(tag, "#000"),
                         s=30, zorder=5, edgecolor="#000", linewidth=0.3)
-    ax2.set_ylim(0, 1.05); ax2.set_xlim(wlo, whi)
-    ax2.set_xlabel("t (s)"); ax2.set_ylabel("R² (per sign)")
+    ax2.set_ylim(0, 1.05)
+    ax2.set_xlim(to_datetime(wlo, t0_ms), to_datetime(whi, t0_ms))
+    _date_axis(ax2)
+    ax2.set_xlabel("time"); ax2.set_ylabel("R² (per sign)")
     ax2.legend(loc="upper right", fontsize=7, frameon=False, ncol=2)
     _style_axes(ax2)
+    fig2.autofmt_xdate()
     fig2.tight_layout()
     buf2 = io.BytesIO()
     fig2.savefig(buf2, format="png", dpi=180, facecolor="white")

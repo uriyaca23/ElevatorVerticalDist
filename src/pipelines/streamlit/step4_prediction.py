@@ -17,6 +17,7 @@ from ui import api_client
 
 from .common import (
     ACCEL_ALGOS,
+    HOVER_DATETIME_FMT,
     LoadedSignal,
     PRIMARY_ALGO_ID,
     RIDE_COLORS,
@@ -27,6 +28,8 @@ from .common import (
     goto,
     render_predict_segment_sidebar,
     render_trapezoid_params,
+    to_datetime,
+    to_datetime_array,
     valid_segments,
 )
 
@@ -56,10 +59,14 @@ def _prediction_main_figure(
 ) -> go.Figure:
     t = np.asarray(state["t"])
     a_vert = np.asarray(state["a_vert"])
+    t0_ms = state.get("t0_ms")
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=t, y=a_vert, mode="lines", name="a_vert",
+        x=to_datetime_array(t, t0_ms), y=a_vert,
+        mode="lines", name="a_vert",
         line=dict(color="#233044", width=1),
+        hovertemplate=f"%{{x|{HOVER_DATETIME_FMT}}}<br>"
+                      "a=%{y:.2f} m/s²<extra></extra>",
     ))
     for r in rows:
         s = float(r["start_s"]); e = float(r["end_s"])
@@ -67,7 +74,7 @@ def _prediction_main_figure(
         is_sel = (selected is not None and int(r["segment"]) == selected)
         base = RIDE_COLORS.get(rt, "#777")
         fig.add_vrect(
-            x0=s, x1=e,
+            x0=to_datetime(s, t0_ms), x1=to_datetime(e, t0_ms),
             fillcolor=SELECTED_COLOR if is_sel else base,
             opacity=0.35 if is_sel else 0.15,
             line_width=2 if is_sel else 0,
@@ -80,27 +87,62 @@ def _prediction_main_figure(
         )
     fig.update_layout(
         height=330, margin=dict(l=10, r=10, t=20, b=30),
-        xaxis_title="time (s)", yaxis_title="a_vert (m/s²)",
+        xaxis=dict(title="time", type="date"),
+        yaxis_title="a_vert (m/s²)",
         hovermode="x unified", plot_bgcolor="#fafbfc",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
     )
+
+    # Zoom to the currently-selected segment so the ride is centred.
+    # Double-click on the chart reverts to the full range.
+    if selected is not None:
+        sel_row = next((r for r in rows if int(r["segment"]) == selected), None)
+        if sel_row is not None:
+            s_sel = float(sel_row["start_s"]); e_sel = float(sel_row["end_s"])
+            if np.isfinite(s_sel) and np.isfinite(e_sel) and e_sel > s_sel:
+                pad = max(5.0, 0.5 * (e_sel - s_sel))
+                x_lo = s_sel - pad; x_hi = e_sel + pad
+                mask = (t >= x_lo) & (t <= x_hi)
+                if mask.any():
+                    local_lo = float(np.nanmin(a_vert[mask]))
+                    local_hi = float(np.nanmax(a_vert[mask]))
+                    y_pad = max(0.5, 0.10 * (local_hi - local_lo))
+                    fig.update_layout(
+                        xaxis=dict(title="time", type="date",
+                                   range=[to_datetime(x_lo, t0_ms),
+                                          to_datetime(x_hi, t0_ms)]),
+                        yaxis=dict(range=[local_lo - y_pad, local_hi + y_pad]),
+                    )
     return fig
 
 
 def _prediction_bar_figure(
     rows_by_algo: dict[str, list[dict]], selected: int | None,
+    t0_ms: float | None,
 ) -> go.Figure:
     """Grouped bar chart — one bar per (segment, algorithm) pair.
 
-    The selected segment is emphasised by dimming the opacity of the
-    other segments rather than recolouring, so the per-algorithm colour
+    Bars are labelled by the segment's start time (``HH:MM:SS``) instead
+    of the segment number, so the x-axis matches the time-series charts
+    above. The selected segment is emphasised by dimming the opacity of
+    the others rather than recolouring, so the per-algorithm colour
     legend stays meaningful.
     """
     fig = go.Figure()
     primary_id = ACCEL_ALGOS[0][0]
     rows_template = rows_by_algo.get(primary_id, [])
-    xs = [f"#{r['segment']}" for r in rows_template]
     seg_ids = [int(r["segment"]) for r in rows_template]
+    starts_dt = [to_datetime(float(r["start_s"]), t0_ms) for r in rows_template]
+    ends_dt = [to_datetime(float(r["end_s"]), t0_ms) for r in rows_template]
+    # Categorical x labels so plotly groups bars cleanly per segment;
+    # the time stays first-class via customdata for the hover.
+    xs = [dt.strftime("%H:%M:%S") for dt in starts_dt]
+    customdata = [
+        [seg_ids[i],
+         starts_dt[i].strftime("%Y-%m-%d %H:%M:%S"),
+         ends_dt[i].strftime("%H:%M:%S")]
+        for i in range(len(rows_template))
+    ]
 
     for algo_id, label, color in ACCEL_ALGOS:
         rows = rows_by_algo.get(algo_id, [])
@@ -113,16 +155,19 @@ def _prediction_bar_figure(
             for sid in seg_ids
         ]
         fig.add_trace(go.Bar(
-            x=xs, y=ys, name=label,
+            x=xs, y=ys, name=label, customdata=customdata,
             marker_color=color, marker_opacity=opacities,
             hovertemplate=(
                 f"<b>{label}</b><br>"
-                "seg %{x}<br>Δh=%{y:+.2f} m<extra></extra>"
+                "seg #%{customdata[0]}<br>"
+                "%{customdata[1]} → %{customdata[2]}<br>"
+                "Δh=%{y:+.2f} m<extra></extra>"
             ),
         ))
 
     fig.update_layout(
         height=300, margin=dict(l=10, r=10, t=10, b=30),
+        xaxis_title="segment start time",
         yaxis_title="Δh (m)", plot_bgcolor="#fafbfc",
         barmode="group", bargap=0.25, bargroupgap=0.08,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
@@ -231,7 +276,7 @@ def render() -> None:
         use_container_width=True, key="pred_main_fig",
     )
     st.plotly_chart(
-        _prediction_bar_figure(rows_by_algo, selected),
+        _prediction_bar_figure(rows_by_algo, selected, state.get("t0_ms")),
         use_container_width=True, key="pred_bar_fig",
     )
 

@@ -15,6 +15,7 @@ import streamlit as st
 from ui import api_client
 
 from .common import (
+    HOVER_DATETIME_FMT,
     LoadedSignal,
     PEAK_STATUS_COLORS,
     RIDE_COLORS,
@@ -29,6 +30,8 @@ from .common import (
     peak_status_legend_html,
     render_segment_sidebar,
     render_trapezoid_params,
+    to_datetime,
+    to_datetime_array,
     trapezoid_kernel,
     valid_segments,
 )
@@ -40,8 +43,7 @@ def _run_detector(loaded: LoadedSignal) -> None:
             preds, state, _t0_ms = api_client.segment(loaded.acc)
         except Exception as e:  # noqa: BLE001 — surface the error to the user
             st.error(
-                f"Segmentation API call failed ({type(e).__name__}: {e}). "
-                f"Is the API service reachable at {api_client.API_URL}?"
+                f"Segmentation failed ({type(e).__name__}: {e})."
             )
             preds, state = [], None
     st.session_state["detector_state"] = state if state else None
@@ -65,15 +67,17 @@ def _main_signal_figure(
     t = np.asarray(state["t"])
     a_vert = np.asarray(state["a_vert"])
     a_smooth = np.asarray(state["a_smooth"])
+    t0_ms = state.get("t0_ms")
+    dt = to_datetime_array(t, t0_ms)
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=t, y=a_vert, mode="lines", name="a_vert",
+        x=dt, y=a_vert, mode="lines", name="a_vert",
         line=dict(color="#233044", width=1),
-        hovertemplate="t=%{x:.2f}s<br>a=%{y:.2f} m/s²<extra></extra>",
+        hovertemplate=f"%{{x|{HOVER_DATETIME_FMT}}}<br>a=%{{y:.2f}} m/s²<extra></extra>",
     ))
     fig.add_trace(go.Scatter(
-        x=t, y=a_smooth, mode="lines", name="smoothed",
+        x=dt, y=a_smooth, mode="lines", name="smoothed",
         line=dict(color="#e67e22", width=1.6),
     ))
     for i, row in segments_df.iterrows():
@@ -87,7 +91,7 @@ def _main_signal_figure(
         is_selected = (selected_idx is not None and i == selected_idx)
         base = RIDE_COLORS.get(rt, RIDE_COLORS["up"])
         fig.add_vrect(
-            x0=s, x1=e,
+            x0=to_datetime(s, t0_ms), x1=to_datetime(e, t0_ms),
             fillcolor=SELECTED_COLOR if is_selected else base,
             opacity=0.32 if is_selected else 0.16,
             line_width=2 if is_selected else 0,
@@ -99,11 +103,38 @@ def _main_signal_figure(
         )
     fig.update_layout(
         height=360, margin=dict(l=10, r=10, t=30, b=30),
-        xaxis_title="time (s)", yaxis_title="a_vert (m/s²)",
+        xaxis_title="time", yaxis_title="a_vert (m/s²)",
+        xaxis=dict(type="date"),
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
         plot_bgcolor="#fafbfc",
     )
+
+    # Zoom the initial view to the currently-selected segment so the
+    # ride is centred. The user can double-click the plot to revert to
+    # the full-signal range at any time.
+    if selected_idx is not None and 0 <= selected_idx < len(segments_df):
+        try:
+            seg_sel = segments_df.iloc[selected_idx]
+            s_sel = float(seg_sel["start_s"]); e_sel = float(seg_sel["end_s"])
+        except (TypeError, ValueError, IndexError):
+            s_sel = e_sel = float("nan")
+        if np.isfinite(s_sel) and np.isfinite(e_sel) and e_sel > s_sel:
+            pad = max(5.0, 0.5 * (e_sel - s_sel))
+            x_lo = s_sel - pad; x_hi = e_sel + pad
+            mask = (t >= x_lo) & (t <= x_hi)
+            if mask.any():
+                local_lo = float(min(np.nanmin(a_vert[mask]),
+                                     np.nanmin(a_smooth[mask])))
+                local_hi = float(max(np.nanmax(a_vert[mask]),
+                                     np.nanmax(a_smooth[mask])))
+                y_pad = max(0.5, 0.10 * (local_hi - local_lo))
+                fig.update_layout(
+                    xaxis=dict(type="date",
+                               range=[to_datetime(x_lo, t0_ms),
+                                      to_datetime(x_hi, t0_ms)]),
+                    yaxis=dict(range=[local_lo - y_pad, local_hi + y_pad]),
+                )
     return fig
 
 
@@ -143,14 +174,16 @@ def _correlation_figure_with_peaks(
     pos_plot = np.where(np.isfinite(pos_r2), pos_r2, np.nan)
     neg_plot = np.where(np.isfinite(neg_r2), neg_r2, np.nan)
     mask = (t >= t_lo) & (t <= t_hi)
+    t0_ms = state.get("t0_ms")
+    dt_window = to_datetime_array(t[mask], t0_ms)
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=t[mask], y=pos_plot[mask], mode="lines", name="max R² (+)",
+        x=dt_window, y=pos_plot[mask], mode="lines", name="max R² (+)",
         line=dict(color="#2980b9", width=1.2),
     ))
     fig.add_trace(go.Scatter(
-        x=t[mask], y=neg_plot[mask], mode="lines", name="max R² (−)",
+        x=dt_window, y=neg_plot[mask], mode="lines", name="max R² (−)",
         line=dict(color="#c0392b", width=1.2),
     ))
     cfg = state.get("config")
@@ -169,19 +202,23 @@ def _correlation_figure_with_peaks(
             groups[tag][0].append(float(t[i]))
             groups[tag][1].append(float(arr[i]))
         for tag, (xs, ys) in groups.items():
+            xs_dt = to_datetime_array(np.asarray(xs), t0_ms)
             fig.add_trace(go.Scatter(
-                x=xs, y=ys, mode="markers",
+                x=xs_dt, y=ys, mode="markers",
                 name=f"{tag} ({'+' if sign > 0 else '−'})",
                 marker=dict(color=PEAK_STATUS_COLORS.get(tag, "#000"),
                             size=9, line=dict(color="#000", width=0.5)),
-                hovertemplate="t=%{x:.2f}s<br>R²=%{y:.3f}<br>"
+                hovertemplate=f"%{{x|{HOVER_DATETIME_FMT}}}<br>"
+                              "R²=%{y:.3f}<br>"
                               f"<b>{tag}</b><extra></extra>",
                 showlegend=False,
             ))
 
     fig.update_layout(
         height=260, margin=dict(l=10, r=10, t=30, b=30),
-        xaxis=dict(title="t (s)", range=[t_lo, t_hi]),
+        xaxis=dict(title="time", type="date",
+                   range=[to_datetime(t_lo, t0_ms),
+                          to_datetime(t_hi, t0_ms)]),
         yaxis=dict(title="R² (per sign)", range=[0, 1.05]),
         hovermode="closest", plot_bgcolor="#fafbfc",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
@@ -197,19 +234,23 @@ def _signal_with_trapezoid_figure(
     t = np.asarray(state["t"])
     a_vert = np.asarray(state["a_vert"])
     a_smooth = np.asarray(state["a_smooth"])
+    t0_ms = state.get("t0_ms")
     mask = (t >= t_lo - pad_s) & (t <= t_hi + pad_s)
+    dt_window = to_datetime_array(t[mask], t0_ms)
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=t[mask], y=a_vert[mask], mode="lines", name="a_vert",
+        x=dt_window, y=a_vert[mask], mode="lines", name="a_vert",
         line=dict(color="#233044", width=1),
+        hovertemplate=f"%{{x|{HOVER_DATETIME_FMT}}}<br>"
+                      "a=%{y:.2f} m/s²<extra></extra>",
     ))
     fig.add_trace(go.Scatter(
-        x=t[mask], y=a_smooth[mask], mode="lines", name="smoothed",
+        x=dt_window, y=a_smooth[mask], mode="lines", name="smoothed",
         line=dict(color="#e67e22", width=1.4),
     ))
     fig.add_hline(y=0, line_dash="dash", line_color="#bbb", opacity=0.6)
-    fig.add_vrect(x0=t_lo, x1=t_hi, fillcolor=SELECTED_COLOR,
-                  opacity=0.08, line_width=0)
+    fig.add_vrect(x0=to_datetime(t_lo, t0_ms), x1=to_datetime(t_hi, t0_ms),
+                  fillcolor=SELECTED_COLOR, opacity=0.08, line_width=0)
 
     if prediction is not None:
         for lobe_key, lobe_color in (("lobe1", "#c0392b"), ("lobe2", "#8e44ad")):
@@ -222,18 +263,21 @@ def _signal_with_trapezoid_figure(
             tt = np.linspace(t_c - W, t_c + W, 200)
             yy = A * trapezoid_kernel(tt, t_c, W, f)
             fig.add_trace(go.Scatter(
-                x=tt, y=yy, mode="lines", name=f"{lobe_key} template",
+                x=to_datetime_array(tt, t0_ms), y=yy,
+                mode="lines", name=f"{lobe_key} template",
                 line=dict(color=lobe_color, width=2.2),
             ))
             fig.add_trace(go.Scatter(
-                x=[t_c], y=[A], mode="markers", showlegend=False,
+                x=[to_datetime(t_c, t0_ms)], y=[A],
+                mode="markers", showlegend=False,
                 marker=dict(color=lobe_color, size=8,
                             line=dict(color="#000", width=0.5)),
             ))
 
     fig.update_layout(
         height=280, margin=dict(l=10, r=10, t=20, b=30),
-        xaxis_title="t (s)", yaxis_title="a (m/s²)",
+        xaxis=dict(title="time", type="date"),
+        yaxis_title="a (m/s²)",
         hovermode="x unified", plot_bgcolor="#fafbfc",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
     )

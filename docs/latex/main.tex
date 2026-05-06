@@ -11,7 +11,7 @@
 \usepackage[table]{xcolor}
 \usepackage{array}
 \usepackage{tikz}
-\usetikzlibrary{decorations.pathreplacing,arrows.meta,positioning,shapes.geometric,fit}
+\usetikzlibrary{decorations.pathreplacing,arrows.meta,positioning,shapes.geometric,fit,shadows}
 \usepackage{hyperref}
 \usepackage[margin=1in]{geometry}
 
@@ -1081,7 +1081,67 @@ half-width $W\in\mathcal{W}$ and a flat fraction $f\in\mathcal{F}$,
   \end{cases}
   \label{eq:trap-template}
 \end{equation}
-which is a deliberately simplified version of the first acceleration
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[>=Stealth, font=\small]
+  \pgfmathsetmacro{\W}{4.0}
+  \pgfmathsetmacro{\f}{0.45}
+  \pgfmathsetmacro{\fW}{\f*\W}
+  \pgfmathsetmacro{\hgt}{1.6}
+  % axes
+  \draw[->] ({-\W-0.8},0) -- ({\W+1.0},0) node[right] {$t$};
+  \draw[->] (0,-0.05) -- (0,{\hgt+1.1}) node[above] {$\tau_{W,f}(t)$};
+  % trapezoid outline (with zero tails outside [-W,W])
+  \draw[very thick, blue!70!black]
+    ({-\W-0.7},0) -- (-\W,0) --
+    (-\fW,\hgt) -- (\fW,\hgt) --
+    (\W,0) -- ({\W+0.7},0);
+  % plateau dashed level line
+  \draw[dashed,gray!50] (0,\hgt) -- (-\fW,\hgt);
+  \node[left] at (0,\hgt) {\small $1$};
+  % vertical guides at -W,-fW,fW,W
+  \draw[dotted,gray!55] (-\W,0) -- (-\W,0.18);
+  \draw[dotted,gray!55] (-\fW,0) -- (-\fW,\hgt);
+  \draw[dotted,gray!55] (\fW,0) -- (\fW,\hgt);
+  \draw[dotted,gray!55] (\W,0) -- (\W,0.18);
+  % x-axis tick labels
+  \node[below=2pt] at (-\W,0)  {\small $-W$};
+  \node[below=2pt] at (-\fW,0) {\small $-fW$};
+  \node[below=2pt] at (\fW,0)  {\small $fW$};
+  \node[below=2pt] at (\W,0)   {\small $W$};
+  % half-width bracket: 0 -> W, drawn above the plateau
+  \draw[decorate,decoration={brace,amplitude=4pt},thick,red!70!black]
+    (0,{\hgt+0.45}) -- (\W,{\hgt+0.45})
+    node[midway,above=3pt,red!70!black] {half-width $W$};
+  % plateau-width bracket: -fW -> fW, drawn below the axis
+  \draw[decorate,decoration={brace,amplitude=4pt,mirror},thick,orange!80!black]
+    (-\fW,-0.65) -- (\fW,-0.65)
+    node[midway,below=3pt,orange!80!black] {plateau $2fW$};
+  % ramp labels along the slopes
+  \node[blue!50!black,font=\scriptsize,rotate=42]
+    at ({-(\W+\fW)/2},{\hgt/2 + 0.18}) {ramp};
+  \node[blue!50!black,font=\scriptsize,rotate=-42]
+    at ({(\W+\fW)/2},{\hgt/2 + 0.18}) {ramp};
+\end{tikzpicture}
+\caption{The trapezoid template $\tau_{W,f}(t)$ of
+\eqref{eq:trap-template} with its two grid parameters labelled. The
+\textbf{half-width} $W$ (red brace) fixes the lobe support
+$[-W,\,W]$, and the \textbf{flat fraction} $f\in[0,1]$ controls the
+plateau-to-lobe ratio: the flat top spans $[-fW,\,fW]$ at unit
+amplitude (orange brace), and the two linear ramps connect
+$|t|=fW$ at amplitude~$1$ to $|t|=W$ at amplitude~$0$. Two corner
+cases follow directly from the geometry: $f=0$ collapses the plateau
+to a point and the template becomes a pure triangle (a short hop
+with no cruise at $a_{\max}$), while $f\to 1$ collapses the ramps
+and the template becomes a rectangle (a long ride spending most of
+its accel phase saturated at $a_{\max}$). The depicted instance is
+$f\!\approx\!0.45$.}
+\label{fig:trap-template}
+\end{figure}
+
+\noindent The template (Figure~\ref{fig:trap-template}) is a
+deliberately simplified version of the first acceleration
 lobe of \eqref{eq:elevator-template}: the flat plateau stands in for
 the $a_{\max}$ cruise, and the two linear ramps for the jerk-limited
 onset and offset. The identification with the kinematic parameters
@@ -3020,64 +3080,80 @@ verdict.
 \centering
 \resizebox{\textwidth}{!}{%
 \begin{tikzpicture}[
-  node distance=6mm and 8mm,
+  node distance=22mm and 30mm,
   every node/.style={font=\small},
-  block/.style={
-    rectangle, draw=black!70, thick, rounded corners=2pt,
-    minimum width=3.0cm, minimum height=0.95cm, align=center,
-    fill=blue!5,
-  },
-  data/.style={
-    rectangle, draw=black!50, dashed, rounded corners=2pt,
-    minimum width=2.4cm, minimum height=0.8cm, align=center,
-    fill=gray!8,
+  stage/.style={
+    rectangle, draw=black!80, very thick, rounded corners=4pt,
+    minimum width=3.2cm, minimum height=1.6cm, align=center,
+    fill=blue!12, font=\small\bfseries,
+    drop shadow={shadow xshift=0.6pt, shadow yshift=-0.6pt,
+                 fill=black!25, opacity=0.35},
   },
   output/.style={
-    rectangle, draw=black!70, thick, rounded corners=2pt,
-    minimum width=3.0cm, minimum height=0.95cm, align=center,
-    fill=green!7,
+    rectangle, draw=black!80, very thick, rounded corners=4pt,
+    minimum width=3.2cm, minimum height=1.6cm, align=center,
+    fill=green!18, font=\small\bfseries,
+    drop shadow={shadow xshift=0.6pt, shadow yshift=-0.6pt,
+                 fill=black!25, opacity=0.35},
   },
-  truth/.style={
-    rectangle, draw=black!50, dotted, rounded corners=2pt,
-    minimum width=2.6cm, minimum height=0.75cm, align=center,
-    fill=orange!7,
+  raw/.style={
+    rectangle, draw=black!60, dashed, rounded corners=4pt,
+    minimum width=2.6cm, minimum height=1.2cm, align=center,
+    fill=gray!10,
   },
-  arr/.style={-{Latex[length=2mm]}, thick, draw=black!70},
-  garr/.style={-{Latex[length=2mm]}, thick, dotted, draw=black!50},
+  arr/.style={
+    -{Latex[length=3.2mm,width=2.4mm]},
+    line width=1.1pt, draw=black!80,
+  },
+  datalabel/.style={
+    rectangle, draw=black!45, rounded corners=2.5pt,
+    fill=yellow!18, font=\scriptsize, align=center,
+    inner xsep=4pt, inner ysep=3pt,
+  },
 ]
-  \node[data] (raw) {Raw sensor log\\
-    \texttt{ACC, PRS, GYR, $\ldots$}};
-  \node[block, right=of raw] (loader) {Loader\\
-    \texttt{getExperimentData}};
-  \node[data, right=of loader] (acc) {ACC frame\\
-    ($x, y, z$ at $\sim 100$~Hz)};
-  \node[truth, below=4mm of acc] (gt) {GT ride list\\
-    + GT $\Delta h$\\ (barometer-derived)};
-  \node[block, right=of acc] (seg) {Segmenter\\
-    \texttt{ACC\_TEMPLATE\_MATCH}\\ (iter\_16)};
-  \node[data, below=4mm of seg] (segs) {Predicted intervals\\
-    $[t_s, t_e]$};
-  \node[block, right=of segs] (pred) {Predictor\\
-    \texttt{TRAPEZOID\_ACCEL}\\ ($\pm 3$~s pre/post)};
-  \node[output, right=of pred] (out) {$\Delta h$ + 90\% CI\\
-    per ride};
+  \node[raw]                    (raw)    {Raw sensor\\ log};
+  \node[stage, right=of raw]    (loader) {Loader\\
+    \footnotesize\mdseries\texttt{getExperimentData}};
+  \node[stage, right=of loader] (seg)    {Segmenter\\
+    \footnotesize\mdseries\texttt{ACC\_TEMPLATE\_MATCH}};
+  \node[stage, right=of seg]    (pred)   {Predictor\\
+    \footnotesize\mdseries\texttt{TRAPEZOID\_ACCEL}};
+  \node[output, right=of pred]  (out)    {Per-ride\\ output};
 
-  \draw[arr] (raw)    -- (loader);
-  \draw[arr] (loader) -- (acc);
-  \draw[garr] (loader.south) |- (gt.west);
-  \draw[arr] (acc)    -- (seg);
-  \draw[arr] (seg)    -- (segs);
-  \draw[arr] (segs)   -- (pred);
-  \draw[arr] (acc.south) |- ([yshift=2mm]pred.north west) -- (pred.north west);
-  \draw[arr] (pred)   -- (out);
+  \draw[arr] (raw) -- (loader);
+
+  \draw[arr] (loader) --
+    node[datalabel, midway, above=2mm, yshift=1mm]
+      {\textbf{ACC frame}\\
+       $\bigl(t,\; a_x,\; a_y,\; a_z\bigr)$\\
+       per-sample, $\sim 100$~Hz}
+    (seg);
+
+  \draw[arr] (seg) --
+    node[datalabel, midway, above=2mm, yshift=1mm]
+      {\textbf{Ride intervals}\\
+       $\bigl[t_{\text{start}},\; t_{\text{end}}\bigr]$\\
+       trapezoid fit $\bigl(w^{\!*},\; f^{\!*},\; A^{\!*}\bigr)$}
+    (pred);
+
+  \draw[arr] (pred) --
+    node[datalabel, midway, above=2mm, yshift=1mm]
+      {\textbf{Prediction}\\
+       $\widehat{\Delta h}$, \;90\% CI\\
+       quality score $q$}
+    (out);
 \end{tikzpicture}%
 }
 \caption{End-to-end pipeline flow. Solid blue blocks are deployed
-algorithm stages; dashed gray nodes are passive data; the dotted
-orange node belongs to the offline evaluation track only (the
-deployed system never sees the GT). The predictor consumes both
-the segmenter's interval and the surrounding $\pm 3$~s of ACC
-for gravity calibration.}
+algorithm stages; the dashed gray node is the raw on-disk sensor log
+and the green block is the user-facing output. Each arrow is labelled
+with the data contract crossing the stage boundary: the loader emits
+a per-sample accelerometer frame $(t, a_x, a_y, a_z)$ at
+$\sim 100$~Hz; the segmenter emits ride intervals
+$[t_{\text{start}}, t_{\text{end}}]$ together with the trapezoid
+template fit $(w^{*}, f^{*}, A^{*})$ (pulse half-width, separation,
+amplitude); the predictor emits the signed $\widehat{\Delta h}$, its
+$90\%$ conformal CI, and a per-ride quality score.}
 \label{fig:pipeline-flow}
 \end{figure}
 
@@ -3328,15 +3404,12 @@ contaminate that estimate even though no ride happened.
   cumulative sum (from $t = 0$) at the end of every clean
   prediction --- this is what the system would tell the user as
   their current altitude after each successful ride.
-  \textbf{Centre:} the same predicted altitude scattered against
-  the true cumulative altitude at the matched GT's end; clean
-  predictions hug the $y = x$ line and the spread is the
-  accumulated drift from prior errors. \textbf{Right:} residual
-  histogram (predicted $-$ true cumulative altitude) at each
-  clean prediction --- the bulk sits inside $\pm 1.5$~m even
-  after summing dozens of rides, with the tail driven mostly by
-  earlier FPs that have already polluted the running tally by
-  the time a clean prediction fires.}
+  \textbf{Right:} residual histogram (predicted $-$ true
+  cumulative altitude) at each clean prediction --- the bulk
+  sits inside $\pm 1.5$~m even after summing dozens of rides,
+  with the tail driven mostly by earlier FPs that have already
+  polluted the running tally by the time a clean prediction
+  fires.}
   \label{fig:pipeline-clean-altitude}
 \end{figure}
 

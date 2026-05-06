@@ -2,7 +2,11 @@
 
 Two-stage page: a chooser ("phone DB" / "upload file") and then the
 selected form. The phone-DB form requires a Phone ID that passes
-:func:`validate_phone_id`.
+:func:`validate_phone_id`. The file form takes a CSV or Excel file in
+the canonical ACC schema (``timestamp_ms``, ``x``, ``y``, ``z`` — same
+shape as the files under ``src/data/structuredData/data/<exp>/ACC.csv``);
+when the uploaded file uses different column names the user maps them,
+and the time column is auto-normalised to int64 milliseconds.
 """
 from __future__ import annotations
 
@@ -13,7 +17,6 @@ import pandas as pd
 import streamlit as st
 
 from .common import (
-    GRAVITY_MS2,
     LoadedSignal,
     PhoneType,
     STEP_HOWTO,
@@ -24,50 +27,133 @@ from .common import (
 )
 
 
-def _tabular_to_signal(
-    df: pd.DataFrame, time_col: str, acc_col: str, filename: str,
-) -> LoadedSignal:
-    """Reduce a user-provided Excel/CSV to the ACC schema the detector wants."""
-    t_raw = pd.to_numeric(df[time_col], errors="coerce").to_numpy(dtype=float)
-    a = pd.to_numeric(df[acc_col], errors="coerce").to_numpy(dtype=float)
-    good = np.isfinite(t_raw) & np.isfinite(a)
-    t_raw = t_raw[good]
-    a = a[good]
-    if t_raw.size < 10:
-        raise ValueError("Not enough numeric samples after cleaning (need ≥10).")
+# Canonical ACC schema, matching src/data/structuredData/data/<exp>/ACC.csv.
+CANONICAL_COLUMNS = ("timestamp_ms", "x", "y", "z")
+_MIN_SAMPLES = 10
 
-    span = float(t_raw[-1] - t_raw[0])
-    if span > 0 and span < 1e4:
-        ts_ms = (t_raw * 1000.0).astype("int64")
-    else:
-        ts_ms = t_raw.astype("int64")
-    n = t_raw.size
+
+def _detect_time_unit(ts: np.ndarray) -> tuple[str, np.ndarray]:
+    """Identify how the user encoded time and convert to int64 ms.
+
+    Heuristic, based on the magnitude of the largest timestamp:
+
+    * ``> 1e12`` — Unix epoch milliseconds (a ms past year 2001 is
+      already 13 digits, so anything this large is unambiguously ms).
+    * ``> 1e9``  — Unix epoch seconds (10-digit values like
+      ``1774373973``).
+    * otherwise — relative time from the start of the recording. Span
+      ``< 1e4`` is treated as seconds (a 5-minute capture spans ~300
+      units); anything wider is already in ms.
+    """
+    if ts.size == 0:
+        raise ValueError("Time column is empty after dropping non-numeric rows.")
+    mx = float(np.nanmax(ts))
+    mn = float(np.nanmin(ts))
+    span = mx - mn
+    if mx > 1e12:
+        return "Unix epoch milliseconds", ts.astype("int64")
+    if mx > 1e9:
+        return "Unix epoch seconds", (ts * 1000.0).astype("int64")
+    if span < 1e4:
+        return "relative seconds (from t=0)", (ts * 1000.0).astype("int64")
+    return "relative milliseconds (from t=0)", ts.astype("int64")
+
+
+def _csv_to_signal(
+    df: pd.DataFrame, mapping: dict[str, str], filename: str,
+) -> tuple[LoadedSignal, str]:
+    """Reduce a user-provided CSV to the canonical ACC schema.
+
+    ``mapping`` maps each canonical column (``timestamp_ms``, ``x``,
+    ``y``, ``z``) to the source column the user picked. Returns the
+    finished :class:`LoadedSignal` together with the detected time-unit
+    label so the caller can echo it back to the user.
+    """
+    cols = {k: mapping[k] for k in CANONICAL_COLUMNS}
+    if len(set(cols.values())) != len(cols):
+        raise ValueError(
+            "The same source column was mapped to more than one canonical "
+            "column. Pick a different column for each of time / x / y / z."
+        )
+    missing = [c for c in cols.values() if c not in df.columns]
+    if missing:
+        raise ValueError(f"Columns not found in the CSV: {missing}")
+
+    t_raw = pd.to_numeric(df[cols["timestamp_ms"]], errors="coerce").to_numpy(dtype=float)
+    x_raw = pd.to_numeric(df[cols["x"]],            errors="coerce").to_numpy(dtype=float)
+    y_raw = pd.to_numeric(df[cols["y"]],            errors="coerce").to_numpy(dtype=float)
+    z_raw = pd.to_numeric(df[cols["z"]],            errors="coerce").to_numpy(dtype=float)
+
+    good = (np.isfinite(t_raw) & np.isfinite(x_raw)
+            & np.isfinite(y_raw) & np.isfinite(z_raw))
+    n_dropped = int((~good).sum())
+    t_raw = t_raw[good]; x_raw = x_raw[good]
+    y_raw = y_raw[good]; z_raw = z_raw[good]
+
+    if t_raw.size < _MIN_SAMPLES:
+        raise ValueError(
+            f"Not enough numeric rows after cleaning "
+            f"(need ≥{_MIN_SAMPLES}, got {t_raw.size}). Check that the "
+            "columns you mapped actually hold numbers and that the file "
+            "isn't mostly blank."
+        )
+
+    time_label, ts_ms = _detect_time_unit(t_raw)
+
+    order = np.argsort(ts_ms, kind="stable")
+    out_of_order = int(np.sum(np.diff(ts_ms) < 0))
+    ts_ms = ts_ms[order]
+    x_raw = x_raw[order]; y_raw = y_raw[order]; z_raw = z_raw[order]
+
+    dup_mask = np.concatenate([[False], np.diff(ts_ms) == 0])
+    n_dups = int(dup_mask.sum())
+    if n_dups:
+        keep = ~dup_mask
+        ts_ms = ts_ms[keep]; x_raw = x_raw[keep]
+        y_raw = y_raw[keep]; z_raw = z_raw[keep]
+
+    if ts_ms.size < _MIN_SAMPLES:
+        raise ValueError(
+            f"Only {ts_ms.size} samples left after deduping repeated "
+            f"timestamps (need ≥{_MIN_SAMPLES}). The time column may have "
+            "many repeated values — check that you mapped the right column."
+        )
+
+    n = ts_ms.size
+    span_s = float(ts_ms[-1] - ts_ms[0]) / 1000.0
+    if span_s <= 0:
+        raise ValueError(
+            "Timestamps span zero seconds — every sample carries the same "
+            "time value. Map the time column to a non-constant column."
+        )
+    fs_hz = (n - 1) / span_s
+
     acc = pd.DataFrame({
         "timestamp_ms": ts_ms,
-        "x": np.zeros(n),
-        "y": np.zeros(n),
-        "z": GRAVITY_MS2 + a,
+        "x": x_raw, "y": y_raw, "z": z_raw,
     })
-    dt = float(np.median(np.diff(ts_ms))) / 1000.0 if n > 1 else 0.02
-    fs_est = 1.0 / dt if dt > 0 else float("nan")
+    notes: list[str] = []
+    if n_dropped:
+        notes.append(f"dropped {n_dropped} non-numeric rows")
+    if out_of_order:
+        notes.append(f"sorted {out_of_order} out-of-order samples")
+    if n_dups:
+        notes.append(f"removed {n_dups} duplicate timestamps")
+
     return LoadedSignal(
         acc=acc, source=f"File · {filename}",
         meta={
             "filename":    filename,
-            "time_column": time_col,
-            "acc_column":  acc_col,
             "samples":     int(n),
-            "sample_rate": f"{fs_est:.1f} Hz",
+            "sample_rate": f"{fs_hz:.1f} Hz",
+            "time_format": time_label,
+            "time_column": cols["timestamp_ms"],
+            "x_column":    cols["x"],
+            "y_column":    cols["y"],
+            "z_column":    cols["z"],
+            "notes":       "; ".join(notes) if notes else "",
         },
-    )
-
-
-def _read_tabular_upload(uploaded) -> pd.DataFrame:
-    """Pick the right reader based on the uploaded file's extension."""
-    name = (uploaded.name or "").lower()
-    if name.endswith(".csv"):
-        return pd.read_csv(uploaded)
-    return pd.read_excel(uploaded)
+    ), time_label
 
 
 def validate_phone_id(value: str) -> tuple[bool, str]:
@@ -116,9 +202,11 @@ def _render_mode_picker() -> None:
     with c2:
         st.markdown(
             '<div class="info-block">'
-            '<b>📂 Upload an Excel / CSV file</b><br>'
-            'Bring your own recording. Needs a time column and a '
-            'vertical-acceleration column.'
+            '<b>📂 Upload a CSV / Excel file</b><br>'
+            'Bring your own recording in the canonical ACC schema '
+            '(<code>timestamp_ms</code>, <code>x</code>, <code>y</code>, '
+            '<code>z</code>) — or any 4-column file and map the columns '
+            'on the next page.'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -205,62 +293,124 @@ def _render_phone_form() -> None:
             goto(STEP_SEGMENT)
 
 
+def _read_tabular_upload(uploaded) -> pd.DataFrame:
+    """Pick the right pandas reader based on the upload's extension.
+
+    Streamlit hands us an :class:`UploadedFile` (a buffer with a
+    ``.name`` attribute). The reader is chosen by suffix — pandas needs
+    different functions for CSV vs Excel, and Excel additionally needs
+    ``openpyxl`` (xlsx) or ``xlrd`` (xls) installed.
+    """
+    name = (uploaded.name or "").lower()
+    if name.endswith(".csv"):
+        return pd.read_csv(uploaded)
+    if name.endswith(".xlsx") or name.endswith(".xls"):
+        return pd.read_excel(uploaded)
+    raise ValueError(
+        f"Unsupported file type: {uploaded.name!r}. "
+        "Use a .csv, .xlsx, or .xls file."
+    )
+
+
 def _render_file_form() -> None:
     st.markdown(
         '<div class="hero">'
         '<span class="step-pill">Step 2 · Upload</span>'
-        '<h1>Upload an Excel / CSV file</h1>'
-        '<p>Pick a tabular file with a time column and a vertical-'
-        'acceleration column.</p>'
+        '<h1>Upload a CSV / Excel file (ACC schema)</h1>'
+        '<p>Provide a file in the canonical accelerometer schema, or '
+        'any 4-column file and map the columns below.</p>'
         '</div>',
         unsafe_allow_html=True,
     )
     _render_change_mode_link("file")
 
     st.markdown(
-        '<div class="info-block"><b>Expected file structure</b><br>'
-        'A spreadsheet (.xlsx / .xls) or CSV with at least two columns:'
+        '<div class="info-block"><b>Required file format</b><br>'
+        'A CSV (.csv) or Excel sheet (.xlsx / .xls) with a header row '
+        'and four numeric columns:'
         '<ul style="margin:0.3rem 0 0 1.2rem">'
-        '<li><b>time</b> — numeric timestamps. Seconds (e.g. <code>0.00, '
-        '0.02, …</code>) <i>or</i> milliseconds (Unix epoch ms). The app '
-        'auto-detects the unit from the value range.</li>'
-        '<li><b>vertical acceleration</b> — numeric, in m/s². This is '
-        'acceleration along the gravity axis (gravity removed <i>or</i> '
-        'included — the detector only needs the relative signal).</li>'
+        '<li><code>timestamp_ms</code> — Unix epoch in milliseconds. '
+        'Epoch seconds and relative time (seconds or milliseconds from '
+        'the start of the recording) are also accepted; the form '
+        'auto-detects the unit and converts on the fly.</li>'
+        '<li><code>x</code>, <code>y</code>, <code>z</code> — '
+        'accelerometer axes in m/s², gravity included (the canonical '
+        'files store the raw IMU reading — gravity sits on whichever '
+        'axis the phone was held along, usually z ≈ 9.8).</li>'
         '</ul>'
-        'Other columns are ignored. The first row must contain the '
-        'column headers. Pick which header is which in the dropdowns '
-        'below after uploading.'
+        'Reference file: <code>src/data/structuredData/data/&lt;exp&gt;/ACC.csv</code>. '
+        'If your file uses different column names, map them with the '
+        'dropdowns that appear after upload.'
         '</div>',
         unsafe_allow_html=True,
     )
 
     uploaded = st.file_uploader(
-        "Upload .xlsx, .xls, or .csv", type=["xlsx", "xls", "csv"],
-        key="file_uploader",
+        "Upload .csv, .xlsx, or .xls",
+        type=["csv", "xlsx", "xls"], key="file_uploader",
     )
 
     file_df: pd.DataFrame | None = None
-    time_col = acc_col = None
     if uploaded is not None:
         try:
             file_df = _read_tabular_upload(uploaded)
         except Exception as e:
             st.error(f"Could not read file: {type(e).__name__}: {e}")
             file_df = None
+        if file_df is not None and file_df.empty:
+            st.error("The uploaded file has no rows.")
+            file_df = None
+        if file_df is not None and len(file_df.columns) < 4:
+            st.error(
+                f"The file needs at least 4 columns (time, x, y, z) — "
+                f"got {len(file_df.columns)}: {list(file_df.columns)}"
+            )
+            file_df = None
 
+    mapping: dict[str, str] | None = None
     if file_df is not None:
+        cols = list(file_df.columns)
+        canonical = all(c in cols for c in CANONICAL_COLUMNS)
+        if canonical:
+            st.success(
+                "Canonical ACC schema detected — using "
+                "`timestamp_ms`, `x`, `y`, `z` directly. You can override "
+                "the mapping below if needed."
+            )
+
+        st.markdown("**Map source columns → canonical schema**")
+
+        def _default(canon: str) -> int:
+            return cols.index(canon) if canon in cols else 0
+
+        cc1, cc2, cc3, cc4 = st.columns(4)
+        with cc1:
+            t_col = st.selectbox("Time column", cols,
+                                 index=_default("timestamp_ms"),
+                                 key="map_time_col")
+        with cc2:
+            x_col = st.selectbox("X column", cols,
+                                 index=_default("x"), key="map_x_col")
+        with cc3:
+            y_col = st.selectbox("Y column", cols,
+                                 index=_default("y"), key="map_y_col")
+        with cc4:
+            z_col = st.selectbox("Z column", cols,
+                                 index=_default("z"), key="map_z_col")
+
+        picked = [t_col, x_col, y_col, z_col]
+        if len(set(picked)) != len(picked):
+            st.error(
+                "Each canonical column must map to a different source "
+                f"column — currently: {picked}"
+            )
+        else:
+            mapping = {
+                "timestamp_ms": t_col, "x": x_col, "y": y_col, "z": z_col,
+            }
+
         st.markdown("**Preview (first 12 rows)**")
         st.dataframe(file_df.head(12), use_container_width=True, height=220)
-        cols = list(file_df.columns)
-        cc1, cc2 = st.columns(2)
-        with cc1:
-            time_col = st.selectbox("Time column", cols, key="xl_time_col")
-        with cc2:
-            acc_col = st.selectbox(
-                "Accelerometer column",
-                [c for c in cols if c != time_col], key="xl_acc_col",
-            )
 
     st.divider()
     c_back, c_next, _ = st.columns([1.0, 1.2, 3.0])
@@ -268,19 +418,22 @@ def _render_file_form() -> None:
         if st.button("← Back"):
             goto(STEP_HOWTO)
     with c_next:
-        ready = (file_df is not None
-                 and time_col is not None and acc_col is not None)
+        ready = file_df is not None and mapping is not None
         if st.button("Next →", type="primary",
                      key="btn_file_next", disabled=not ready):
             try:
-                loaded = _tabular_to_signal(
-                    file_df, time_col, acc_col, uploaded.name,
+                loaded, time_label = _csv_to_signal(
+                    file_df, mapping, uploaded.name,
                 )
             except Exception as e:
                 st.error(f"Load failed: {type(e).__name__}: {e}")
                 return
             st.session_state["loaded"] = loaded
             reset_downstream_state()
+            st.success(
+                f"Loaded {loaded.meta['samples']} samples at "
+                f"{loaded.meta['sample_rate']} (time format: {time_label})."
+            )
             goto(STEP_SEGMENT)
 
 

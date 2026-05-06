@@ -773,7 +773,7 @@ def clean_predicted_altitude(
     BIN_W = 0.5 if AX_LIM_S <= 10 else (1.0 if AX_LIM_S <= 30 else 2.0)
     edges_alt = np.arange(-AX_LIM_S, AX_LIM_S + BIN_W, BIN_W)
 
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4.8))
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.8))
 
     # ---- Panel 1: histogram of predicted cumulative altitude ----
     n_out_alt = int((np.abs(arr_pred) > AX_LIM_S).sum())
@@ -795,47 +795,28 @@ def clean_predicted_altitude(
     axes[0].grid(True, axis="y", alpha=0.3)
     axes[0].legend(loc="upper right", fontsize=8)
 
-    # ---- Panel 2: scatter pred vs true cumulative altitude ----
-    m_lim = float(max(AX_LIM_S,
-                      np.max(np.abs(arr_pred)),
-                      np.max(np.abs(arr_true)))) * 1.05
-    axes[1].scatter(arr_true, arr_pred, s=22, alpha=0.6,
-                    color=COLOR["matched"], edgecolor="none")
-    axes[1].plot([-m_lim, m_lim], [-m_lim, m_lim], "k--", lw=0.7,
-                 alpha=0.6, label="$y = x$")
-    axes[1].axhline(0, color="gray", lw=0.4, alpha=0.5)
-    axes[1].axvline(0, color="gray", lw=0.4, alpha=0.5)
-    axes[1].set_xlim(-m_lim, m_lim); axes[1].set_ylim(-m_lim, m_lim)
-    axes[1].set_xlabel("true cumulative altitude at matched-GT end (m)")
-    axes[1].set_ylabel("predicted cumulative altitude (m)")
-    axes[1].set_title(
-        f"Predicted vs true cumulative altitude  (n={len(arr_pred)})"
-    )
-    axes[1].grid(True, alpha=0.3)
-    axes[1].legend(loc="lower right", fontsize=8)
-
-    # ---- Panel 3: residual histogram ----
+    # ---- Panel 2: residual histogram ----
     ERR_LIM = 5.0
     BIN_E = 0.5
     edges_err = np.arange(-ERR_LIM, ERR_LIM + BIN_E, BIN_E)
     n_out_err = int((np.abs(arr_err) > ERR_LIM).sum())
-    axes[2].hist(arr_err, bins=edges_err, color="#16a085", alpha=0.85,
+    axes[1].hist(arr_err, bins=edges_err, color="#16a085", alpha=0.85,
                  edgecolor="white")
-    axes[2].axvline(0, color="black", ls="--", lw=0.5)
-    axes[2].axvline(float(np.median(arr_err)), color="#c0392b", ls="--",
+    axes[1].axvline(0, color="black", ls="--", lw=0.5)
+    axes[1].axvline(float(np.median(arr_err)), color="#c0392b", ls="--",
                     lw=0.8, label=f"median = {np.median(arr_err):+.2f} m")
-    axes[2].set_xlim(-ERR_LIM, ERR_LIM)
-    axes[2].set_xlabel(
+    axes[1].set_xlim(-ERR_LIM, ERR_LIM)
+    axes[1].set_xlabel(
         "cumulative altitude error: pred $-$ true (m)  "
         f"[{BIN_E:g}-m bins, $\\pm${int(ERR_LIM)} m clipped]"
     )
-    axes[2].set_ylabel("count")
-    axes[2].set_title(
+    axes[1].set_ylabel("count")
+    axes[1].set_title(
         f"Residual at each correct prediction  "
         f"(n={len(arr_err)}; {n_out_err} outside)"
     )
-    axes[2].grid(True, axis="y", alpha=0.3)
-    axes[2].legend(loc="upper right", fontsize=8)
+    axes[1].grid(True, axis="y", alpha=0.3)
+    axes[1].legend(loc="upper right", fontsize=8)
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=120)
