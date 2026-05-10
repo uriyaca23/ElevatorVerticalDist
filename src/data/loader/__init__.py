@@ -36,6 +36,7 @@ from .constants import (
     EXPERIMENT_TYPES,
     FOR_BAROMETER_PLOT_FILENAME,
     FOR_BAROMETER_SUBDIR,
+    GAP_THRESHOLD_S,
     GT_COLUMNS,
     GT_CSV,
     GT_FILENAME,
@@ -51,6 +52,7 @@ from .constants import (
     STRUCTURED_DATA_DIR,
     STRUCTURED_INDEX_CSV,
     STRUCTURED_ROOT,
+    THRESHOLD_FREQUENCY_HZ,
     VALID_SOURCES,
 )
 from .legacy import (
@@ -66,6 +68,7 @@ from .parsing import (
 )
 from .pipeline import (
     ExperimentPipeline,
+    _detect_valid_intervals as detect_valid_intervals,
     classify_experiment_type,
     getExperimentData,
     getExperimentRawParsed,
@@ -101,9 +104,12 @@ __all__ = [
     "SOURCE_IDO",
     "SOURCE_REAL_WORLD",
     "VALID_SOURCES",
+    "THRESHOLD_FREQUENCY_HZ",
+    "GAP_THRESHOLD_S",
     # Pipeline
     "ExperimentPipeline",
     "classify_experiment_type",
+    "detect_valid_intervals",
     "getExperimentRawParsed",
     "getExperimentData",
     "saveExperimentData",

@@ -21,10 +21,13 @@ from .common import (
     PhoneType,
     STEP_HOWTO,
     STEP_SEGMENT,
+    enrich_loaded,
     goto,
     loadDataFromS3,
     reset_downstream_state,
+    split_acc_into_parts,
 )
+from src.data.loader import detect_valid_intervals
 
 
 # Canonical ACC schema, matching src/data/structuredData/data/<exp>/ACC.csv.
@@ -140,6 +143,14 @@ def _csv_to_signal(
     if n_dups:
         notes.append(f"removed {n_dups} duplicate timestamps")
 
+    # Gap detection: any consecutive-sample gap > GAP_THRESHOLD_S splits the
+    # signal into separate valid intervals; downstream UI flags the gaps as
+    # "no data" and segmenter/predictor only run inside valid intervals.
+    valid_intervals = detect_valid_intervals(ts_ms)
+    if len(valid_intervals) > 1:
+        notes.append(f"detected {len(valid_intervals)} valid intervals (gaps present)")
+    acc_parts = split_acc_into_parts(acc, valid_intervals)
+
     return LoadedSignal(
         acc=acc, source=f"File · {filename}",
         meta={
@@ -152,7 +163,10 @@ def _csv_to_signal(
             "y_column":    cols["y"],
             "z_column":    cols["z"],
             "notes":       "; ".join(notes) if notes else "",
+            "valid_intervals_count": len(valid_intervals),
         },
+        valid_intervals=valid_intervals,
+        acc_parts=acc_parts,
     ), time_label
 
 
@@ -288,6 +302,10 @@ def _render_phone_form() -> None:
                 loaded = loadDataFromS3(
                     PhoneType(phone), phone_id_raw.strip(), t_start, t_end,
                 )
+                # Post-load: detect valid intervals and split into gap-free
+                # parts. Kept out of loadDataFromS3 itself so the DB loader
+                # stays a pure fetcher.
+                loaded = enrich_loaded(loaded)
             st.session_state["loaded"] = loaded
             reset_downstream_state()
             goto(STEP_SEGMENT)

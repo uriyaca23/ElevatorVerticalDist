@@ -37,15 +37,90 @@ from .common import (
 )
 
 
+def _shift_prediction(p: dict, shift_s: float) -> dict:
+    """Return a copy of ``p`` with every time-domain field offset by
+    ``shift_s`` seconds. Per-part calls return predictions in chunk-local
+    seconds; downstream code wants canonical full-signal seconds, and we
+    must shift *all* time fields — including ``lobe{1,2}.t_c`` —
+    otherwise the trapezoid template overlay renders at the wrong
+    horizontal position (a previous bug surfaced as a tiny trapezoid
+    parked at the start of the recording while the actual signal slice
+    was minutes later).
+    """
+    q = dict(p)
+    if "t_start_s" in p:
+        q["t_start_s"] = float(p["t_start_s"]) + shift_s
+    if "t_end_s" in p:
+        q["t_end_s"] = float(p["t_end_s"]) + shift_s
+    for lobe_key in ("lobe1", "lobe2"):
+        lobe = p.get(lobe_key)
+        if isinstance(lobe, dict) and "t_c" in lobe:
+            q[lobe_key] = {**lobe, "t_c": float(lobe["t_c"]) + shift_s}
+    return q
+
+
 def _run_detector(loaded: LoadedSignal) -> None:
-    with st.spinner("Running trapezoid-template detector…"):
+    """Run the trapezoid-template detector once per gap-free part.
+
+    The pipeline splits the raw signal into ``loaded.acc_parts`` — one
+    DataFrame per valid interval — at load time. We run the detector on
+    each part in isolation, then concatenate predictions onto a single
+    canonical time axis. This keeps the detector blind to the gaps (no
+    false matches that span a dropout) and keeps every downstream plot
+    in absolute wall-clock time.
+
+    The ``state`` returned to the UI for visualisation purposes is also
+    derived from the ACC concatenated across parts; that's the value
+    ``api_client.segment`` already computes when handed
+    ``loaded.acc`` (rows in gap regions were dropped at load time, so
+    its timestamps already form the canonical, gap-skipping axis).
+    """
+    parts = loaded.acc_parts or ([loaded.acc] if not loaded.acc.empty else [])
+    if not parts:
+        st.session_state["detector_state"] = None
+        st.session_state["predictions"] = []
+        st.session_state["segments_df"] = pd.DataFrame(
+            columns=["type", "start_s", "end_s", "joint_r2"],
+        )
+        st.session_state["selected_segment"] = None
+        return
+
+    with st.spinner(
+        f"Running trapezoid-template detector on {len(parts)} part(s)…"
+    ):
+        # The full-signal call gives us a canonical visualisation state
+        # whose timestamp_ms / t arrays already match the gap-aware axis
+        # the loader produced.
         try:
-            preds, state, _t0_ms = api_client.segment(loaded.acc)
-        except Exception as e:  # noqa: BLE001 — surface the error to the user
-            st.error(
-                f"Segmentation failed ({type(e).__name__}: {e})."
-            )
-            preds, state = [], None
+            _full_preds, state, _t0_ms = api_client.segment(loaded.acc)
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Segmentation failed ({type(e).__name__}: {e}).")
+            state = None
+
+        # Per-part detection — one call per gap-free DataFrame.
+        canonical_t0_ms = float(loaded.acc["timestamp_ms"].iloc[0])
+        preds: list[dict] = []
+        for i, part in enumerate(parts):
+            if part is None or len(part) < 2:
+                continue
+            try:
+                part_preds, _ps, part_t0_ms = api_client.segment(
+                    part, include_state=False,
+                )
+            except Exception as e:  # noqa: BLE001
+                st.warning(
+                    f"Detection failed on part #{i} "
+                    f"({type(e).__name__}: {e}); skipping."
+                )
+                continue
+            shift_s = (
+                (part_t0_ms if part_t0_ms is not None
+                 else float(part["timestamp_ms"].iloc[0]))
+                - canonical_t0_ms
+            ) / 1000.0
+            for p in part_preds:
+                preds.append(_shift_prediction(p, shift_s))
+
     st.session_state["detector_state"] = state if state else None
     st.session_state["predictions"] = preds
     rows = [
@@ -61,8 +136,64 @@ def _run_detector(loaded: LoadedSignal) -> None:
     st.session_state["selected_segment"] = 0 if rows else None
 
 
+def _gap_spans_seconds(
+    valid_intervals: list[tuple[int, int]] | None,
+    t0_ms: float | None,
+    t_lo: float, t_hi: float,
+) -> list[tuple[float, float]]:
+    """Return the complement of valid_intervals over [t_lo, t_hi] in seconds.
+
+    Inputs are absolute Unix-ms intervals; outputs are relative seconds
+    on the same time axis the figure uses. Empty / missing inputs → empty
+    list (caller skips rendering the red overlays).
+    """
+    if not valid_intervals or t0_ms is None:
+        return []
+    epoch = float(t0_ms)
+    valid_s = sorted(
+        ((float(a) - epoch) / 1000.0, (float(b) - epoch) / 1000.0)
+        for a, b in valid_intervals
+    )
+    gaps: list[tuple[float, float]] = []
+    cursor = float(t_lo)
+    for s, e in valid_s:
+        if e <= cursor:
+            continue
+        if s > cursor:
+            gaps.append((cursor, min(s, t_hi)))
+        cursor = max(cursor, e)
+        if cursor >= t_hi:
+            break
+    if cursor < t_hi:
+        gaps.append((cursor, t_hi))
+    return [(a, b) for a, b in gaps if b > a]
+
+
+def _add_gap_overlays(
+    fig: go.Figure,
+    valid_intervals: list[tuple[int, int]] | None,
+    t0_ms: float | None,
+    t_lo: float, t_hi: float,
+) -> None:
+    """Shade gap regions in red and stamp a ✕ on each."""
+    gaps = _gap_spans_seconds(valid_intervals, t0_ms, t_lo, t_hi)
+    if not gaps:
+        return
+    for s, e in gaps:
+        fig.add_vrect(
+            x0=to_datetime(s, t0_ms), x1=to_datetime(e, t0_ms),
+            fillcolor="#3498db", opacity=0.28, line_width=0,
+            annotation_text="✕ no data",
+            annotation_position="top right",
+            annotation_font_color="#1b5b8e",
+            annotation_font_size=11,
+            layer="below",
+        )
+
+
 def _main_signal_figure(
     state: dict, segments_df: pd.DataFrame, selected_idx: int | None,
+    valid_intervals: list[tuple[int, int]] | None = None,
 ) -> go.Figure:
     t = np.asarray(state["t"])
     a_vert = np.asarray(state["a_vert"])
@@ -80,6 +211,8 @@ def _main_signal_figure(
         x=dt, y=a_smooth, mode="lines", name="smoothed",
         line=dict(color="#e67e22", width=1.6),
     ))
+    if t.size:
+        _add_gap_overlays(fig, valid_intervals, t0_ms, float(t[0]), float(t[-1]))
     for i, row in segments_df.iterrows():
         try:
             s = float(row["start_s"]); e = float(row["end_s"])
@@ -325,7 +458,9 @@ def render() -> None:
 
     st.markdown("### Signal + segments")
     st.plotly_chart(
-        _main_signal_figure(state, segments_df, sel),
+        _main_signal_figure(
+            state, segments_df, sel, valid_intervals=loaded.valid_intervals,
+        ),
         use_container_width=True, key="seg_main_fig",
     )
 

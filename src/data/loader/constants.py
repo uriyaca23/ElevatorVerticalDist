@@ -92,3 +92,10 @@ GT_COLUMNS = [
     "start_ms", "end_ms", "type", "description",
     "signalClearRecording", "height_diff_m",
 ]
+
+# Gap detection: any spacing between consecutive samples larger than
+# 1/THRESHOLD_FREQUENCY_HZ seconds is treated as a "no data" gap that splits
+# the recording into separate valid intervals. Below 1 Hz we effectively
+# have no signal.
+THRESHOLD_FREQUENCY_HZ = 1.0
+GAP_THRESHOLD_S = 1.0 / THRESHOLD_FREQUENCY_HZ

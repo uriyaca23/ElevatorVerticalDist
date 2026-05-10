@@ -17,7 +17,16 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from src.data.loadFromDB import LoadedSignal, PhoneType, loadDataFromS3
+# Unified loader entry point lives in src/data/load_data.py so non-UI
+# tools (gt_editor, segmentation/editor) can import the same helpers
+# without depending on the streamlit package.
+from src.data.load_data import (
+    LoadedSignal,
+    enrich_loaded,
+    load_data,
+    split_acc_into_parts,
+)
+from src.data.loadFromDB import PhoneType, loadDataFromS3
 from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (
     detect as _detect,
 )
@@ -47,7 +56,7 @@ ALGO_ZUPT = "zupt"
 
 APP_TITLE = "Elevator Vertical Distance — Boutique Pipeline"
 GRAVITY_MS2 = 9.80665
-RIDE_COLORS = {"up": "#1f6feb", "down": "#b54a9b", "outside": "#9aa0a6"}
+RIDE_COLORS = {"up": "#2ca02c", "down": "#b54a9b", "outside": "#9aa0a6"}
 SELECTED_COLOR = "#e67e22"
 
 # Accelerometer-only prediction algorithms run side-by-side on the Predict

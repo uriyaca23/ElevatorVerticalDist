@@ -1,0 +1,115 @@
+{
+  "train": {
+    "zupt": {
+      "calibration": {
+        "n_used": 382,
+        "n_accepted": 310,
+        "multiplier": 46.05639805975216,
+        "p95_score": 46.05639805975216
+      },
+      "metrics": {
+        "n_total": 415,
+        "n_clean": 382,
+        "n_accepted_clean": 310,
+        "clean_mae": 7.759813442454582,
+        "clean_median_abs_err": 0.7517069238784992,
+        "clean_rmse": 39.626202165375574,
+        "clean_coverage_90": 0.9136125654450262,
+        "clean_median_ci": 24.93630816039829,
+        "clean_mean_ci": 32.14252192410985,
+        "clean_p95_abs_err": 30.20623119016325,
+        "accepted_clean_mae": 2.9008883393177083,
+        "accepted_clean_median_abs_err": 0.37864861077873724,
+        "accepted_clean_rmse": 7.121858856346702,
+        "accepted_clean_coverage_90": 0.9290322580645162,
+        "accepted_clean_median_ci": 20.485021317307783,
+        "filter_accept_rate": 0.7951807228915663,
+        "filter_accept_rate_clean": 0.8115183246073299,
+        "filter_reject_rate_unclean": 0.3939393939393939,
+        "clean_frac_within_1_5m": 0.6178010471204188,
+        "clean_frac_within_3m": 0.6832460732984293
+      }
+    },
+    "trapezoid": {
+      "calibration": {
+        "n_used": 239,
+        "multiplier": 25.153085323148826,
+        "p95_score": 25.153085323148826
+      },
+      "metrics": {
+        "n_total": 415,
+        "n_clean": 382,
+        "n_accepted_clean": 239,
+        "clean_mae": 5.434147406721832,
+        "clean_median_abs_err": 0.5690317670570493,
+        "clean_rmse": 11.770120764499485,
+        "clean_coverage_90": 0.8455497382198953,
+        "clean_median_ci": 6.2617995115957665,
+        "clean_mean_ci": 9.444645288670905,
+        "clean_p95_abs_err": 28.900947467595632,
+        "accepted_clean_mae": 2.4502040237578386,
+        "accepted_clean_median_abs_err": 0.2531026189329979,
+        "accepted_clean_rmse": 7.214859182724105,
+        "accepted_clean_coverage_90": 0.9246861924686193,
+        "accepted_clean_median_ci": 4.867016609879344,
+        "filter_accept_rate": 0.6,
+        "filter_accept_rate_clean": 0.6256544502617801,
+        "filter_reject_rate_unclean": 0.696969696969697,
+        "clean_frac_within_1_5m": 0.6282722513089005,
+        "clean_frac_within_3m": 0.675392670157068
+      }
+    }
+  },
+  "test": {
+    "zupt": {
+      "calibration": null,
+      "metrics": {
+        "n_total": 108,
+        "n_clean": 108,
+        "n_accepted_clean": 95,
+        "clean_mae": 25.139471075243918,
+        "clean_median_abs_err": 2.1578237952201844,
+        "clean_rmse": 131.3862673860404,
+        "clean_coverage_90": 0.8981481481481481,
+        "clean_median_ci": 21.169092815340832,
+        "clean_mean_ci": 29.06113887940017,
+        "clean_p95_abs_err": 32.718676568471956,
+        "accepted_clean_mae": 6.404618584658947,
+        "accepted_clean_median_abs_err": 0.8812247990712265,
+        "accepted_clean_rmse": 12.11152942854118,
+        "accepted_clean_coverage_90": 0.9263157894736842,
+        "accepted_clean_median_ci": 19.555103945163356,
+        "filter_accept_rate": 0.8796296296296297,
+        "filter_accept_rate_clean": 0.8796296296296297,
+        "filter_reject_rate_unclean": NaN,
+        "clean_frac_within_1_5m": 0.48148148148148145,
+        "clean_frac_within_3m": 0.5185185185185185
+      }
+    },
+    "trapezoid": {
+      "calibration": null,
+      "metrics": {
+        "n_total": 108,
+        "n_clean": 108,
+        "n_accepted_clean": 66,
+        "clean_mae": 8.938769945786285,
+        "clean_median_abs_err": 1.7375521414213946,
+        "clean_rmse": 29.603569420001577,
+        "clean_coverage_90": 0.7037037037037037,
+        "clean_median_ci": 5.923901574118329,
+        "clean_mean_ci": 9.292937566843682,
+        "clean_p95_abs_err": 29.050492832557786,
+        "accepted_clean_mae": 3.057805093712346,
+        "accepted_clean_median_abs_err": 0.2536748979765844,
+        "accepted_clean_rmse": 8.350080580530674,
+        "accepted_clean_coverage_90": 0.8484848484848485,
+        "accepted_clean_median_ci": 5.781737123723202,
+        "filter_accept_rate": 0.6111111111111112,
+        "filter_accept_rate_clean": 0.6111111111111112,
+        "filter_reject_rate_unclean": NaN,
+        "clean_frac_within_1_5m": 0.5,
+        "clean_frac_within_3m": 0.5277777777777778
+      }
+    }
+  }
+}

@@ -123,7 +123,10 @@ def process_experiment(name: str) -> int:
 
     rides: list[dict] = []
     ride_idx = 0
-    for _slice, row, _meta in ExperimentPipeline(sensors, gt, meta):
+    for _slice, row, _meta in ExperimentPipeline(
+        sensors, gt, meta,
+        valid_intervals=gt.attrs.get("valid_intervals_per_sensor", {}),
+    ):
         typ = str(row["type"])
         if typ not in ("up", "down"):
             continue

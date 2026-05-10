@@ -501,6 +501,148 @@ code changes, pass \texttt{use\_cache=False}. The CSV schemas are
 documented in \texttt{src/data/README.md} and frozen in
 \texttt{loader/constants.py}.
 
+\subsection{Sample Frequency Analysis and the Solution for
+Low-Frequency / Missing Parts}
+\label{sec:sample-frequency}
+
+\paragraph{Why this matters.} Mobile phones do not guarantee a uniform
+sample rate on the IMU bus. The OS may throttle the sensor when the
+device is locked, when battery saver kicks in, or when a higher-priority
+app suspends background work; the application itself may drop a batch of
+samples after a buffer overflow. The result is that an apparently
+``50~Hz'' recording can contain stretches of seconds with no samples
+at all, or stretches where the effective rate has fallen well below the
+Nyquist frequency of any signal of interest. Our pipeline runs
+\texttt{scipy.signal.resample\_poly} or \texttt{numpy.interp} during
+load (see \S\ref{sec:loader}); without protection both of those
+operators happily \emph{fabricate} samples across an arbitrarily long
+silent window, and the segmenter then ``detects'' rides inside the
+fabricated region. We need a way to distinguish ``the phone gave us
+real samples here'' from ``the resampler invented these values to fill
+a hole.''
+
+\paragraph{The threshold-frequency rule.} Pick a global threshold
+$f_\text{min}$ below which the data is considered too sparse to be
+meaningful. We use $f_\text{min} = 1$~Hz, encoded as
+\texttt{THRESHOLD\_FREQUENCY\_HZ} in
+\texttt{src/data/loader/constants.py}. A \emph{gap} is any
+consecutive-sample spacing greater than $1/f_\text{min} = 1$~s. Gaps
+split a sensor's timeline into a list of contiguous \emph{valid
+intervals} $\{[t^{(s)}_i, t^{(e)}_i]\}_{i=1}^N$. The detection rule is
+implemented by \texttt{\_detect\_valid\_intervals} in
+\texttt{loader/pipeline.py}; given an int64 timestamp array
+$t \in \mathbb{Z}^M$:
+\begin{enumerate}
+  \item Compute the inter-sample diffs $\Delta t = \mathrm{diff}(t)$.
+  \item Mark every index $j$ with $\Delta t_j > f_\text{min}^{-1}\cdot
+    10^3$~ms as a \emph{break}.
+  \item Emit one valid interval per maximal run of non-break samples,
+    delimited by adjacent break indices.
+\end{enumerate}
+A clean recording yields a single interval; a recording with $k$ gaps
+yields $k+1$ intervals.
+
+\paragraph{Per-interval resampling.} For each valid interval the loader
+calls the existing \texttt{\_resample\_sensor\_to\_hz} helper, which
+anchors a uniform 50~Hz grid to the interval's first timestamp and
+fills it with \texttt{resample\_poly} (when the per-interval input is
+itself uniform) or \texttt{np.interp}. The resampled chunks are
+concatenated; the final per-sensor DataFrame contains 50~Hz rows
+\emph{only inside valid intervals} and is otherwise empty. Downstream
+code that slices by \texttt{timestamp\_ms} therefore cannot accidentally
+pick up an interpolated sample inside a gap. The wrapper
+\texttt{\_resample\_sensor\_with\_gaps} returns the pair
+$(\text{resampled DataFrame}, \text{valid intervals})$, and
+\texttt{\_resample\_sensors\_with\_gaps} applies it per sensor.
+
+\paragraph{Per-sensor validity.} Each sensor has its own clock and its
+own dropouts: the barometer can pause while the accelerometer keeps
+running, or vice versa. The loader therefore keeps a separate interval
+list per sensor, stored at
+\texttt{gt.attrs["valid\_intervals\_per\_sensor"]}: a
+$\texttt{dict[str, list[(int, int)]]}$ keyed by sensor name (``ACC'',
+``PRS'', \ldots). Algorithms that fuse multiple sensors are responsible
+for intersecting the lists themselves; algorithms that need only one
+sensor see only that sensor's list. The \texttt{ExperimentPipeline}
+container exposes the same dict via the \texttt{valid\_intervals}
+attribute and the convenience method
+\texttt{gap\_free\_subslices(sensor="ACC")}, so iteration code can
+honour the gaps without re-deriving them.
+
+\paragraph{Propagation to the Streamlit app.} The
+\texttt{LoadedSignal} dataclass (\texttt{src/data/loadFromDB.py}) gains
+a \texttt{valid\_intervals: list[(int, int)]} field, populated either
+in the upload form (\texttt{step2\_data.\_csv\_to\_signal} runs
+\texttt{detect\_valid\_intervals} on the cleaned timestamp column) or
+in the S3 stub (\texttt{loadDataFromS3}). The segmentation step
+(\texttt{step3\_segmentation.\_run\_detector}) then uses a hybrid
+strategy: it calls the trapezoid-template detector \emph{once} on the
+full signal to obtain the canonical visualisation \texttt{state}
+(arrays spanning the whole timeline), and then re-runs the detector
+\emph{per valid interval} so that no template match can straddle a
+gap; per-interval predictions are time-shifted onto the full-signal
+\texttt{t0\_ms} origin before being concatenated. The prediction step
+(\texttt{step4\_prediction.\_run\_predictions}) drops, with a
+user-visible warning, any segment whose $[t_\text{start},
+t_\text{end}]$ does not lie entirely inside one valid interval.
+
+\paragraph{User-visible signal: red ``no data'' overlays.} Both UIs
+shade gap regions to make them impossible to miss:
+\begin{itemize}
+  \item In the Streamlit wizard the helper
+    \texttt{\_add\_gap\_overlays} (in
+    \texttt{step3\_segmentation.py}, reused by step~4) walks the
+    \emph{complement} of the valid-interval list over the visible time
+    axis and adds a red \texttt{plotly} \texttt{vrect} per gap with
+    annotation text ``$\times$~no data''.
+  \item In the desktop trapezoid editor
+    (\texttt{src/segmentation/algorithms/editor.py}) the same
+    complement is computed against the ACC valid intervals and rendered
+    with \texttt{ax.axvspan(\ldots, color="\#c0392b", alpha=0.2)} on
+    every panel; a single bold $\times$ marker is stamped near the top
+    of the topmost panel for each gap. The detector loop in
+    \texttt{load\_experiment} runs per-interval and renumbers the
+    resulting predictions so the detail-pane indices stay unique
+    after concatenation.
+\end{itemize}
+The user contract is therefore: \emph{the UI shows you where the data
+is missing; do not label ground-truth rides inside those red regions.}
+Because the segmenter and predictor also skip those regions
+defensively, an accidental violation of the contract degrades to a
+warning rather than a silently wrong $\Delta h$.
+
+\paragraph{Test fixtures: the corruption script.} To exercise the
+loader and both UIs without waiting for a phone to misbehave in the
+wild, \texttt{scripts/generate\_corrupted\_test\_data.py} produces a
+sibling experiment folder
+\texttt{structuredData/data/<exp>\_\_corrupted\_<mode>/} with one of
+three failure modes applied to every per-sensor CSV (\texttt{gt.csv},
+\texttt{metadata.csv} and \texttt{baramoshka.csv} are copied
+byte-identically; only \texttt{metadata.csv.exp\_name} is rewritten to
+match the new folder name):
+\begin{itemize}
+  \item \textbf{dropout} --- delete every row inside a fixed
+    \texttt{[gap\_start\_s, gap\_start\_s + gap\_len\_s)} window. The
+    loader must report exactly two valid intervals per sensor.
+  \item \textbf{thinning} --- inside the same window, keep only one
+    sample every \texttt{thinning\_spacing\_s} seconds (default
+    1.5~s). Each surviving sample sits more than $f_\text{min}^{-1}$
+    apart from its in-window neighbours, so the loader splits the
+    window into one valid interval per kept sample plus the two
+    flanking spans (typically 6--8 intervals for a 10~s window).
+  \item \textbf{halving} --- drop every other row across the whole
+    frame. The signal stays uniform but at half the native rate; no
+    spacing exceeds the threshold, so the loader returns exactly one
+    valid interval. This regression case verifies that we don't fire
+    the gap-splitting machinery on merely-low-rate-but-uniform data.
+\end{itemize}
+The smoke tests we ran reproduce these counts: a clean Acro-building
+recording yields 1 valid interval per dense sensor; the
+\texttt{dropout} variant yields 2; the \texttt{thinning} variant with
+a 10~s window and 1.5~s spacing yields 7; the \texttt{halving} variant
+stays at 1. The script prints the expected numbers at the end of every
+run for quick eyeballing.
+
 \subsection{The Ground-Truth Editor}
 \label{sec:gt-editor}
 

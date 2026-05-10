@@ -1,0 +1,8 @@
+{
+  "alpha": 0.08,
+  "floor_multiplier": 1.645,
+  "extra_margin_m": 0.0,
+  "n_calibration": 239,
+  "multiplier": 25.153085323148826,
+  "p95_score": 25.153085323148826
+}

@@ -19,6 +19,7 @@ Mouse:
 
 from __future__ import annotations
 
+import shutil
 import sys
 import tkinter as tk
 from datetime import datetime, timedelta
@@ -56,8 +57,10 @@ from src.data.loader.pipeline import (
     _coerce_bool,
     _derive_gt_from_prs,
     _segments_to_full_gt,
+    _structured_dir_for,
     addGTtoSegment,
     load_baramoshka,
+    rebuild_metadata_index,
 )
 from src.data.loadFromDB import LoadedSignal, PhoneType, loadDataFromS3
 from src.physics import calculate_velocity_from_accelerometer, pressure_to_altitude
@@ -318,6 +321,9 @@ class GtEditor(tk.Tk):
                    command=self._open_add_experiment_dialog)\
             .pack(side=tk.LEFT, padx=(4, 0))
         ttk.Button(top, text="Save (Ctrl+S)", command=self.save_gt).pack(side=tk.RIGHT)
+        ttk.Button(top, text="🗑 Delete experiment",
+                   command=self._on_delete_experiment)\
+            .pack(side=tk.RIGHT, padx=(4, 4))
 
         # Navigation controls live in a compact 2-row grid so the top bar
         # still fits on narrow screens. Row 0 = zoom, row 1 = pan, columns
@@ -510,7 +516,10 @@ class GtEditor(tk.Tk):
         except Exception as e:
             messagebox.showerror("Load failed", f"{type(e).__name__}: {e}")
             return
-        self.pipeline = ExperimentPipeline(sensors, gt, metadata)
+        self.pipeline = ExperimentPipeline(
+            sensors, gt, metadata,
+            valid_intervals=gt.attrs.get("valid_intervals_per_sensor", {}),
+        )
 
         prs = self.pipeline.data.get("PRS")
         acc = self.pipeline.data.get("ACC")
@@ -543,6 +552,51 @@ class GtEditor(tk.Tk):
             return
         self._dirty = False
         self.status_var.set(f"Saved ✓  ({out_dir})")
+
+    def _on_delete_experiment(self):
+        """Delete the currently-loaded experiment's structuredData folder
+        and remove its row from `structuredData/metadata.csv`.
+
+        The top-level metadata.csv is rebuilt from per-experiment
+        metadata.csv files, so removing the folder + calling
+        `rebuild_metadata_index` is enough to drop the row.
+        """
+        name = self.exp_var.get().strip()
+        if not name:
+            messagebox.showinfo("Nothing to delete", "Pick an experiment first.")
+            return
+        out_dir = _structured_dir_for(name)
+        if not out_dir.exists():
+            messagebox.showinfo(
+                "Nothing to delete",
+                f"No structuredData folder for '{name}'.",
+            )
+            return
+        if not messagebox.askyesno(
+            "Delete experiment?",
+            f"This will permanently delete:\n\n  {out_dir}\n\n"
+            f"and remove '{name}' from structuredData/metadata.csv.\n\n"
+            f"Continue?",
+            icon="warning",
+        ):
+            return
+        try:
+            shutil.rmtree(out_dir)
+            rebuild_metadata_index()
+        except Exception as e:
+            messagebox.showerror("Delete failed", f"{type(e).__name__}: {e}")
+            return
+
+        # Drop the in-memory pipeline + clear the plot/tree so we don't
+        # operate on a now-deleted experiment.
+        self.pipeline = None
+        self.exp_path = None
+        self._dirty = False
+        self.exp_var.set("")
+        self._populate_experiments()
+        self._refresh_plot()
+        self._refresh_tree()
+        self.status_var.set(f"Deleted '{name}' ✓")
 
     # ---------- Plot ----------
 
@@ -602,6 +656,76 @@ class GtEditor(tk.Tk):
                     xycoords=("data", "axes fraction"),
                     ha="center", va="bottom", fontsize=7, color="#333",
                     clip_on=True,
+                )
+
+        # Blue "no data" overlays for sub-threshold-frequency / missing
+        # regions. The loader marks valid intervals per sensor; we shade
+        # the complement so the user knows not to label GT inside them.
+        # We intersect across the dense motion sensors (skipping GPS,
+        # which is naturally sparse) so a gap shown here means at least
+        # one core IMU lost signal — that's the user-actionable case.
+        valid_per_sensor = self.pipeline.valid_intervals or {}
+        if not valid_per_sensor:
+            valid_per_sensor = (
+                self.pipeline.gt.attrs.get("valid_intervals_per_sensor", {})
+            )
+        core_intervals = [
+            sorted((int(a), int(b)) for a, b in ivs)
+            for s, ivs in valid_per_sensor.items()
+            if s in ("ACC", "GYR", "MAG", "PRS", "ORI") and ivs
+        ]
+        if core_intervals:
+            # Two-pointer intersection of interval lists. ``current``
+            # holds the running intersection; we fold each sensor's list
+            # into it.
+            def _intersect(
+                a: list[tuple[int, int]], b: list[tuple[int, int]],
+            ) -> list[tuple[int, int]]:
+                out: list[tuple[int, int]] = []
+                i = j = 0
+                while i < len(a) and j < len(b):
+                    lo = max(a[i][0], b[j][0])
+                    hi = min(a[i][1], b[j][1])
+                    if lo <= hi:
+                        out.append((lo, hi))
+                    if a[i][1] < b[j][1]:
+                        i += 1
+                    else:
+                        j += 1
+                return out
+
+            current = core_intervals[0]
+            for nxt in core_intervals[1:]:
+                current = _intersect(current, nxt)
+                if not current:
+                    break
+
+            # Compute the gap regions = complement of ``current`` over
+            # the union span.
+            t_lo_ms = min(ivs[0][0] for ivs in core_intervals)
+            t_hi_ms = max(ivs[-1][1] for ivs in core_intervals)
+            cursor = t_lo_ms
+            gap_spans_ms: list[tuple[int, int]] = []
+            for a, b in current:
+                if a > cursor:
+                    gap_spans_ms.append((cursor, a))
+                cursor = max(cursor, b + 1)
+            if cursor < t_hi_ms:
+                gap_spans_ms.append((cursor, t_hi_ms))
+
+            for gs_ms, ge_ms in gap_spans_ms:
+                if ge_ms <= gs_ms:
+                    continue
+                gs = (gs_ms - self._t0_ms) / 1000.0
+                ge = (ge_ms - self._t0_ms) / 1000.0
+                for ax in axes:
+                    ax.axvspan(gs, ge, color="#3498db", alpha=0.28,
+                               zorder=3, lw=0)
+                y_lo, y_hi = axes[0].get_ylim()
+                axes[0].text(
+                    (gs + ge) / 2.0, y_lo + 0.92 * (y_hi - y_lo),
+                    "✕", color="#1b5b8e", ha="center", va="center",
+                    fontsize=14, fontweight="bold", zorder=5,
                 )
 
         self._axes = list(axes)

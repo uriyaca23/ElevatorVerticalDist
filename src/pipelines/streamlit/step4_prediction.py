@@ -32,11 +32,30 @@ from .common import (
     to_datetime_array,
     valid_segments,
 )
+from .step3_segmentation import _add_gap_overlays
 
 
 # Algorithm short ids the diagnostic charts know how to render.
 _TRAP_ALGO_ID = "trap"
 _ZUPT_ALGO_ID = "zupt"
+
+
+def _segment_inside_valid_interval(
+    seg_start_s: float, seg_end_s: float,
+    valid_intervals: list[tuple[int, int]] | None,
+    t0_ms: float | None,
+) -> bool:
+    """True iff [seg_start_s, seg_end_s] lies entirely inside one valid
+    interval. With no intervals defined (legacy / clean signal), returns
+    True so existing flows are unaffected."""
+    if not valid_intervals or t0_ms is None:
+        return True
+    seg_lo_ms = float(t0_ms) + seg_start_s * 1000.0
+    seg_hi_ms = float(t0_ms) + seg_end_s * 1000.0
+    for s_ms, e_ms in valid_intervals:
+        if s_ms <= seg_lo_ms and seg_hi_ms <= e_ms:
+            return True
+    return False
 
 
 def _run_predictions(
@@ -47,20 +66,40 @@ def _run_predictions(
 
     The /predict endpoint owns the per-segment slicing and the gravity
     pre/post window logic — the UI just hands over the full session ACC
-    and the finalised segment list.
+    and the finalised segment list. Defensive: any segment whose span
+    crosses a "no data" gap is dropped before the predict call (the user
+    is shown the red gap overlays in step 3 and should not have placed
+    such segments, but we filter here too).
     """
-    seg_dicts = [
-        {"type":    str(row["type"]).lower(),
-         "start_s": float(row["start_s"]),
-         "end_s":   float(row["end_s"])}
-        for _, row in segments.iterrows()
-    ]
+    t0_ms = (
+        float(loaded.acc["timestamp_ms"].iloc[0])
+        if not loaded.acc.empty else None
+    )
+    seg_dicts: list[dict] = []
+    skipped = 0
+    for _, row in segments.iterrows():
+        s = float(row["start_s"]); e = float(row["end_s"])
+        if not _segment_inside_valid_interval(s, e, loaded.valid_intervals, t0_ms):
+            skipped += 1
+            continue
+        seg_dicts.append({
+            "type":    str(row["type"]).lower(),
+            "start_s": s,
+            "end_s":   e,
+        })
+    if skipped:
+        st.warning(
+            f"Skipped {skipped} segment(s) that overlap a no-data gap. "
+            "Move them inside a valid interval (or delete them) on the "
+            "previous step."
+        )
     rows_by_algo, _primary = api_client.predict(loaded.acc, seg_dicts)
     return rows_by_algo
 
 
 def _prediction_main_figure(
     state: dict, rows: list[dict], selected: int | None,
+    valid_intervals: list[tuple[int, int]] | None = None,
 ) -> go.Figure:
     t = np.asarray(state["t"])
     a_vert = np.asarray(state["a_vert"])
@@ -73,6 +112,8 @@ def _prediction_main_figure(
         hovertemplate=f"%{{x|{HOVER_DATETIME_FMT}}}<br>"
                       "a=%{y:.2f} m/s²<extra></extra>",
     ))
+    if t.size:
+        _add_gap_overlays(fig, valid_intervals, t0_ms, float(t[0]), float(t[-1]))
     for r in rows:
         s = float(r["start_s"]); e = float(r["end_s"])
         rt = r["type"]
@@ -399,7 +440,9 @@ def render() -> None:
     render_predict_segment_sidebar(rows, selected)
 
     st.plotly_chart(
-        _prediction_main_figure(state, rows, selected),
+        _prediction_main_figure(
+            state, rows, selected, valid_intervals=loaded.valid_intervals,
+        ),
         use_container_width=True, key="pred_main_fig",
     )
     st.plotly_chart(

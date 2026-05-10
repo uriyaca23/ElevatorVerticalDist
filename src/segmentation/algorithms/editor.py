@@ -53,6 +53,7 @@ from matplotlib.backends.backend_tkagg import (  # noqa: E402
 )
 from matplotlib.figure import Figure  # noqa: E402
 
+#changes
 # Make absolute ``src.*`` imports resolve when the editor is launched as
 # a standalone script (``python .../editor.py``) as well as via ``-m``.
 _HERE = Path(__file__).resolve().parent
@@ -64,8 +65,10 @@ from src.data.gt_editor import PANEL_DRAWERS as _GT_PANEL_DRAWERS  # noqa: E402
 from src.data.gt_editor import TYPE_COLORS  # noqa: E402
 from src.data.loader import (  # noqa: E402
     RAW_DATA_ROOT,
+    STRUCTURED_DATA_DIR,
     getExperimentData,
     list_experiments,
+    list_structured_experiments,
 )
 from src.segmentation.algorithms.accelerometer_only.template_match.fit_elevator_parameters.common import (  # noqa: E402
     SMOOTH_SEC, trapezoid_kernel,
@@ -148,6 +151,11 @@ class PredictionEditor(tk.Tk):
         # Cached detector state (arrays; shared across tree selections).
         self._state: dict | None = None
         self.predictions: list[dict] = []
+
+        # Per-experiment ACC valid intervals (Unix epoch ms). Populated by
+        # ``load_experiment``; drives the red "no data" overlays and the
+        # per-interval detector loop.
+        self._acc_valid_intervals: list[tuple[int, int]] = []
 
         self._axes: list = []
         self._hl_spans: list = []
@@ -418,7 +426,13 @@ class PredictionEditor(tk.Tk):
     # ---------- Experiments + loading ----------
 
     def _populate_experiments(self):
-        self.exp_combo["values"] = list_experiments(RAW_DATA_ROOT)
+        # Merge raw and structured experiments so ones materialised directly
+        # under structuredData/ (e.g. via the GT-editor S3 ingest / upload)
+        # are also pickable here. Mirrors gt_editor._populate_experiments.
+        raw = list_experiments(RAW_DATA_ROOT)
+        structured = list_structured_experiments(STRUCTURED_DATA_DIR)
+        seen = set(raw)
+        self.exp_combo["values"] = list(raw) + [n for n in structured if n not in seen]
 
     def _copy_exp_name(self):
         name = self.exp_var.get()
@@ -458,11 +472,54 @@ class PredictionEditor(tk.Tk):
         if acc is not None and not acc.empty:
             self._acc_t0_ms = float(acc["timestamp_ms"].iloc[0])
 
+        # Per-sensor valid intervals were stashed by the loader; ACC drives
+        # this UI's detection and plotting. Anything outside is a "no data"
+        # gap that the user must not label.
+        self._acc_valid_intervals: list[tuple[int, int]] = (
+            gt.attrs.get("valid_intervals_per_sensor", {}).get("ACC", [])
+            if gt is not None else []
+        )
+
         self.status_var.set(f"Running detector on {name}…")
         self.update_idletasks()
         try:
+            # Run the detector once on the full ACC for a canonical state
+            # (full-timeline arrays drive the heatmap / correlation panels).
+            # Then re-run per valid interval and replace the predictions —
+            # per-interval calls cannot produce false matches that span a
+            # gap, since the detector never sees both sides at once.
             self.predictions, state = predict_intervals(acc)
             self._state = state if state else None
+            if (acc is not None and not acc.empty
+                    and len(self._acc_valid_intervals) > 1):
+                ts = acc["timestamp_ms"].astype("int64").to_numpy()
+                acc_t0_ms = float(acc["timestamp_ms"].iloc[0])
+                preds: list[dict] = []
+                for s_ms, e_ms in self._acc_valid_intervals:
+                    mask = (ts >= s_ms) & (ts <= e_ms)
+                    chunk = acc.loc[mask].reset_index(drop=True)
+                    if len(chunk) < 2:
+                        continue
+                    try:
+                        chunk_preds, _chunk_state = predict_intervals(chunk)
+                    except Exception:  # noqa: BLE001
+                        continue
+                    chunk_t0_ms = float(chunk["timestamp_ms"].iloc[0])
+                    shift_s = (chunk_t0_ms - acc_t0_ms) / 1000.0
+                    for p in chunk_preds:
+                        q = dict(p)
+                        q["t_start_s"] = float(p["t_start_s"]) + shift_s
+                        q["t_end_s"] = float(p["t_end_s"]) + shift_s
+                        if "lobe1" in q and isinstance(q["lobe1"], dict) and "t_c" in q["lobe1"]:
+                            q["lobe1"] = {**q["lobe1"], "t_c": float(q["lobe1"]["t_c"]) + shift_s}
+                        if "lobe2" in q and isinstance(q["lobe2"], dict) and "t_c" in q["lobe2"]:
+                            q["lobe2"] = {**q["lobe2"], "t_c": float(q["lobe2"]["t_c"]) + shift_s}
+                        preds.append(q)
+                # Renumber so prediction "index" tags stay unique post-merge
+                # (the detail tables key off these indices).
+                for i, p in enumerate(preds):
+                    p["index"] = i
+                self.predictions = preds
         except Exception as e:
             messagebox.showerror("Detector failed", f"{type(e).__name__}: {e}")
             self._state = None
@@ -524,6 +581,48 @@ class PredictionEditor(tk.Tk):
                 ax.axvspan(s, e, color=col, alpha=0.18, hatch="//", zorder=1)
                 ax.axvline(s, color=col, lw=0.9, ls="--", alpha=0.7, zorder=2)
                 ax.axvline(e, color=col, lw=0.9, ls="--", alpha=0.7, zorder=2)
+
+        # Red "no data" overlays for ACC gap regions. These tell the user
+        # not to mark GT inside the highlighted spans (the segmenter and
+        # predictor skip them too — see load_experiment / streamlit step3).
+        if self._acc_valid_intervals:
+            acc_s = self.sensors.get("ACC") if self.sensors else None
+            if acc_s is not None and not acc_s.empty:
+                ts0_ms = float(acc_s["timestamp_ms"].iloc[0])
+                ts1_ms = float(acc_s["timestamp_ms"].iloc[-1])
+                lo_s = (ts0_ms - self._t0_ms) / 1000.0
+                hi_s = (ts1_ms - self._t0_ms) / 1000.0
+                valid_s = sorted(
+                    ((float(a) - self._t0_ms) / 1000.0,
+                     (float(b) - self._t0_ms) / 1000.0)
+                    for a, b in self._acc_valid_intervals
+                )
+                gaps: list[tuple[float, float]] = []
+                cursor = lo_s
+                for vs, ve in valid_s:
+                    if ve <= cursor:
+                        continue
+                    if vs > cursor:
+                        gaps.append((cursor, min(vs, hi_s)))
+                    cursor = max(cursor, ve)
+                    if cursor >= hi_s:
+                        break
+                if cursor < hi_s:
+                    gaps.append((cursor, hi_s))
+                for gs, ge in gaps:
+                    if ge <= gs:
+                        continue
+                    for ax in axes:
+                        ax.axvspan(gs, ge, color="#3498db", alpha=0.28,
+                                   zorder=3, lw=0)
+                    # Single ✕ marker on the topmost panel.
+                    ax_top = axes[0]
+                    y_lo, y_hi = ax_top.get_ylim()
+                    ax_top.text(
+                        (gs + ge) / 2.0, y_lo + 0.92 * (y_hi - y_lo),
+                        "✕", color="#1b5b8e", ha="center", va="center",
+                        fontsize=14, fontweight="bold", zorder=5,
+                    )
 
         self._axes = list(axes)
         self.fig.tight_layout()
