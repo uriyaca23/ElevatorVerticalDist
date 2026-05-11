@@ -41,6 +41,7 @@ from __future__ import annotations
 import math
 import sys
 import tkinter as tk
+from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
 
@@ -52,6 +53,7 @@ from matplotlib.backends.backend_tkagg import (  # noqa: E402
     FigureCanvasTkAgg, NavigationToolbar2Tk,
 )
 from matplotlib.figure import Figure  # noqa: E402
+from matplotlib.ticker import FuncFormatter  # noqa: E402
 
 #changes
 # Make absolute ``src.*`` imports resolve when the editor is launched as
@@ -462,14 +464,14 @@ class PredictionEditor(tk.Tk):
 
         prs = sensors.get("PRS")
         acc = sensors.get("ACC")
-        if prs is not None and not prs.empty:
-            self._t0_ms = int(prs["timestamp_ms"].iloc[0])
-        elif acc is not None and not acc.empty:
+        if acc is not None and not acc.empty:
             self._t0_ms = int(acc["timestamp_ms"].iloc[0])
+        elif prs is not None and not prs.empty:
+            self._t0_ms = int(prs["timestamp_ms"].iloc[0])
         else:
             self._t0_ms = 0
 
-        self._acc_t0_ms = 0.0
+        self._acc_t0_ms = float(self._t0_ms)
         if acc is not None and not acc.empty:
             self._acc_t0_ms = float(acc["timestamp_ms"].iloc[0])
 
@@ -566,7 +568,10 @@ class PredictionEditor(tk.Tk):
             drawer(ax, self.sensors, self._t0_ms)
             ax.grid(True, alpha=0.3)
             ax.set_title(name, fontsize=9, loc="left")
-        axes[-1].set_xlabel("time (s)")
+        # Bottom axis carries the two-line tick labels (seconds + wall-clock)
+        # so the editor matches gt_editor.py and the user can read either
+        # format without having to do arithmetic in their head.
+        self._apply_session_time_axis(axes[-1])
 
         if self.gt is not None and not self.gt.empty:
             for _, row in self.gt.iterrows():
@@ -639,6 +644,57 @@ class PredictionEditor(tk.Tk):
         if self._state is None:
             return 0.0
         return (self._acc_t0_ms - self._t0_ms) / 1000.0
+
+    # ---------- Time formatting (mirror of gt_editor.py) ----------
+
+    def _wall_time_str(self, s_offset: float, epoch_ms: float,
+                       *, sub_second: bool = False) -> str:
+        """Convert seconds-since-``epoch_ms`` to a ``HH:MM:SS`` wall-clock
+        string (or ``HH:MM:SS.mmm`` when ``sub_second``). Returns ``""``
+        if no epoch is set or the resulting timestamp is out of range.
+        Same shape as gt_editor's ``_wall_time_str`` so the two tools
+        produce identical readouts.
+        """
+        if epoch_ms <= 0:
+            return ""
+        try:
+            wall = datetime.fromtimestamp(epoch_ms / 1000.0 + s_offset)
+        except (OverflowError, ValueError, OSError):
+            return ""
+        if sub_second:
+            return wall.strftime("%H:%M:%S.") + f"{wall.microsecond // 1000:03d}"
+        return wall.strftime("%H:%M:%S")
+
+    def _make_tick_formatter(self, epoch_ms: float):
+        """Tick formatter rendering ``"<seconds>s"`` on the first line and
+        ``HH:MM:SS`` on the second, matching the gt_editor x-axis ticks.
+        ``epoch_ms`` is the wall-clock origin of the seconds-from-start
+        axis (session t0 for the main plot, ACC t0 for detail panes).
+        """
+        def fmt(s_offset, _pos=None):
+            head = f"{s_offset:.0f}s"
+            wall = self._wall_time_str(float(s_offset), epoch_ms)
+            return f"{head}\n{wall}" if wall else head
+        return fmt
+
+    def _apply_session_time_axis(self, ax) -> None:
+        """Apply the session-relative (PRS-or-ACC t0) two-line tick
+        formatter and label. Used on the main signal panel.
+        """
+        ax.xaxis.set_major_formatter(
+            FuncFormatter(self._make_tick_formatter(float(self._t0_ms))),
+        )
+        ax.set_xlabel("time")
+
+    def _apply_acc_time_axis(self, ax, *, label: str = "t (s, ACC-local)") -> None:
+        """Apply the ACC-relative two-line tick formatter to a detail axis.
+        ``label`` is preserved verbatim so existing axis annotations
+        (which encode the time frame the data lives in) stay accurate.
+        """
+        ax.xaxis.set_major_formatter(
+            FuncFormatter(self._make_tick_formatter(float(self._acc_t0_ms))),
+        )
+        ax.set_xlabel(label)
 
     def _highlight_on_plot(self, t_start: float, t_end: float):
         for h in self._hl_spans:
@@ -1070,7 +1126,8 @@ class PredictionEditor(tk.Tk):
         ax.set_title("Trapezoid fit on accelerometer signal",
                      fontsize=9, loc="left")
         ax.grid(True, alpha=0.25)
-        ax.set_xlabel("t (s, ACC-local)", fontsize=8)
+        self._apply_acc_time_axis(ax)
+        ax.xaxis.label.set_fontsize(8)
         ax.set_ylabel("a (m/s²)", fontsize=8)
 
         row = results.get(PredictAlgorithm.TRAPEZOID_ACCEL.value, {})
@@ -1278,7 +1335,7 @@ class PredictionEditor(tk.Tk):
         ax.set_ylim(0, 1.05)
         ax.set_xlim(t_lo, t_hi)
         ax.set_ylabel("R² (per sign)")
-        ax.set_xlabel("t (s, ACC-local)")
+        self._apply_acc_time_axis(ax)
         ax.grid(True, alpha=0.25)
 
         peaks_pos = _detect.find_local_maxima(pos_r2, t, t_lo, t_hi)
@@ -1382,7 +1439,7 @@ class PredictionEditor(tk.Tk):
                        lw=1.0, ls="--", alpha=0.8)
         ax_sig.axvline(pred["t_end_s"],   color=PRED_COLORS[pred["ride_type"]],
                        lw=1.0, ls="--", alpha=0.8)
-        ax_sig.set_xlabel("t (s, ACC-local)")
+        self._apply_acc_time_axis(ax_sig)
         ax_sig.set_ylabel("a (m/s²)")
         ax_sig.grid(True, alpha=0.25)
         ax_sig.legend(fontsize=8, loc="upper right")
@@ -1463,7 +1520,7 @@ class PredictionEditor(tk.Tk):
             i, A, _ = peak
             ax_sig.axvline(t[i], color=color, lw=0.9, ls=":", alpha=0.85)
             ax_sig.scatter([t[i]], [A], color=color, s=26, zorder=5)
-        ax_sig.set_xlabel("t (s, ACC-local)")
+        self._apply_acc_time_axis(ax_sig)
         ax_sig.set_ylabel("a (m/s²)")
         ax_sig.grid(True, alpha=0.25)
         ax_sig.legend(fontsize=8, loc="upper right")
@@ -1527,8 +1584,13 @@ class PredictionEditor(tk.Tk):
     def _on_canvas_motion(self, event):
         if event.inaxes in self._axes and event.xdata is not None and event.ydata is not None:
             ylab = event.inaxes.get_ylabel() or "y"
+            wall = self._wall_time_str(
+                float(event.xdata), float(self._t0_ms), sub_second=True,
+            )
+            wall_part = f"  ({wall})" if wall else ""
             self.hover_var.set(
-                f"t = {event.xdata:8.2f} s    {ylab} = {event.ydata:.3f}"
+                f"t = {event.xdata:8.2f} s{wall_part}    "
+                f"{ylab} = {event.ydata:.3f}"
             )
         else:
             self.hover_var.set("")
@@ -1592,12 +1654,12 @@ class PredictionEditor(tk.Tk):
             return
         prs = self.sensors.get("PRS")
         acc = self.sensors.get("ACC")
-        if prs is not None and not prs.empty:
-            t0 = int(prs["timestamp_ms"].iloc[0])
-            t1 = int(prs["timestamp_ms"].iloc[-1])
-        elif acc is not None and not acc.empty:
+        if acc is not None and not acc.empty:
             t0 = int(acc["timestamp_ms"].iloc[0])
             t1 = int(acc["timestamp_ms"].iloc[-1])
+        elif prs is not None and not prs.empty:
+            t0 = int(prs["timestamp_ms"].iloc[0])
+            t1 = int(prs["timestamp_ms"].iloc[-1])
         else:
             return
         self._axes[0].set_xlim(

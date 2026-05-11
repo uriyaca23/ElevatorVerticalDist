@@ -263,6 +263,7 @@ def init_state() -> None:
         "prediction_rows_by_algo": None,  # {algo_id: list[dict]}
         "predict_selected":   None,
         "data_input_mode":    None,   # "phone" | "file" | None (= picker)
+        "pending_new_segment": False,
     }
     for k, v in defaults.items():
         st.session_state.setdefault(k, v)
@@ -292,6 +293,35 @@ _LOCAL_TZ = datetime.now().astimezone().tzinfo
 # Plotly d3-format hover string for a datetime x-axis. Shown in the
 # tooltip when the user hovers any time-series chart.
 HOVER_DATETIME_FMT = "%Y-%m-%d %H:%M:%S.%L"
+
+
+def hover_time_template(value_template: str = "") -> str:
+    """Plotly hovertemplate showing wall-clock + seconds-from-start.
+
+    Mirrors the gt_editor's desktop readout (HH:MM:SS.mmm + offset
+    seconds) so every chart in the wizard exposes both representations
+    of time on hover. ``value_template`` is a d3-format snippet for the
+    trace's y value, e.g. ``"a=%{y:.2f} m/s²"``. Callers must pass
+    ``customdata`` shaped ``(N, 1)`` (relative seconds) when adding the
+    trace; ``time_customdata`` builds that array.
+    """
+    body = (
+        f"%{{x|{HOVER_DATETIME_FMT}}}<br>"
+        "t=%{customdata[0]:.2f} s"
+    )
+    if value_template:
+        body += "<br>" + value_template
+    return body + "<extra></extra>"
+
+
+def time_customdata(t_seconds) -> np.ndarray:
+    """Reshape a 1-D seconds-from-start array into the ``(N, 1)`` shape
+    Plotly expects when a hovertemplate references ``customdata[0]``.
+    """
+    arr = np.asarray(t_seconds, dtype=float)
+    if arr.ndim == 0:
+        arr = arr.reshape(1)
+    return arr.reshape(-1, 1)
 
 
 def _t0_ms(t0_ms: float | None) -> float:
@@ -488,6 +518,99 @@ def _segment_label(i: int, row: pd.Series) -> str:
     return f"#{i:<2} {rt:<4}  {s:6.1f}–{e:6.1f} s"
 
 
+def _default_new_segment_bounds(
+    segments_df: pd.DataFrame,
+) -> tuple[float, float]:
+    """Default Start/End the add-segment form opens with.
+
+    Picks "just after the last segment" so consecutive additions don't
+    pile up on top of each other, falling back to 0–5 s when the list is
+    still empty. The form is editable, so this is only a starting point.
+    """
+    if len(segments_df):
+        last = segments_df.iloc[-1]
+        new_lo = float(last["end_s"]) + 0.5
+    else:
+        new_lo = 0.0
+    return new_lo, new_lo + 5.0
+
+
+_NEW_SEG_KEYS = ("sb_new_lo", "sb_new_hi", "sb_new_type")
+
+
+def _clear_new_segment_state() -> None:
+    st.session_state["pending_new_segment"] = False
+    for k in _NEW_SEG_KEYS:
+        if k in st.session_state:
+            del st.session_state[k]
+
+
+def _render_add_segment_controls(segments_df: pd.DataFrame) -> None:
+    """Sidebar control for adding a new segment.
+
+    Opens an inline Start/End/Type form when the user clicks
+    "+ Add segment", and only commits to ``segments_df`` after the
+    Accept button is pressed. This replaces the earlier behaviour of
+    inserting a default 5-second window at "last end + 0.5 s" the moment
+    the button was clicked, which placed the new segment at a random
+    spot and forced the user to immediately Edit it.
+    """
+    if st.session_state.get("pending_new_segment"):
+        default_lo, default_hi = _default_new_segment_bounds(segments_df)
+        st.sidebar.markdown("**New segment**")
+        new_lo = st.sidebar.number_input(
+            "Start (s)", value=default_lo, step=0.05, format="%.2f",
+            key="sb_new_lo",
+        )
+        new_hi = st.sidebar.number_input(
+            "End (s)", value=default_hi, step=0.05, format="%.2f",
+            key="sb_new_hi",
+        )
+        new_type = st.sidebar.selectbox(
+            "Type", options=["up", "down"], key="sb_new_type",
+        )
+        col_a, col_b = st.sidebar.columns(2)
+        accept = col_a.button(
+            "Accept", type="primary", use_container_width=True,
+            key="sb_new_accept",
+        )
+        cancel = col_b.button(
+            "Cancel", use_container_width=True, key="sb_new_cancel",
+        )
+        if accept:
+            if new_hi <= new_lo:
+                st.sidebar.error("End must be greater than start.")
+            else:
+                df = st.session_state.get("segments_df")
+                if df is None:
+                    df = pd.DataFrame(
+                        columns=["type", "start_s", "end_s", "joint_r2"],
+                    )
+                new_row = {
+                    "type":     new_type,
+                    "start_s":  float(new_lo),
+                    "end_s":    float(new_hi),
+                    "joint_r2": np.nan,
+                }
+                df = pd.concat(
+                    [df, pd.DataFrame([new_row])], ignore_index=True,
+                )
+                st.session_state["segments_df"] = df
+                st.session_state["selected_segment"] = len(df) - 1
+                _clear_new_segment_state()
+                st.rerun()
+        if cancel:
+            _clear_new_segment_state()
+            st.rerun()
+        return
+
+    if st.sidebar.button(
+        "+  Add segment", use_container_width=True, key="sb_add_segment",
+    ):
+        st.session_state["pending_new_segment"] = True
+        st.rerun()
+
+
 def render_segment_sidebar(segments_df: pd.DataFrame, sel: int | None) -> None:
     """Segmentation-step sidebar panel.
 
@@ -560,24 +683,7 @@ def render_segment_sidebar(segments_df: pd.DataFrame, sel: int | None) -> None:
                 st.rerun()
 
     st.sidebar.markdown("")
-    if st.sidebar.button("+  Add segment", use_container_width=True,
-                         key="sb_add_segment"):
-        df = st.session_state.get("segments_df")
-        if df is None:
-            df = pd.DataFrame(columns=["type", "start_s", "end_s", "joint_r2"])
-        # Default: 5-second segment at the current selection's tail, or at
-        # the start of the signal when the list is empty.
-        if len(df):
-            last = df.iloc[-1]
-            new_lo = float(last["end_s"]) + 0.5
-        else:
-            new_lo = 0.0
-        new_row = {"type": "up", "start_s": new_lo,
-                   "end_s": new_lo + 5.0, "joint_r2": np.nan}
-        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-        st.session_state["segments_df"] = df
-        st.session_state["selected_segment"] = len(df) - 1
-        st.rerun()
+    _render_add_segment_controls(segments_df)
 
     # Footer — source info + a reset button, since the main sidebar's
     # step indicator was collapsed to make room for the segment list.

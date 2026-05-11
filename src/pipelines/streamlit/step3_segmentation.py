@@ -15,7 +15,6 @@ import streamlit as st
 from ui import api_client
 
 from .common import (
-    HOVER_DATETIME_FMT,
     LoadedSignal,
     PEAK_STATUS_COLORS,
     RIDE_COLORS,
@@ -27,9 +26,11 @@ from .common import (
     find_matching_prediction,
     goto,
     heatmap_at,
+    hover_time_template,
     peak_status_legend_html,
     render_segment_sidebar,
     render_trapezoid_params,
+    time_customdata,
     to_datetime,
     to_datetime_array,
     trapezoid_kernel,
@@ -201,15 +202,19 @@ def _main_signal_figure(
     t0_ms = state.get("t0_ms")
     dt = to_datetime_array(t, t0_ms)
 
+    cd_full = time_customdata(t)
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=dt, y=a_vert, mode="lines", name="|a|−g",
         line=dict(color="#233044", width=1),
-        hovertemplate=f"%{{x|{HOVER_DATETIME_FMT}}}<br>a=%{{y:.2f}} m/s²<extra></extra>",
+        customdata=cd_full,
+        hovertemplate=hover_time_template("a=%{y:.2f} m/s²"),
     ))
     fig.add_trace(go.Scatter(
         x=dt, y=a_smooth, mode="lines", name="smoothed",
         line=dict(color="#e67e22", width=1.6),
+        customdata=cd_full,
+        hovertemplate=hover_time_template("a_smooth=%{y:.2f} m/s²"),
     ))
     if t.size:
         _add_gap_overlays(fig, valid_intervals, t0_ms, float(t[0]), float(t[-1]))
@@ -309,15 +314,20 @@ def _correlation_figure_with_peaks(
     mask = (t >= t_lo) & (t <= t_hi)
     t0_ms = state.get("t0_ms")
     dt_window = to_datetime_array(t[mask], t0_ms)
+    cd_window = time_customdata(t[mask])
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=dt_window, y=pos_plot[mask], mode="lines", name="max R² (+)",
         line=dict(color="#2980b9", width=1.2),
+        customdata=cd_window,
+        hovertemplate=hover_time_template("R²(+)=%{y:.3f}"),
     ))
     fig.add_trace(go.Scatter(
         x=dt_window, y=neg_plot[mask], mode="lines", name="max R² (−)",
         line=dict(color="#c0392b", width=1.2),
+        customdata=cd_window,
+        hovertemplate=hover_time_template("R²(−)=%{y:.3f}"),
     ))
     cfg = state.get("config")
     if cfg is not None:
@@ -335,15 +345,17 @@ def _correlation_figure_with_peaks(
             groups[tag][0].append(float(t[i]))
             groups[tag][1].append(float(arr[i]))
         for tag, (xs, ys) in groups.items():
-            xs_dt = to_datetime_array(np.asarray(xs), t0_ms)
+            xs_arr = np.asarray(xs)
+            xs_dt = to_datetime_array(xs_arr, t0_ms)
             fig.add_trace(go.Scatter(
                 x=xs_dt, y=ys, mode="markers",
                 name=f"{tag} ({'+' if sign > 0 else '−'})",
                 marker=dict(color=PEAK_STATUS_COLORS.get(tag, "#000"),
                             size=9, line=dict(color="#000", width=0.5)),
-                hovertemplate=f"%{{x|{HOVER_DATETIME_FMT}}}<br>"
-                              "R²=%{y:.3f}<br>"
-                              f"<b>{tag}</b><extra></extra>",
+                customdata=time_customdata(xs_arr),
+                hovertemplate=hover_time_template(
+                    f"R²=%{{y:.3f}}<br><b>{tag}</b>",
+                ),
                 showlegend=False,
             ))
 
@@ -369,17 +381,21 @@ def _signal_with_trapezoid_figure(
     a_smooth = np.asarray(state["a_smooth"])
     t0_ms = state.get("t0_ms")
     mask = (t >= t_lo - pad_s) & (t <= t_hi + pad_s)
-    dt_window = to_datetime_array(t[mask], t0_ms)
+    t_win = t[mask]
+    dt_window = to_datetime_array(t_win, t0_ms)
+    cd_window = time_customdata(t_win)
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=dt_window, y=a_vert[mask], mode="lines", name="|a|−g",
         line=dict(color="#233044", width=1),
-        hovertemplate=f"%{{x|{HOVER_DATETIME_FMT}}}<br>"
-                      "a=%{y:.2f} m/s²<extra></extra>",
+        customdata=cd_window,
+        hovertemplate=hover_time_template("a=%{y:.2f} m/s²"),
     ))
     fig.add_trace(go.Scatter(
         x=dt_window, y=a_smooth[mask], mode="lines", name="smoothed",
         line=dict(color="#e67e22", width=1.4),
+        customdata=cd_window,
+        hovertemplate=hover_time_template("a_smooth=%{y:.2f} m/s²"),
     ))
     fig.add_hline(y=0, line_dash="dash", line_color="#bbb", opacity=0.6)
     fig.add_vrect(x0=to_datetime(t_lo, t0_ms), x1=to_datetime(t_hi, t0_ms),
@@ -399,12 +415,20 @@ def _signal_with_trapezoid_figure(
                 x=to_datetime_array(tt, t0_ms), y=yy,
                 mode="lines", name=f"{lobe_key} template",
                 line=dict(color=lobe_color, width=2.2),
+                customdata=time_customdata(tt),
+                hovertemplate=hover_time_template(
+                    f"{lobe_key} tpl=%{{y:.2f}} m/s²",
+                ),
             ))
             fig.add_trace(go.Scatter(
                 x=[to_datetime(t_c, t0_ms)], y=[A],
                 mode="markers", showlegend=False,
                 marker=dict(color=lobe_color, size=8,
                             line=dict(color="#000", width=0.5)),
+                customdata=time_customdata([t_c]),
+                hovertemplate=hover_time_template(
+                    f"<b>{lobe_key} t_c</b><br>A=%{{y:+.2f}} m/s²",
+                ),
             ))
 
     fig.update_layout(

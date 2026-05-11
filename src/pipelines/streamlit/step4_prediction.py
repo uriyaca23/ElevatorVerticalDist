@@ -17,7 +17,6 @@ from ui import api_client
 
 from .common import (
     ACCEL_ALGOS,
-    HOVER_DATETIME_FMT,
     LoadedSignal,
     PRIMARY_ALGO_ID,
     RIDE_COLORS,
@@ -26,8 +25,10 @@ from .common import (
     STEP_SEGMENT,
     find_matching_prediction,
     goto,
+    hover_time_template,
     render_predict_segment_sidebar,
     render_trapezoid_params,
+    time_customdata,
     to_datetime,
     to_datetime_array,
     valid_segments,
@@ -109,8 +110,8 @@ def _prediction_main_figure(
         x=to_datetime_array(t, t0_ms), y=a_vert,
         mode="lines", name="a_vert",
         line=dict(color="#233044", width=1),
-        hovertemplate=f"%{{x|{HOVER_DATETIME_FMT}}}<br>"
-                      "a=%{y:.2f} m/s²<extra></extra>",
+        customdata=time_customdata(t),
+        hovertemplate=hover_time_template("a=%{y:.2f} m/s²"),
     ))
     if t.size:
         _add_gap_overlays(fig, valid_intervals, t0_ms, float(t[0]), float(t[-1]))
@@ -186,7 +187,9 @@ def _prediction_bar_figure(
     customdata = [
         [seg_ids[i],
          starts_dt[i].strftime("%Y-%m-%d %H:%M:%S"),
-         ends_dt[i].strftime("%H:%M:%S")]
+         ends_dt[i].strftime("%H:%M:%S"),
+         float(rows_template[i]["start_s"]),
+         float(rows_template[i]["end_s"])]
         for i in range(len(rows_template))
     ]
 
@@ -207,6 +210,7 @@ def _prediction_bar_figure(
                 f"<b>{label}</b><br>"
                 "seg #%{customdata[0]}<br>"
                 "%{customdata[1]} → %{customdata[2]}<br>"
+                "t=%{customdata[3]:.2f} → %{customdata[4]:.2f} s<br>"
                 "Δh=%{y:+.2f} m<extra></extra>"
             ),
         ))
@@ -244,19 +248,21 @@ def _trapezoid_fit_figure(
         return None
     # t_sec is ride-local (0 at first sample of the slice); shift by
     # the segment's canonical start_s so it lines up with the top plot.
-    t_dt = to_datetime_array(t + float(start_s), t0_ms)
+    t_full = t + float(start_s)
+    t_dt = to_datetime_array(t_full, t0_ms)
+    cd_full = time_customdata(t_full)
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=t_dt, y=s, mode="lines", name="a_smooth",
         line=dict(color="#2c3e50", width=1.0),
-        hovertemplate=f"%{{x|{HOVER_DATETIME_FMT}}}<br>"
-                      "a=%{y:.2f} m/s²<extra></extra>",
+        customdata=cd_full,
+        hovertemplate=hover_time_template("a=%{y:.2f} m/s²"),
     ))
     fig.add_trace(go.Scatter(
         x=t_dt, y=tpl, mode="lines", name="trapezoid template",
         line=dict(color="#c0392b", width=2.0),
-        hovertemplate=f"%{{x|{HOVER_DATETIME_FMT}}}<br>"
-                      "tpl=%{y:.2f} m/s²<extra></extra>",
+        customdata=cd_full,
+        hovertemplate=hover_time_template("tpl=%{y:.2f} m/s²"),
     ))
     params = meta.get("params") or {}
     for key in ("t_c1", "t_c2"):

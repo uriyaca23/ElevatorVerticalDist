@@ -531,10 +531,10 @@ class GtEditor(tk.Tk):
 
         prs = self.pipeline.data.get("PRS")
         acc = self.pipeline.data.get("ACC")
-        if prs is not None and not prs.empty:
-            self._t0_ms = int(prs["timestamp_ms"].iloc[0])
-        elif acc is not None and not acc.empty:
+        if acc is not None and not acc.empty:
             self._t0_ms = int(acc["timestamp_ms"].iloc[0])
+        elif prs is not None and not prs.empty:
+            self._t0_ms = int(prs["timestamp_ms"].iloc[0])
         else:
             self._t0_ms = 0
 
@@ -993,12 +993,12 @@ class GtEditor(tk.Tk):
             return
         prs = self.pipeline.data.get("PRS")
         acc = self.pipeline.data.get("ACC")
-        if prs is not None and not prs.empty:
-            t0 = int(prs["timestamp_ms"].iloc[0])
-            t1 = int(prs["timestamp_ms"].iloc[-1])
-        elif acc is not None and not acc.empty:
+        if acc is not None and not acc.empty:
             t0 = int(acc["timestamp_ms"].iloc[0])
             t1 = int(acc["timestamp_ms"].iloc[-1])
+        elif prs is not None and not prs.empty:
+            t0 = int(prs["timestamp_ms"].iloc[0])
+            t1 = int(prs["timestamp_ms"].iloc[-1])
         else:
             return
         self._axes[0].set_xlim(
