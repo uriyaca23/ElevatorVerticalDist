@@ -1,0 +1,244 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage[margin=1in]{geometry}
+\usepackage{hyperref}
+
+\sloppy
+\emergencystretch=3em
+
+\newcommand{\avert}{a_{\mathrm{vert}}}
+\newcommand{\amag}{\lvert a\rvert}
+
+\title{Accelerometer Algorithm Inputs --- What Signal Each Stage Matches Against}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\paragraph{Purpose.}
+Quick reference for what every accelerometer-only algorithm in this
+repo consumes as input, what it does in plain words, and how the
+trapezoid match in \emph{segmentation} differs from the trapezoid
+match in \emph{prediction}. Barometer paths are out of scope.
+
+% ===========================================================
+\section{Common signal definitions}
+% ===========================================================
+
+Every accelerometer algorithm starts from the raw 3-axis device-frame
+sample $(a_x, a_y, a_z)$ at sampling rate $f_s$ (typically 100\,Hz).
+From it we derive three candidate scalar signals:
+
+\begin{itemize}\setlength\itemsep{2pt}
+  \item $\amag \;=\; \sqrt{a_x^2 + a_y^2 + a_z^2}$ \\
+        Gravity \emph{included}. Orientation-blind.\\
+        \textbf{Used by:} the GT editor (\texttt{src/data/gt\_editor.py:227}) for visual annotation only. \textbf{No active algorithm consumes $\amag$.}
+  \item $a_z$ \\
+        Device-frame $z$-axis. \textbf{No active algorithm consumes $a_z$.}
+  \item $\avert \;=\; (a - \hat g) \cdot \dfrac{\hat g}{\lVert \hat g\rVert}$ \\
+        Signed scalar projection of the acceleration vector onto the
+        estimated gravity direction $\hat g$. Positive = up. \\
+        \textbf{This is the signal every active accelerometer algorithm
+        uses.}
+\end{itemize}
+
+The gravity vector $\hat g$ is estimated from a stationary window:
+\texttt{estimate\_gravity\_stationary} in
+\texttt{src/utils/accelerometer\_utils.py}. In segmentation the
+window is the first 0.5\,s of the buffer
+(\texttt{...template\_match/fit\_elevator\_parameters/common.py:136}).
+In prediction the pre/post ride stationary windows are preferred,
+falling back to in-ride estimation, then to $\amag$ as a last resort
+(\texttt{trapezoid\_accel/estimator.py:118--170}).
+
+After projection the signal is detrended (slow rolling mean) and
+smoothed (rolling mean over \texttt{smooth\_sec}=0.4\,s) to remove
+DC bias from orientation drift and hand-tremor:
+\[
+\avert^{\text{(smooth)}}(t) \;=\; \mathrm{RollMean}\bigl(\avert(t) - \mathrm{RollMean}_{\text{slow}}(\avert(t)),\; w_{\text{smooth}}\bigr).
+\]
+
+% ===========================================================
+\section{Segmentation --- accelerometer path}
+% ===========================================================
+
+Single active algorithm: \textbf{trapezoid matched-filter template match}, dispatched as
+\verb|SegmentAlgorithm.ACC_TEMPLATE_MATCH|.\\
+Files:
+\texttt{src/segmentation/algorithms/accelerometer\_only/template\_match/}\,---\,
+\texttt{matcher.py} (legacy learned-template path) and
+\texttt{check\_grid\_across\_signal/detect.py} (active synthetic-grid path,
+wired to the editor UI).
+
+\paragraph{Input.}
+Smoothed $\avert$ over the \emph{entire session}
+(\texttt{matcher.py:118}, \texttt{detect.py} via the shared
+preprocessing in
+\texttt{fit\_elevator\_parameters/common.py:135--144}). The matcher
+also computes an LPF velocity $v_{\text{lpf}}$ by integrating
+$\avert$, and the two scores are linearly fused
+(\texttt{matcher.py:125--127}); the active grid detector uses
+$\avert$ alone.
+
+\paragraph{Template.}
+Synthetic trapezoid kernel parameterised by half-width $W$ and
+flat-fraction $f \in [0,1]$:
+\[
+\text{tpl}(t;\,t_c,W,f) \;=\;
+\begin{cases}
+1 & |t-t_c| \le f\,W \quad\text{(flat top)} \\[2pt]
+\dfrac{W - |t-t_c|}{W\,(1-f)} & f\,W < |t-t_c| \le W \quad\text{(linear ramp)}\\[6pt]
+0 & |t-t_c| > W.
+\end{cases}
+\]
+Grid: $30 \times 15 = 450$ templates over $W \in [0.3,\,3.0]$\,s,
+$f \in [0.05,\,0.80]$, plus the $f=0$ triangle row
+(\texttt{detect.py:130--143}).
+
+\paragraph{What it does (problem type: \emph{detection}).}
+Slide every template across the whole signal using Pearson normalised
+cross-correlation (\texttt{ncc\_slide}, \texttt{matcher.py:33--54}).
+Reduce the per-sample argmax across $(W,f)$ to a peak score, then:
+\begin{enumerate}\setlength\itemsep{2pt}
+  \item \textbf{Peak-pick} on unsigned $R^2$ with threshold
+        \texttt{r2\_peak\_thresh}=0.40 and a minimum matched
+        amplitude $|A|\ge 0.20\,\mathrm{m/s^2}$.
+  \item \textbf{NMS dedup} within \texttt{nms\_radius\_s}=1.0\,s and
+        same-sign suppression within 5\,s.
+  \item \textbf{Pair} a positive (take-off) peak with a later
+        negative (landing) peak, accept if their shared-shape
+        joint $R^2 \ge 0.90$, the pair $|A|\ge 0.30\,\mathrm{m/s^2}$,
+        and the plateau between the lobes is quiet
+        (\texttt{quiet\_middle\_ratio}=0.5).
+\end{enumerate}
+
+\paragraph{Output.}
+A list of ride intervals $(t_{\text{start}}, t_{\text{end}}, \text{direction})$. No height value is produced.
+
+% ===========================================================
+\section{Prediction --- accelerometer paths}
+% ===========================================================
+
+Two accelerometer-only predictors share the
+\texttt{predict\_segment(ride, pre, post) -> PredictionOutput}
+contract dispatched by \texttt{Predictor} in
+\texttt{src/prediction/algorithms/predictor.py:29--43}.
+
+% -------------------------------------------------
+\subsection{ZUPT double-integration}
+% -------------------------------------------------
+File: \texttt{src/prediction/algorithms/accelerometer\_only/zupt\_accel/estimator.py}.
+
+\paragraph{Input.}
+$\avert$ over the \emph{ride window}, plus the pre/post stationary
+windows used to estimate $\hat g$.
+
+\paragraph{What it does.}
+\begin{enumerate}\setlength\itemsep{2pt}
+  \item Detect the active-motion sub-window by thresholding
+        $|\avert|$ (\texttt{\_find\_motion\_window}, \texttt{estimator.py:50--65}).
+  \item Zero-force $\avert(t)=0$ outside that sub-window
+        (\texttt{\_zupt\_integrate\_windowed}, \texttt{estimator.py:68--79}).
+  \item Double-integrate $\avert \to v \to h$, applying linear-drift
+        correction so $v$ returns to zero at the boundaries.
+\end{enumerate}
+
+\paragraph{Trapezoid involvement.}
+\textbf{None.} ZUPT does not match any template; it is a pure
+double-integration with zero-velocity-update bookends.
+
+\paragraph{Output.}
+Signed $\Delta h$ in metres plus a theoretical $\sigma$ from white-noise integration bounds.
+
+% -------------------------------------------------
+\subsection{Trapezoid pulse-pair fit}
+% -------------------------------------------------
+File: \texttt{src/prediction/algorithms/accelerometer\_only/trapezoid\_accel/estimator.py}; kernel + grid search in \texttt{pulse\_pair.py}.
+
+\paragraph{Input.}
+Detrended + smoothed $\avert$ over the \emph{ride window}
+(\texttt{estimator.py:190--196}): same projection, same
+\texttt{smooth\_sec}=0.4\,s rolling mean.
+
+\paragraph{What it does (problem type: \emph{parameter estimation}).}
+Searches the same $(W,f)$ trapezoid grid as segmentation
+(\texttt{pulse\_pair.py:42}, $30\times 15$). For every grid point and
+every candidate centre pair $(t_{c1}, t_{c2})$ it solves
+least-squares for a \emph{shared} amplitude $|A|$ across the two
+lobes and scores by the joint $R^2 = \tfrac12(R^2_1 + R^2_2)$
+(\texttt{pulse\_pair.py:42--62}). The argmax across
+$(W, f, t_{c1}, t_{c2})$ is kept. A second 4-parameter
+\emph{joined-pulse} fit ($\Delta t_c = 2W$ forced) is run in parallel;
+the better joint-$R^2$ wins (\texttt{estimator.py:213--254}). A ZUPT
+fallback kicks in if both matched-filter fits collapse.
+
+\paragraph{Output.}
+Closed-form
+\[
+\Delta h \;=\; \operatorname{sign}\cdot |A|\cdot W\cdot (1+f)\cdot (t_{c2} - t_{c1})
+\]
+(\texttt{estimator.py:330--339}), plus a delta-method theoretical
+$\sigma$ and a conformal-calibrated 90\,\% CI half-width.
+
+% ===========================================================
+\section{Segmentation vs.\ prediction --- same trapezoid, different question}
+% ===========================================================
+
+Both stages match the same trapezoid template family against the same
+projected signal $\avert$. The difference is what they do with the
+match.
+
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{p{0.22\linewidth}p{0.36\linewidth}p{0.36\linewidth}}
+\toprule
+ & \textbf{Segmentation} & \textbf{Prediction (trapezoid pulse-pair)} \\
+\midrule
+\textbf{Input scope} & smoothed $\avert$ over the \textbf{whole session} & detrended+smoothed $\avert$ over \textbf{one ride window} \\
+\textbf{Template family} & synthetic trapezoid $(W,f)$ grid $+$ $f{=}0$ triangle row & same $(W,f)$ grid, shared-shape constraint across the lobe pair \\
+\textbf{Scoring} & sliding Pearson NCC, per-sample peak score & exhaustive LS amplitude per $(W,f,t_{c1},t_{c2})$, joint $R^2$ \\
+\textbf{What is found} & peak \emph{locations} (when does a ride happen?) & best-fit \emph{parameters} $(W,f,|A|,t_{c1},t_{c2})$ \\
+\textbf{Problem class} & \textbf{detection} & \textbf{parameter estimation} \\
+\textbf{Output} & ride intervals $(t_s, t_e, \text{dir})$ & $\Delta h$ in metres $+$ CI half-width \\
+\textbf{Filters / gates} & peak $R^2 \ge 0.40$, NMS, pair $R^2 \ge 0.90$, quiet-middle & quality score, $R^2$ thresholds by ride length, anchor-ratio, $\Delta t_c$ floors \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The trapezoid kernel itself lives in a single shared utility
+(\texttt{src/utils/trapezoid\_template.py}, re-exported by both
+stages) so the template parametrisation is identical by construction.
+
+% ===========================================================
+\section{One-line summary}
+% ===========================================================
+
+\textit{All active accelerometer algorithms --- the segmentation
+matched-filter, the ZUPT predictor, and the trapezoid pulse-pair
+predictor --- consume $\avert$ (gravity-projected vertical
+acceleration), not $\amag$.} The trapezoid template appears in both
+stages, but with different roles: segmentation uses it as a
+\emph{detector} (sliding NCC over the whole session to find rides),
+and prediction uses it as an \emph{estimator} (exhaustive LS fit
+inside a single ride to recover $\Delta h$).
+
+\paragraph{Implication for editor graphs.}
+The GT editor (\texttt{src/data/gt\_editor.py}) currently plots
+$\amag$, which no active algorithm uses. The segmentation editor
+(\texttt{src/segmentation/algorithms/editor.py:118--121}) and the
+Streamlit segmentation step
+(\texttt{src/pipelines/streamlit/step3\_segmentation.py:199--209})
+both already plot $\avert$ (with its smoothed overlay), which is the
+signal the matched filter actually scores against. Harmonising the
+three to display $\avert$ is a follow-up; this report is the
+reference for the decision.
+
+\end{document}

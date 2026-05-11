@@ -133,9 +133,16 @@ def segment(acc: pd.DataFrame, phone_model: str = "",
     Returns ``(predictions, state, t0_ms)`` — same shape as the
     ``/segment`` endpoint. ``state`` is ``None`` when the detector
     produced nothing (e.g. empty trace) or when ``include_state=False``.
+
+    Boutique pipeline runs the matched filter on the rotation-invariant
+    ``|a|-g`` magnitude residual (rather than the gravity-projected
+    ``a_vert``) so the signal the user inspects in step 3 matches what
+    the algorithm actually scores against. See
+    ``docs/latex/main.tex`` §12 (Gravity Calculation Change).
     """
+    cfg = _detect.DetectConfig(input_signal="a_mag_minus_g")
     predictions, state = _detect.predict_intervals(
-        acc, phone_model=phone_model,
+        acc, cfg, phone_model=phone_model,
     )
     t0_ms_raw = float(state.get("t0_ms", float("nan"))) if state else float("nan")
     t0_ms: float | None = t0_ms_raw if math.isfinite(t0_ms_raw) else None
@@ -159,8 +166,21 @@ def predict(acc: pd.DataFrame,
     t0_ms = float(acc["timestamp_ms"].iloc[0])
 
     chosen = _selected_algos(algorithms)
+    # Boutique-pipeline hybrid signal policy: trapezoid runs on the
+    # rotation-invariant |a|-g (matching what the segmentation step
+    # already feeds it via ``api_client.segment``), ZUPT keeps the
+    # gravity-projected a_vert because its quality is bounded by the
+    # double-integration drift model, not the matched-filter signal
+    # choice. See ``docs/latex/main.tex`` §12--13.
+    _PER_ALGO_OVERRIDES: dict[str, dict] = {
+        "trap": {"input_signal": "a_mag_minus_g"},
+        "zupt": {},
+    }
     predictors: dict[str, Predictor] = {
-        aid: Predictor(PREDICT_ALGORITHM_CONFIG(algorithm=_ACCEL_ALGO_MAP[aid]))
+        aid: Predictor(PREDICT_ALGORITHM_CONFIG(
+            algorithm=_ACCEL_ALGO_MAP[aid],
+            overrides=_PER_ALGO_OVERRIDES.get(aid, {}),
+        ))
         for aid in chosen
     }
 

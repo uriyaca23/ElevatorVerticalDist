@@ -94,6 +94,15 @@ class TemplateMatchConfig(BaseModel):
     # tightened to ``max(config_floor, multiplier · σ_a)``.
     noise_sigma_multiplier: float = 6.0
 
+    # Scalar acceleration signal the matched filter scores against.
+    # ``"a_vert"``: signed projection onto the estimated gravity vector
+    # (current default; orientation-aware but vulnerable to in-ride phone
+    # rotation that invalidates the frozen ``ĝ``). ``"a_mag_minus_g"``:
+    # rotation-invariant ``|a| − |ĝ|`` magnitude residual; robust to phone
+    # tilt mid-ride, but picks up horizontal user motion. See
+    # ``docs/latex/algorithm_report.tex`` for the trade-off discussion.
+    input_signal: str = "a_vert"
+
 
 class SEGMENT_ALGORITHM_CONFIG(BaseModel):
     algorithm: SegmentAlgorithm = SegmentAlgorithm.PRESSURE_FILTER

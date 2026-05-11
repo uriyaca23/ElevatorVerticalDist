@@ -164,6 +164,26 @@ class ZuptAccelEstimator:
         pre_ok = 8.0 < pre_mag < 12.0 and pre_stab < c.grav_stability_max
         post_ok = 8.0 < post_mag < 12.0 and post_stab < c.grav_stability_max
 
+        # Rotation-invariant override: signed ``|a| − |ĝ|``. Returned as
+        # method ``"a_mag_minus_g"`` (distinct from ``"magnitude"`` so the
+        # sign-flip fallback in :meth:`predict_segment` is bypassed —
+        # ``|a| − g`` is already signed correctly).
+        if c.input_signal == "a_mag_minus_g":
+            if pre_ok and post_ok:
+                g_ref = 0.5 * (pre_mag + post_mag)
+            elif pre_ok:
+                g_ref = pre_mag
+            elif post_ok:
+                g_ref = post_mag
+            else:
+                _r_g, r_mag, _r_s = estimate_gravity_stationary(
+                    inp.ax, inp.ay, inp.az, fs=inp.fs,
+                    window_sec=c.grav_window_sec,
+                )
+                g_ref = r_mag if 8.0 < r_mag < 12.0 else 9.81
+            mag = np.sqrt(inp.ax ** 2 + inp.ay ** 2 + inp.az ** 2)
+            return mag - g_ref, "a_mag_minus_g", g_ref
+
         # Prefer average of pre + post gravity when both are stable —
         # this is the gold standard and cancels steady orientation drift.
         if pre_ok and post_ok:

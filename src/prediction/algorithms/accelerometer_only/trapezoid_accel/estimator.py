@@ -148,6 +148,27 @@ class TrapezoidAccelEstimator:
         )
         pre_ok = 8.0 < pre_mag < 12.0 and pre_s < c.grav_stability_max
         post_ok = 8.0 < post_mag < 12.0 and post_s < c.grav_stability_max
+
+        # Rotation-invariant override: ignore the projection chain and
+        # use ``|a| − |ĝ|`` instead. Sign is preserved (take-off → |a| > g,
+        # landing → |a| < g) so downstream matched-filter logic, including
+        # the polarity-aware pair fit, works unchanged.
+        if c.input_signal == "a_mag_minus_g":
+            if pre_ok and post_ok:
+                g_ref = 0.5 * (pre_mag + post_mag)
+            elif pre_ok:
+                g_ref = pre_mag
+            elif post_ok:
+                g_ref = post_mag
+            else:
+                _r_g, r_mag, _r_s = estimate_gravity_stationary(
+                    inp.ax, inp.ay, inp.az, fs=inp.fs,
+                    window_sec=c.grav_window_sec,
+                )
+                g_ref = r_mag if 8.0 < r_mag < 12.0 else 9.81
+            mag = np.sqrt(inp.ax * inp.ax + inp.ay * inp.ay + inp.az * inp.az)
+            return mag - g_ref, "a_mag_minus_g"
+
         if pre_ok and post_ok:
             w1 = 1.0 / max(pre_s, 1e-3); w2 = 1.0 / max(post_s, 1e-3)
             gvec = (pre_g * w1 + post_g * w2) / (w1 + w2)

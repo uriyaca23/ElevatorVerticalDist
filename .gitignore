@@ -43,3 +43,8 @@ elevator_reports/
 
 # Date-stamped uncommitted-file snapshots
 change_*/
+
+# Auto-generated figure dirs from this branch's scripts
+# (gravity-change comparison figures + parallel |a|-g pipeline eval)
+docs/latex/figures/gravity_change/
+docs/latex/figures/pipeline_amg/

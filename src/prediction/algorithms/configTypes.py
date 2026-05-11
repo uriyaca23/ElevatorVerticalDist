@@ -82,6 +82,13 @@ class ZuptAccelConfig(BaseModel):
     default_phone: str = ""
     default_fs_hz: float = 50.0
 
+    # Scalar acceleration signal fed to ZUPT integration.
+    #   "a_vert"        : gravity-projected vertical acceleration (default).
+    #   "a_mag_minus_g" : rotation-invariant ``|a| − |ĝ|`` magnitude residual,
+    #                      preserves sign (take-off > 0, landing < 0) and is
+    #                      robust to in-ride phone rotation.
+    input_signal: str = "a_vert"
+
     class Config:
         extra = "forbid"
 
@@ -199,6 +206,14 @@ class TrapezoidAccelConfig(BaseModel):
     # Phone / sampling defaults
     default_phone: str = ""
     default_fs_hz: float = 50.0
+
+    # Scalar acceleration signal the trapezoid matched filter scores against.
+    #   "a_vert"        : gravity-projected vertical acceleration (default).
+    #   "a_mag_minus_g" : rotation-invariant ``|a| − |ĝ|`` magnitude residual,
+    #                      preserves sign (take-off > 0, landing < 0) and is
+    #                      robust to in-ride phone rotation. See
+    #                      ``docs/latex/algorithm_report.tex``.
+    input_signal: str = "a_vert"
 
     class Config:
         extra = "forbid"

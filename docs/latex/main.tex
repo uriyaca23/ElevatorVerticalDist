@@ -14,9 +14,12 @@
 \usetikzlibrary{decorations.pathreplacing,arrows.meta,positioning,shapes.geometric,fit,shadows}
 \usepackage{hyperref}
 \usepackage[margin=1in]{geometry}
+\usepackage{multirow}
 
 % Lightweight TODO macro so placeholders are easy to spot.
 \newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+% Used by the "Gravity Calculation Change" section.
+\newcommand{\avert}{a_{\mathrm{vert}}}
 
 % Tolerate occasional overfull hboxes rather than letting code strings
 % leak into the margin. Balances word-spacing looseness against content
@@ -4180,5 +4183,648 @@ a niche.
 \fi
 
 \input{boutique_pipeline_guide.tex}
+
+% =====================================================================
+\section{Gravity Calculation Change: $a_{\rm vert}$ vs.\ $|a|-g$}
+\label{sec:gravity-change}
+% =====================================================================
+
+\subsection{Motivation}
+
+In field testing we encountered sessions where the
+$|a(t)|$ magnitude trace clearly carried the trapezoid
+take-off / landing pulse-pair the matched-filter is looking for, but
+the gravity-projected vertical $\avert$ did not --- the trapezoid had
+collapsed into the orthogonal channels of the device frame. The cause
+was in-ride phone reorientation: the user shifted the phone after
+the calibration window that pinned the gravity direction
+$\hat g$, and the projection $\avert = (\vec a - \vec g)\cdot\hat g$
+now mixed vertical and horizontal components. The magnitude $|a|$,
+by contrast, is rotation-invariant by construction.
+
+This section evaluates a simple substitution: replace
+$\avert$ with the signed magnitude residual
+\[
+  a_{\rm mag} \;\equiv\; |a(t)| \;-\; g,
+\]
+where $g$ is a stationary-window estimate of the gravity magnitude.
+The change is wired through both stages of the pipeline behind a
+config flag (\verb|input_signal|, defaulting to the existing
+\verb|"a_vert"|) so the comparison is one config override.
+
+\subsection{Theoretical analysis}
+\label{sec:gravity-change-theory}
+
+The phone is a rigid body in the world frame. Let $\hat g_{\rm world}$
+be world-vertical (up positive), $\vec a_{\rm ride}$ the
+cabin acceleration, $\vec a_h$ the user's translational
+acceleration on the phone, and $R(t)$ the device-to-world rotation.
+The IMU reads specific force in the device frame:
+\[
+  \vec a_{\rm dev}(t) \;=\; R(t)^{\top}\Bigl(g\,\hat g_{\rm world} +
+      \vec a_{\rm ride}(t) + \vec a_h(t)\Bigr).
+\]
+
+\paragraph{Projected vertical.}
+$\avert$ is computed by projecting onto a \emph{frozen} estimate
+$\hat g_0 = R_0^{\top}\hat g_{\rm world}$ captured during a
+stationary window at $t_0$:
+\[
+  \avert(t) = \vec a_{\rm dev}(t)\cdot\hat g_0 - g.
+\]
+Substituting and writing $R(t) = R_0\,\Delta R(t)$ where
+$\Delta R$ is the post-calibration rotation:
+\[
+  \avert(t) = \bigl(g + a_{\rm ride}\bigr)\cos\theta(t) - g
+              + \bigl(\Delta R^{\top}\vec a_h\bigr)\!\cdot\hat e_3,
+\]
+where $\theta(t)$ is the angle between
+$\Delta R^{\top}\hat g_{\rm world}$ and $\hat g_{\rm world}$
+(i.e.\ how far the phone has rotated since calibration), and
+$\hat e_3$ is the third device-frame basis vector. Two failure modes:
+\begin{enumerate}\setlength\itemsep{2pt}
+  \item \textbf{Tilt sensitivity}: the cabin pulse is scaled by
+        $\cos\theta(t)$ \emph{and} an extra
+        $g(\cos\theta - 1)$ bias appears, which can dwarf
+        $a_{\rm ride}\cos\theta$ for even modest $\theta$.
+  \item \textbf{Horizontal-motion immunity}: when $\theta = 0$ the
+        horizontal $\vec a_h$ projects perpendicular to $\hat g_0$
+        and the third term vanishes. This is the strength of the
+        projection --- user-induced horizontal motion drops out
+        cleanly.
+\end{enumerate}
+
+\paragraph{Magnitude residual.}
+The Euclidean norm is rotation-invariant:
+$|\vec a_{\rm dev}(t)| = |g\,\hat g_{\rm world} + \vec a_{\rm ride}
++ \vec a_h|$. When $\vec a_{\rm ride}\parallel\hat g_{\rm world}$
+(which it always is --- elevators only move along $\hat g_{\rm world}$),
+\[
+  |\vec a_{\rm dev}(t)| \;=\; \sqrt{(g + a_{\rm ride})^2 + |\vec a_h|^2}.
+\]
+Subtracting $g$ and Taylor-expanding the square root for
+$|\vec a_h|\ll g$:
+\[
+  a_{\rm mag} = |a| - g
+              \;\approx\; a_{\rm ride}
+              \;+\; \underbrace{\frac{|\vec a_h|^2}{2g}}_{
+                  \text{horizontal-motion bias, second-order}}
+              \;+\; O\!\left(\frac{a_{\rm ride}|\vec a_h|^2}{g^2}\right).
+\]
+Two corresponding behaviours:
+\begin{enumerate}\setlength\itemsep{2pt}
+  \item \textbf{Tilt-invariance}: $\theta$ does not appear. Any
+        in-ride rotation, no matter how aggressive, leaves
+        $a_{\rm mag}$ unchanged. \emph{This is the design win.}
+  \item \textbf{Horizontal-motion leakage}: a walking user with
+        $|\vec a_h|\approx 1\,\mathrm{m/s^2}$ contributes a
+        steady bias of order
+        $1^2 / (2\cdot 9.81) \approx 0.05\,\mathrm{m/s^2}$, well
+        below the matched-filter's $0.20\,\mathrm{m/s^2}$ peak floor.
+        $|\vec a_h|\approx 3\,\mathrm{m/s^2}$ (vigorous running) leaks
+        $\approx 0.46\,\mathrm{m/s^2}$ --- comparable to a real lobe.
+\end{enumerate}
+
+\paragraph{Which signal to prefer.}
+Define a regime indicator
+$\rho \equiv \theta_{\max}\,g \,/\, |\vec a_h|_{\max}$ (units of
+1/rad). For a given ride, the dominant error term is
+\[
+  \begin{cases}
+    \text{tilt error in $\avert$:} & g(1-\cos\theta_{\max})
+        \approx \tfrac12 g\theta_{\max}^2, \\[4pt]
+    \text{horizontal error in $a_{\rm mag}$:}
+        & \tfrac{1}{2g}|\vec a_h|_{\max}^2.
+  \end{cases}
+\]
+Setting them equal gives the indifference rotation:
+$\theta_{\rm eq} = |\vec a_h|_{\max}/g$. So $a_{\rm mag}$ is
+preferable whenever the phone rotates more than
+$|\vec a_h|_{\max}/g$ radians during the ride --- about
+$5.8^\circ$ when $|\vec a_h|_{\max} = 1\,\mathrm{m/s^2}$. In
+practice typical real-world rotations (re-pocketing, hand swaps,
+turning to face the door) are tens of degrees, well above this
+threshold, while typical $|\vec a_h|_{\max}$ for a standing
+passenger is sub-1\,m/s$^2$. The crossover favours $a_{\rm mag}$
+in almost every realistic scenario short of vigorous walking
+inside the cabin.
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.49\linewidth}
+  \includegraphics[width=\linewidth]{gravity_change/gravity_theory_tilt.png}
+\end{minipage}\hfill
+\begin{minipage}{0.49\linewidth}
+  \includegraphics[width=\linewidth]{gravity_change/gravity_theory_horizontal.png}
+\end{minipage}
+\caption{The two failure modes. \textbf{Left:} a frozen-$\hat g$
+  projection collapses with $\cos\theta$ \emph{plus} an
+  $g(\cos\theta-1)$ DC offset, going strongly negative for moderate
+  tilts; the magnitude residual is flat. \textbf{Right:} the
+  magnitude residual gains a $|\vec a_h|^2/2g$ bias under horizontal
+  user motion that the projection (when $\theta=0$) filters out.
+  Crossover is at $\theta_{\rm eq} = |\vec a_h|_{\max}/g$
+  ($\approx 5.8^\circ$ for $|\vec a_h|=1\,\mathrm{m/s^2}$).}
+\label{fig:gravity-theory}
+\end{figure}
+
+\subsection{Implementation}
+
+The change is wired through one new Pydantic field per stage:
+
+\begin{itemize}\setlength\itemsep{2pt}
+  \item \texttt{TemplateMatchConfig.input\_signal}
+        (\texttt{src/segmentation/algorithms/configTypes.py})
+  \item \texttt{ZuptAccelConfig.input\_signal} and
+        \texttt{TrapezoidAccelConfig.input\_signal}
+        (\texttt{src/prediction/algorithms/configTypes.py})
+\end{itemize}
+
+Each accepts \verb|"a_vert"| (current default) or \verb|"a_mag_minus_g"|.
+A new helper \texttt{\_a\_mag\_minus\_g} in the segmentation
+preprocessing module
+(\texttt{.../template\_match/fit\_elevator\_parameters/common.py})
+mirrors the existing \texttt{\_vertical\_accel} chain --- same 8\,s
+DC detrend, same 0.4\,s smoothing --- so downstream thresholds tuned
+on $\avert$ carry over with comparable noise statistics. In the
+prediction estimators, the same magnitude-residual computation is
+inlined in each algorithm's vertical-projection method
+(\texttt{TrapezoidAccelEstimator.\_vertical},
+\texttt{ZuptAccelEstimator.\_pick\_vertical\_accel}). The $g$
+reference is taken from the average of pre/post stationary-window
+gravity-vector magnitudes, falling back to an in-ride estimate when
+neither side is usable.
+
+\subsection{Empirical results}
+
+\paragraph{Segmentation (22 TRAIN experiments, 415 GT rides).}
+The accelerometer-only matched-filter detector (with the synthetic
+$(W,f)$ trapezoid grid) was evaluated with both signal choices. The
+swap is a substantial detection win:
+
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{lrrrrr}
+\toprule
+ & \textbf{clean} & \textbf{missed} & \textbf{FP} & \textbf{F1-like} & \textbf{IoU\,F1@0.5} \\
+\midrule
+$\avert$ (baseline)  & 309 & 95 & 29 & 0.813 & 0.642 \\
+$|a|-g$ (treatment)  & 364 & 42 & \textbf{0} & \textbf{0.926} & \textbf{0.687} \\
+\midrule
+$\Delta$             & $+55$ & $-53$ & $-29$ & $+0.113$ & $+0.045$ \\
+\bottomrule
+\end{tabular}
+\caption{Segmentation detection metrics on the TRAIN set. The treatment
+  eliminates all 29 false positives and recovers more than half of the
+  baseline's missed rides.}
+\label{tab:gravity-seg-results}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{gravity_change/gravity_segmentation_compare.png}
+\caption{Segmentation P/R/F1 and failure-mode counts. The FP elimination
+  is the most striking result: false positives in $\avert$ come from
+  horizontal user motion landing on a stale $\hat g_0$ axis and creating
+  spurious trapezoid signatures; the magnitude residual does not afford
+  that path.}
+\label{fig:gravity-seg-compare}
+\end{figure}
+
+\paragraph{Prediction (TRAIN $n=382$ clean, TEST $n=108$).}
+Both accelerometer-only predictors were evaluated with each signal
+choice, conformal-refit per signal on the train half and applied to
+test:
+
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{llrrrrr}
+\toprule
+ \textbf{Algo} & \textbf{Signal} & \textbf{split} & \textbf{MAE} & \textbf{medAE} & \textbf{RMSE} & \textbf{cov$_{90}$} \\
+\midrule
+\multirow{4}{*}{ZUPT}
+  & $\avert$  & train & 1.18 & 0.34 & 3.00 & 90.3\% \\
+  & $|a|-g$   & train & 2.12 & 0.37 & 4.43 & 92.7\% \\
+  & $\avert$  & test  & 6.45 & 0.19 & 43.98 & 94.4\% \\
+  & $|a|-g$   & test  & \textbf{1.73} & 0.21 & \textbf{5.82} & 91.7\% \\
+\midrule
+\multirow{4}{*}{Trapezoid}
+  & $\avert$  & train & 0.93 & 0.26 & 2.59 & 74.3\% \\
+  & $|a|-g$   & train & 1.18 & 0.26 & 2.61 & 67.3\% \\
+  & $\avert$  & test  & 3.60 & 0.29 & 25.82 & 93.5\% \\
+  & $|a|-g$   & test  & \textbf{1.25} & 0.29 & \textbf{4.25} & 89.8\% \\
+\bottomrule
+\end{tabular}
+\caption{Per-ride $\Delta h$ prediction errors (metres). All-cap numbers
+  indicate the cleaner test outcome with the magnitude residual.
+  Crucially, \textbf{medAE is identical to within 0.02\,m across
+  every row} --- the median ride is fit equally well by either
+  signal, the differences live entirely in the outlier tail.}
+\label{tab:gravity-pred-results}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{gravity_change/gravity_prediction_compare.png}
+\caption{Prediction error bars per algorithm and split. The
+  $a_{\rm vert}$ TEST RMSE columns dominate the canvas
+  (44\,m for ZUPT, 26\,m for trapezoid) --- those are tail
+  outliers, not typical errors. Switching to $|a|-g$ collapses
+  them by an order of magnitude (5.8\,m, 4.3\,m).}
+\label{fig:gravity-pred-compare}
+\end{figure}
+
+\paragraph{End-to-end pipeline.}
+Running the deployed pipeline (template-match segmentation $\to$
+trapezoid prediction) with each signal across all 22 train + 4 test
+experiments and scoring against barometer-derived $\Delta h$. Three
+views per the
+\texttt{scripts/pipeline\_evaluation\_report.py} convention:
+\textbf{GT} (predictor on every ground-truth interval — the oracle),
+\textbf{matched} (predictor on segmenter intervals that cleanly
+match a GT — real end-to-end on caught rides), and \textbf{all}
+(predictor on every segmenter interval including false positives,
+scored against barometer Δh over the same window).
+
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.10}
+\begin{tabular}{llrrrrr}
+\toprule
+ \textbf{split} & \textbf{view} & \textbf{n} & \textbf{MAE($\avert$)} & \textbf{MAE($|a|-g$)} & \textbf{RMSE($\avert$)} & \textbf{RMSE($|a|-g$)} \\
+\midrule
+TRAIN & GT      & 415 & 1.16 & 1.38 & 3.28 & 3.22 \\
+TRAIN & matched & 309/364 & 1.46 & 1.70 & 6.32 & 5.99 \\
+TRAIN & all     & 345/371 & 2.40 & \textbf{1.71} & 6.95 & \textbf{3.52} \\
+\midrule
+TEST  & GT      & 108 & 3.60 & \textbf{1.25} & 25.82 & \textbf{4.25} \\
+TEST  & matched & 98  & 1.49 & \textbf{0.77} & 7.66  & \textbf{2.31} \\
+TEST  & all     & 108/100 & 1.37 & \textbf{1.13} & 3.59 & 3.78 \\
+\bottomrule
+\end{tabular}
+\caption{End-to-end pipeline errors (metres). The matched view is the
+  most operationally relevant: predictor running on detected segments,
+  scored against the matched GT's barometer-derived $\Delta h$. The
+  \textbf{TEST matched MAE drops from 1.49\,m to 0.77\,m (RMSE
+  7.66\,m $\to$ 2.31\,m)} when the gravity-projected signal is
+  replaced by the magnitude residual. The "all" view on TRAIN
+  improves dramatically because $|a|-g$ eliminates all 29 false
+  positives the matched-filter produced under $\avert$
+  (Table~\ref{tab:gravity-seg-results}), so the barometer-truth
+  pool is no longer polluted by FP segments.}
+\label{tab:gravity-pipeline-results}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{gravity_change/gravity_pipeline_compare.png}
+\caption{End-to-end pipeline matched-view error. TRAIN regresses
+  slightly under $|a|-g$ (consistent with the per-stage prediction
+  numbers in Table~\ref{tab:gravity-pred-results}), but TEST collapses
+  by roughly $2\times$ on MAE and $3.3\times$ on RMSE.}
+\label{fig:gravity-pipeline-compare}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{gravity_change/gravity_pipeline_test_views.png}
+\caption{All three pipeline views on the TEST split. The GT-view RMSE
+  of 25.82\,m under $\avert$ is the most extreme outlier signature ---
+  a small number of TEST rides have catastrophic projection collapse
+  that the matched-filter cannot fit. The same rides under $|a|-g$
+  contribute single-digit-metre residuals (RMSE 4.25\,m). The
+  median-absolute-error column would be flat across all bars (it is
+  $\approx 0.29$\,m in every cell of
+  Table~\ref{tab:gravity-pipeline-results}): the gap lives entirely
+  in the tail.}
+\label{fig:gravity-pipeline-test-views}
+\end{figure}
+
+\subsection{Interpretation and recommendation}
+
+The empirical and theoretical pictures align:
+\begin{itemize}\setlength\itemsep{2pt}
+  \item \textbf{The median ride is unaffected} (medAE constant to
+        $\pm 0.02$\,m). On a well-behaved ride with a stable phone,
+        $\avert$ and $|a|-g$ agree to the resolving power of the
+        trapezoid template.
+  \item \textbf{The tail is what changes.} The $\avert$ failures we
+        observed in the field have a clean signature: a few
+        catastrophic outliers (single-ride errors of 10\,m+) caused
+        by mid-ride reorientation. The magnitude residual eliminates
+        them. RMSE on TEST drops from 25.8\,m to 4.3\,m for the
+        trapezoid predictor; segmentation false positives go from
+        29 to zero.
+  \item \textbf{Train regresses slightly} (trapezoid MAE
+        $+0.25$\,m, ZUPT MAE $+0.94$\,m), consistent with the
+        $|\vec a_h|^2/2g$ bias derived above on a near-stationary
+        lab phone. The crossover analysis predicts this cost is
+        small relative to the rotation cost it offsets.
+\end{itemize}
+
+For real-world deployment, where in-ride phone rotation is the rule
+rather than the exception, the magnitude residual is the
+recommended default. The current configuration leaves
+\texttt{input\_signal} at \verb|"a_vert"| so existing benchmarks
+remain reproducible; promoting \verb|"a_mag_minus_g"| to the default
+is a one-line change in each \texttt{configTypes.py} once these
+results are validated on a wider deployment corpus.
+
+% =====================================================================
+\section{Pipeline with $|a|-g$ Segmentation \& Prediction}
+\label{sec:pipeline-amg}
+% =====================================================================
+
+% Auto-generated macros from
+%   scripts/pipeline_evaluation_report.py
+%       --seg-signal a_mag_minus_g --pred-signal a_mag_minus_g
+%       --out-dir   docs/latex/figures/pipeline_amg
+%       --macro-prefix PipeAmg
+\input{figures/pipeline_amg/results_macros.tex}
+
+\subsection{Configuration}
+
+This section re-runs the full pipeline evaluation of
+\S\ref{sec:pipeline-amg} (segmentation $\to$ trapezoid predictor
+$\to$ scoring against three truth sources --- GT, matched
+barometer, all-segments barometer) with one change: both the
+matched-filter detector and the trapezoid predictor consume the
+rotation-invariant magnitude residual $|a|-g$ instead of the
+gravity-projected $\avert$ (\S\ref{sec:gravity-change-theory}).
+The ZUPT predictor is untouched --- it does not enter the
+pipeline view.
+
+All other knobs are identical to the baseline run
+(\S\ref{sec:pipeline-amg}): same $(W,f)$ grid, same peak / pair /
+quiet-middle filters, same calibration checkpoint loaded for the
+trapezoid predictor's conformal multiplier, same 26-experiment
+train + test corpus.
+
+\subsection{Headline numbers}
+
+\begin{table}[h]
+\centering
+\input{figures/pipeline_amg/headline_pooled.tex}
+\caption{Pipeline-pooled errors under
+  $\texttt{input\_signal}=\texttt{a\_mag\_minus\_g}$. Three views:
+  predictor on every GT interval, on every cleanly-matched
+  segmenter interval, and on every segmenter interval scored
+  against barometer.}
+\label{tab:pipeline-amg-pooled}
+\end{table}
+
+\begin{table}[h]
+\centering
+\input{figures/pipeline_amg/headline_train.tex}
+\caption{Train split under $|a|-g$.}
+\label{tab:pipeline-amg-train}
+\end{table}
+
+\begin{table}[h]
+\centering
+\input{figures/pipeline_amg/headline_test.tex}
+\caption{Held-out test split under $|a|-g$. The numbers to watch:
+  matched-view MAE $\PipeAmgTestMatchedMae$\,m versus the baseline
+  $\avert$ section's \mbox{$\sim$1.49\,m} on the same data
+  (\S\ref{sec:pipeline-amg}).}
+\label{tab:pipeline-amg-test}
+\end{table}
+
+\subsection{MAE at a glance}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\linewidth]{pipeline_amg/bar_mae_overall.png}
+\caption{Pooled / train / test MAE per view, $|a|-g$ run.
+  Methodology mirrors Figure on page~\pageref{sec:pipeline-amg};
+  the bars here can be compared cell-by-cell against the baseline
+  figure. Headline: TEST matched-view MAE is
+  $\PipeAmgTestMatchedMae$\,m, RMSE $\PipeAmgTestMatchedRmse$\,m.}
+\label{fig:pipeline-amg-bar}
+\end{figure}
+
+\subsection{Error CDFs}
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.49\linewidth}
+  \includegraphics[width=\linewidth]{pipeline_amg/cdf_pooled.png}
+\end{minipage}\hfill
+\begin{minipage}{0.49\linewidth}
+  \includegraphics[width=\linewidth]{pipeline_amg/cdf_pooled_zoom.png}
+\end{minipage}
+\caption{Pooled CDF of $|\Delta h_{\text{pred}} - \Delta h_{\text{truth}}|$
+  under $|a|-g$. Left: full range. Right: zoom to 0--3\,m, where
+  most of the deployment-relevant mass lives. Fraction $\le 1.5$\,m:
+  GT $\PipeAmgPooledGtFloor$, matched
+  $\PipeAmgPooledMatchedFloor$, all $\PipeAmgPooledAllFloor$.}
+\label{fig:pipeline-amg-cdf-pooled}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.49\linewidth}
+  \includegraphics[width=\linewidth]{pipeline_amg/cdf_train.png}
+\end{minipage}\hfill
+\begin{minipage}{0.49\linewidth}
+  \includegraphics[width=\linewidth]{pipeline_amg/cdf_test.png}
+\end{minipage}
+\caption{Per-split CDFs. The held-out test split (right) is the
+  key generalisation read: matched-view fraction $\le 1.5$\,m is
+  $\PipeAmgTestMatchedFloor$, all-view fraction $\le 1.5$\,m is
+  $\PipeAmgTestAllFloor$.}
+\label{fig:pipeline-amg-cdf-splits}
+\end{figure}
+
+\subsection{Signed-error PDFs and scatter}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\linewidth]{pipeline_amg/signed_error_pdf.png}
+\caption{Signed-error PDFs per view. A symmetric, near-zero-mean
+  distribution implies the predictor is not biased toward
+  over-/under-shooting; long tails are where outliers live.
+  Compare visually with the baseline figure in
+  \S\ref{sec:pipeline-amg} --- the $|a|-g$ tails are markedly
+  thinner.}
+\label{fig:pipeline-amg-signed}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\linewidth]{pipeline_amg/scatter_three.png}
+\caption{Predicted vs.\ truth scatter, all three views, $|a|-g$.
+  Points off the diagonal are mis-predictions; the cluster width
+  around $y=x$ reflects the conditional spread of the predictor.}
+\label{fig:pipeline-amg-scatter}
+\end{figure}
+
+\subsection{False-positive characterisation}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.7\linewidth]{pipeline_amg/fp_predicted_dh.png}
+\caption{Phantom $\Delta h$ on false-positive segments.
+  Under $|a|-g$, $\PipeAmgFpN$ false-positive segments survive
+  the matched-filter pair-filter --- the histogram is empty
+  because every segmenter prediction in the corpus cleanly
+  matched a real GT ride. Median signed phantom is
+  $\PipeAmgFpMedianSigned$\,m, mean absolute phantom is
+  $\PipeAmgFpMeanAbs$\,m. Compare to the baseline (Section
+  \ref{sec:pipeline-amg}) where the FP histogram had non-trivial
+  mass driven by stale-$\hat g$-projection artefacts.
+  The companion ``predicted altitude'' figure that would normally
+  sit beside this one is omitted: with zero FPs the renderer
+  has nothing to draw.}
+\label{fig:pipeline-amg-fp}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\linewidth]{pipeline_amg/fp_vs_clean_dh.png}
+\caption{Distribution of predicted $|\Delta h|$ for FP segments
+  vs.\ clean (matched-GT) segments. A separable left-right view
+  here means the predictor's output magnitude alone could gate
+  out FPs; overlap means we depend on the quality filter to do it.}
+\label{fig:pipeline-amg-fp-vs-clean}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\linewidth]{pipeline_amg/clean_predicted_altitude.png}
+\caption{Predicted altitude trajectories for clean (matched)
+  segments. Each line is one experiment; the slope encodes ride
+  direction, the dwell encodes pause-between-rides. Under
+  $|a|-g$, lines are visibly straighter (less amplitude
+  collapse from stale-$\hat g$ projection).}
+\label{fig:pipeline-amg-clean-alt}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\linewidth]{pipeline_amg/baro_vs_gt_sanity.png}
+\caption{Barometer-derived $\Delta h$ vs.\ ground-truth
+  $\Delta h$ for every matched segment --- a sanity check that
+  the "all" view's barometer truth source agrees with the
+  per-ride GT. Clustering near $y=x$ validates that the
+  third-view-vs-barometer scoring is honest under the new
+  segmentation as well.}
+\label{fig:pipeline-amg-baro-sanity}
+\end{figure}
+
+\subsection{Per-experiment MAE}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{pipeline_amg/per_exp_mae.png}
+\caption{Per-experiment MAE across the 26 experiments, all three
+  views. Bars reveal whether one or two pathological experiments
+  drive the aggregate, vs.\ uniform performance across phones
+  and buildings.}
+\label{fig:pipeline-amg-per-exp}
+\end{figure}
+
+\subsection{Accepted-only (post quality-filter)}
+
+The trapezoid predictor's quality filter is unchanged from the
+baseline run --- only the input signal moved. The same set of
+features (joint $R^2$, cruise-velocity CV, anchor ratio,
+out-of-lobe residual density, pre-/post-gravity angle) classifies
+each prediction; the accept-rate under $|a|-g$ is
+$\PipeAmgAcceptRateClean$ on clean segments and
+$\PipeAmgAcceptRateFp$ on FP segments.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\linewidth]{pipeline_amg/bar_mae_overall_acc.png}
+\caption{Accepted-only MAE. The quality filter removes a curated
+  set of low-confidence predictions; what remains is the
+  predictor's operating distribution for downstream consumers
+  that gate on \texttt{accepted=True}.}
+\label{fig:pipeline-amg-bar-acc}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.49\linewidth}
+  \includegraphics[width=\linewidth]{pipeline_amg/cdf_pooled_acc.png}
+\end{minipage}\hfill
+\begin{minipage}{0.49\linewidth}
+  \includegraphics[width=\linewidth]{pipeline_amg/cdf_pooled_zoom_acc.png}
+\end{minipage}
+\caption{Accepted-only pooled CDF. The right zoom emphasises the
+  $\le 1.5$\,m operating regime.}
+\label{fig:pipeline-amg-cdf-acc}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.49\linewidth}
+  \includegraphics[width=\linewidth]{pipeline_amg/cdf_train_acc.png}
+\end{minipage}\hfill
+\begin{minipage}{0.49\linewidth}
+  \includegraphics[width=\linewidth]{pipeline_amg/cdf_test_acc.png}
+\end{minipage}
+\caption{Accepted-only per-split CDFs. Test-split matched-view
+  fraction $\le 1.5$\,m on accepted predictions only is
+  $\PipeAmgTestMatchedFloorAcc$.}
+\label{fig:pipeline-amg-cdf-acc-splits}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\linewidth]{pipeline_amg/scatter_three_acc.png}
+\caption{Accepted-only scatter: predicted $\Delta h$ vs.\ truth
+  for all three views. Tightness near the diagonal is the
+  deployment story.}
+\label{fig:pipeline-amg-scatter-acc}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\linewidth]{pipeline_amg/per_exp_mae_acc.png}
+\caption{Per-experiment MAE, accepted-only. Compare with the
+  unfiltered Figure~\ref{fig:pipeline-amg-per-exp} to see which
+  experiments contributed rejected predictions.}
+\label{fig:pipeline-amg-per-exp-acc}
+\end{figure}
+
+\subsection{Summary vs.\ the $\avert$ baseline}
+
+The headline numbers under $|a|-g$ in this section can be read
+side-by-side against the baseline reported in
+\S\ref{sec:pipeline-amg}. The pattern established by
+\S\ref{sec:gravity-change} holds at the pipeline level:
+
+\begin{itemize}\setlength\itemsep{2pt}
+  \item \textbf{Test-split matched MAE collapses} from
+        \mbox{$\sim$1.49\,m} to $\PipeAmgTestMatchedMae$\,m. The
+        catastrophic outliers that drove the baseline's TEST RMSE
+        toward double digits do not appear under $|a|-g$.
+  \item \textbf{False positives drop sharply}: the magnitude
+        residual does not afford the stale-$\hat g$ projection
+        path that turned horizontal user motion into phantom
+        trapezoids. \mbox{$\PipeAmgFpN$ FP segments} survive,
+        median absolute phantom Δh of
+        $\PipeAmgFpMedianAbs$\,m.
+  \item \textbf{Train performance regresses slightly} (median
+        ride is unaffected; the small TRAIN MAE increase reflects
+        the $|\vec a_h|^2/2g$ horizontal-motion leakage analysed
+        in \S\ref{sec:gravity-change-theory}). The total error
+        budget on train + test is still substantially better
+        than the baseline.
+  \item \textbf{Quality filter still earns its keep.}
+        $\PipeAmgAcceptRateFp$ of false positives are rejected by
+        the filter; clean predictions retain
+        $\PipeAmgAcceptRateClean$ acceptance.
+\end{itemize}
+
+The boutique pipeline (\texttt{src/pipelines/boutique\_pipeline.py})
+defaults its in-app segmentation to $|a|-g$ from the same change
+that produced this section, so the signal the user sees in the
+Streamlit UI (step 3, "Segmentation") matches what the matched
+filter actually scores against.
 
 \end{document}

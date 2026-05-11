@@ -36,7 +36,7 @@ from src.utils.sensor_noise import get_phone_accel_noise_sigma
 from ..fit_elevator_parameters.common import (
     SMOOTH_SEC,
     match_one_template, trapezoid_kernel,
-    _estimate_fs_hz, _vertical_accel, _smooth,
+    _estimate_fs_hz, _vertical_accel, _a_mag_minus_g, _smooth,
     getExperimentData, list_experiments,
 )
 from . import pair_filter
@@ -143,6 +143,14 @@ class DetectConfig:
     include_triangle_row: bool = True
 
     noise_sigma_multiplier: float = 6.0
+
+    # Scalar signal the matched filter scores against.
+    #   "a_vert"         : signed gravity-projected vertical acceleration
+    #                       (orientation-aware; current default).
+    #   "a_mag_minus_g"  : rotation-invariant ``|a| − |ĝ|`` — survives
+    #                       in-ride phone rotation but picks up
+    #                       horizontal user motion.
+    input_signal: str = "a_vert"
 
     def grid_w_s(self) -> np.ndarray:
         return np.linspace(self.w_min_s, self.w_max_s, self.n_w)
@@ -306,7 +314,10 @@ def detect(
     ax_ = acc["x"].to_numpy(dtype=float)
     ay_ = acc["y"].to_numpy(dtype=float)
     az_ = acc["z"].to_numpy(dtype=float)
-    a_vert = _vertical_accel(ax_, ay_, az_, fs)
+    if config.input_signal == "a_mag_minus_g":
+        a_vert = _a_mag_minus_g(ax_, ay_, az_, fs)
+    else:
+        a_vert = _vertical_accel(ax_, ay_, az_, fs)
     a_smooth = _smooth(a_vert, fs, SMOOTH_SEC)
 
     config, sigma_a = _apply_phone_noise_floor(config, phone_model, fs)

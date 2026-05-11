@@ -203,7 +203,7 @@ def _main_signal_figure(
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=dt, y=a_vert, mode="lines", name="a_vert",
+        x=dt, y=a_vert, mode="lines", name="|a|−g",
         line=dict(color="#233044", width=1),
         hovertemplate=f"%{{x|{HOVER_DATETIME_FMT}}}<br>a=%{{y:.2f}} m/s²<extra></extra>",
     ))
@@ -236,7 +236,7 @@ def _main_signal_figure(
         )
     fig.update_layout(
         height=360, margin=dict(l=10, r=10, t=30, b=30),
-        xaxis_title="time", yaxis_title="a_vert (m/s²)",
+        xaxis_title="time", yaxis_title="|a|−g (m/s²)",
         xaxis=dict(type="date"),
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
@@ -372,7 +372,7 @@ def _signal_with_trapezoid_figure(
     dt_window = to_datetime_array(t[mask], t0_ms)
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=dt_window, y=a_vert[mask], mode="lines", name="a_vert",
+        x=dt_window, y=a_vert[mask], mode="lines", name="|a|−g",
         line=dict(color="#233044", width=1),
         hovertemplate=f"%{{x|{HOVER_DATETIME_FMT}}}<br>"
                       "a=%{y:.2f} m/s²<extra></extra>",
@@ -410,7 +410,7 @@ def _signal_with_trapezoid_figure(
     fig.update_layout(
         height=280, margin=dict(l=10, r=10, t=20, b=30),
         xaxis=dict(title="time", type="date"),
-        yaxis_title="a (m/s²)",
+        yaxis_title="|a|−g (m/s²)",
         hovermode="x unified", plot_bgcolor="#fafbfc",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
     )

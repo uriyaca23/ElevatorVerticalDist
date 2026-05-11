@@ -64,6 +64,7 @@ from src.data.loader.pipeline import (
 )
 from src.data.loadFromDB import LoadedSignal, PhoneType, loadDataFromS3
 from src.physics import calculate_velocity_from_accelerometer, pressure_to_altitude
+from src.utils.accelerometer_utils import vertical_accel_magnitude
 from src.segmentation.algorithms import (
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,
@@ -223,9 +224,16 @@ def _draw_velocity(ax, data, t0):
 def _draw_acc(ax, data, t0):
     df = data["ACC"]
     t = (df["timestamp_ms"].to_numpy(dtype=float) - t0) / 1000.0
-    mag = np.sqrt(df["x"] ** 2 + df["y"] ** 2 + df["z"] ** 2).to_numpy()
-    ax.plot(t, mag, color="tab:blue", lw=0.5)
-    ax.set_ylabel("|a| (m/s²)")
+    # Plot the same |a|−g residual the matched filter scores against
+    # (rotation-invariant; positive = take-off lobe, negative = landing).
+    sig = vertical_accel_magnitude(
+        df["x"].to_numpy(dtype=float),
+        df["y"].to_numpy(dtype=float),
+        df["z"].to_numpy(dtype=float),
+    )
+    ax.plot(t, sig, color="tab:blue", lw=0.5)
+    ax.axhline(0.0, color="gray", lw=0.4, ls="--", alpha=0.5)
+    ax.set_ylabel("|a|−g (m/s²)")
 
 
 def _draw_acc_velocity(ax, data, t0):

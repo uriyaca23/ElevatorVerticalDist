@@ -144,6 +144,32 @@ def _vertical_accel(ax: np.ndarray, ay: np.ndarray, az: np.ndarray, fs: float) -
     return a - dc
 
 
+def _a_mag_minus_g(ax: np.ndarray, ay: np.ndarray, az: np.ndarray, fs: float) -> np.ndarray:
+    """Rotation-invariant ``|a(t)| − |ĝ|``.
+
+    Why this exists: ``_vertical_accel`` projects onto a *frozen* gravity
+    estimate, so an in-ride phone rotation invalidates the axis and the
+    trapezoid signature collapses into the orthogonal channels. The
+    magnitude residual is invariant under arbitrary rotation because
+    ``|a_device| = |g · ĝ_dev + a_ride · ĝ_dev| = |g + a_ride|`` and
+    ``ĝ_dev`` drops out. Sign is preserved: a take-off lobe lifts
+    ``|a|`` above ``g``, a landing lobe pushes it below. Cost: any
+    horizontal user motion ``a_h`` leaks in as ``a_h²/(2g)``.
+
+    Postprocessing matches :func:`_vertical_accel` (same 8 s DC-detrend)
+    so downstream thresholds tuned on ``a_vert`` carry over with
+    comparable noise statistics.
+    """
+    mag = np.sqrt(ax * ax + ay * ay + az * az)
+    _gvec, g_mag, _stab = estimate_gravity_stationary(
+        ax, ay, az, fs=fs, window_sec=0.5,
+    )
+    a = mag - g_mag
+    w = max(3, int(round(_DETREND_SEC * fs)))
+    dc = pd.Series(a).rolling(w, center=True, min_periods=1).mean().to_numpy()
+    return a - dc
+
+
 def _smooth(x: np.ndarray, fs: float, seconds: float) -> np.ndarray:
     w = max(3, int(round(seconds * fs)))
     return pd.Series(x).rolling(w, center=True, min_periods=1).mean().to_numpy()

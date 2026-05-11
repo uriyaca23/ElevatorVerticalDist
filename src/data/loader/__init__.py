@@ -68,7 +68,9 @@ from .parsing import (
 )
 from .pipeline import (
     ExperimentPipeline,
+    TARGET_SAMPLE_RATE_HZ,
     _detect_valid_intervals as detect_valid_intervals,
+    _resample_sensor_with_gaps as resample_sensor_with_gaps,
     classify_experiment_type,
     getExperimentData,
     getExperimentRawParsed,
@@ -106,10 +108,12 @@ __all__ = [
     "VALID_SOURCES",
     "THRESHOLD_FREQUENCY_HZ",
     "GAP_THRESHOLD_S",
+    "TARGET_SAMPLE_RATE_HZ",
     # Pipeline
     "ExperimentPipeline",
     "classify_experiment_type",
     "detect_valid_intervals",
+    "resample_sensor_with_gaps",
     "getExperimentRawParsed",
     "getExperimentData",
     "saveExperimentData",

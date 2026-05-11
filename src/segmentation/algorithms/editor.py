@@ -72,7 +72,7 @@ from src.data.loader import (  # noqa: E402
 )
 from src.segmentation.algorithms.accelerometer_only.template_match.fit_elevator_parameters.common import (  # noqa: E402
     SMOOTH_SEC, trapezoid_kernel,
-    _estimate_fs_hz, _vertical_accel, _smooth,
+    _estimate_fs_hz, _a_mag_minus_g, _smooth,
 )
 from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E402
     detect as _detect,
@@ -98,27 +98,28 @@ PREDICT_PRE_POST_SEC = 2.0
 
 
 # --------------------------------------------------------------------------
-# Custom a_vert panel — same signed, gravity-projected channel the
-# detector works on. Replaces the GT editor's |a| magnitude panel.
+# Custom signal panel — same channel the detector scores against.
+# Now: |a|−g (rotation-invariant magnitude residual). Replaces the GT
+# editor's |a| magnitude panel and the prior a_vert projection panel.
 # --------------------------------------------------------------------------
 
 def _draw_a_vert(ax, data, t0_ms):
     df = data["ACC"]
     ts_ms = df["timestamp_ms"].to_numpy(dtype=float)
     if ts_ms.size == 0:
-        ax.set_ylabel("$a_\\mathrm{vert}$ (m/s²)")
+        ax.set_ylabel("$|a|-g$ (m/s²)")
         return
     t = (ts_ms - t0_ms) / 1000.0
     fs = _estimate_fs_hz(ts_ms)
     ax_arr = df["x"].to_numpy(dtype=float)
     ay_arr = df["y"].to_numpy(dtype=float)
     az_arr = df["z"].to_numpy(dtype=float)
-    a_vert = _vertical_accel(ax_arr, ay_arr, az_arr, fs)
-    a_smooth = _smooth(a_vert, fs, SMOOTH_SEC)
-    ax.plot(t, a_vert, color="#2c3e50", lw=0.5, label="$a_\\mathrm{vert}$")
+    a_sig = _a_mag_minus_g(ax_arr, ay_arr, az_arr, fs)
+    a_smooth = _smooth(a_sig, fs, SMOOTH_SEC)
+    ax.plot(t, a_sig, color="#2c3e50", lw=0.5, label="$|a|-g$")
     ax.plot(t, a_smooth, color="#e67e22", lw=0.9, alpha=0.9, label="smoothed")
     ax.axhline(0, color="gray", lw=0.4, ls="--", alpha=0.5)
-    ax.set_ylabel("$a_\\mathrm{vert}$ (m/s²)")
+    ax.set_ylabel("$|a|-g$ (m/s²)")
     ax.legend(loc="upper right", fontsize=7, frameon=False)
 
 
@@ -482,13 +483,19 @@ class PredictionEditor(tk.Tk):
 
         self.status_var.set(f"Running detector on {name}…")
         self.update_idletasks()
+        # Run the matched filter on the same signal the editor is now
+        # displaying (|a|-g). Without this override the detector would
+        # fall back to ``input_signal="a_vert"`` from DEFAULT_CONFIG and
+        # the smoothed-orange overlay the user sees would not be what
+        # was actually scored against.
+        _det_cfg = _detect.DetectConfig(input_signal="a_mag_minus_g")
         try:
             # Run the detector once on the full ACC for a canonical state
             # (full-timeline arrays drive the heatmap / correlation panels).
             # Then re-run per valid interval and replace the predictions —
             # per-interval calls cannot produce false matches that span a
             # gap, since the detector never sees both sides at once.
-            self.predictions, state = predict_intervals(acc)
+            self.predictions, state = predict_intervals(acc, _det_cfg)
             self._state = state if state else None
             if (acc is not None and not acc.empty
                     and len(self._acc_valid_intervals) > 1):
@@ -501,7 +508,7 @@ class PredictionEditor(tk.Tk):
                     if len(chunk) < 2:
                         continue
                     try:
-                        chunk_preds, _chunk_state = predict_intervals(chunk)
+                        chunk_preds, _chunk_state = predict_intervals(chunk, _det_cfg)
                     except Exception:  # noqa: BLE001
                         continue
                     chunk_t0_ms = float(chunk["timestamp_ms"].iloc[0])
