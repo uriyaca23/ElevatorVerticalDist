@@ -264,6 +264,11 @@ def init_state() -> None:
         "predict_selected":   None,
         "data_input_mode":    None,   # "phone" | "file" | None (= picker)
         "pending_new_segment": False,
+        # Per-segment manual trapezoid overrides — keyed by segment index
+        # in segments_df. See effective_trapezoid_params() and the
+        # step-3 override UI. Cleared whenever the detector is re-run or
+        # the segments table is bulk-edited.
+        "lobe_overrides":     {},
     }
     for k, v in defaults.items():
         st.session_state.setdefault(k, v)
@@ -512,10 +517,61 @@ def render_trapezoid_params(prediction: dict | None) -> None:
     st.markdown(html, unsafe_allow_html=True)
 
 
-def _segment_label(i: int, row: pd.Series) -> str:
+def _segment_label(i: int, row: pd.Series, has_override: bool = False) -> str:
     rt = str(row.get("type", "up"))
     s = float(row["start_s"]); e = float(row["end_s"])
-    return f"#{i:<2} {rt:<4}  {s:6.1f}–{e:6.1f} s"
+    # ✱ marks a segment whose trapezoid shape has been manually overridden
+    # in step 3 — see ``lobe_overrides`` in session state. Two-space pad
+    # keeps column widths stable for un-overridden rows.
+    star = "✱ " if has_override else "  "
+    return f"#{i:<2} {star}{rt:<4}  {s:6.1f}–{e:6.1f} s"
+
+
+def effective_trapezoid_params(
+    prediction: dict | None, override: dict | None,
+) -> dict | None:
+    """Return the per-lobe trapezoid params with an optional shape override.
+
+    The returned dict matches the detector's ``prediction`` structure
+    (``lobe1`` / ``lobe2`` with ``t_c``, ``half_width_s``, ``frac_flat``,
+    ``a_peak``, ``r2_local``) so existing renderers consume it unchanged.
+
+    With ``override`` ``None`` this is a thin copy of ``prediction``. With
+    an override the shared ``(W, f, |A|)`` are taken from the override;
+    each lobe keeps its own ``t_c`` (so inter-lobe duration — the main
+    Δh driver — is preserved) and its own sign on ``a_peak``.
+    """
+    if prediction is None:
+        return None
+    l1 = dict(prediction.get("lobe1") or {})
+    l2 = dict(prediction.get("lobe2") or {})
+    if not override:
+        return {"lobe1": l1, "lobe2": l2, "override_mode": None}
+    try:
+        W = float(override["W"])
+        f = float(override["f"])
+        abs_A = float(override["abs_A"])
+    except (KeyError, TypeError, ValueError):
+        return {"lobe1": l1, "lobe2": l2, "override_mode": None}
+
+    def _sign(lobe: dict, default: float) -> float:
+        a = lobe.get("a_peak")
+        try:
+            v = float(a)
+        except (TypeError, ValueError):
+            v = default
+        return 1.0 if v >= 0 else -1.0
+
+    sign1 = _sign(l1, 1.0)
+    sign2 = _sign(l2, -1.0)
+    l1["half_width_s"] = W; l1["frac_flat"] = f
+    l1["a_peak"] = sign1 * abs_A
+    l2["half_width_s"] = W; l2["frac_flat"] = f
+    l2["a_peak"] = sign2 * abs_A
+    return {
+        "lobe1": l1, "lobe2": l2,
+        "override_mode": str(override.get("mode", "manual")),
+    }
 
 
 def _default_new_segment_bounds(
@@ -680,6 +736,17 @@ def render_segment_sidebar(segments_df: pd.DataFrame, sel: int | None) -> None:
                 st.session_state["segments_df"] = df
                 new = max(0, sel - 1) if len(df) else None
                 st.session_state["selected_segment"] = new
+                # Remap the index-keyed overrides: drop the deleted row's
+                # entry, and shift every later row down by 1 so the
+                # remaining segments keep their overrides.
+                ovs: dict[int, dict] = (
+                    st.session_state.get("lobe_overrides") or {}
+                )
+                if ovs:
+                    st.session_state["lobe_overrides"] = {
+                        (k if k < sel else k - 1): v
+                        for k, v in ovs.items() if k != sel
+                    }
                 st.rerun()
 
     st.sidebar.markdown("")
@@ -710,12 +777,16 @@ def render_predict_segment_sidebar(rows: list[dict], selected: int) -> None:
 
     options = [int(r["segment"]) for r in rows]
     by_id = {int(r["segment"]): r for r in rows}
+    overrides = st.session_state.get("lobe_overrides", {}) or {}
 
     def _label(seg_id: int) -> str:
         r = by_id[seg_id]
         dh = r["delta_height_m"]
         dh_str = f"Δh={dh:+.2f}m" if np.isfinite(dh) else "Δh=—"
-        return (f"#{r['segment']:<2} {r['type']:<4}  "
+        # ✱ marks segments with a manual trapezoid override staged for
+        # this prediction. Two-space pad keeps un-overridden rows aligned.
+        star = "✱ " if seg_id in overrides else "  "
+        return (f"#{r['segment']:<2} {star}{r['type']:<4}  "
                 f"{r['start_s']:5.1f}–{r['end_s']:5.1f}s  {dh_str}")
 
     new_sel = st.sidebar.radio(

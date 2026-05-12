@@ -65,6 +65,8 @@ if str(_REPO_ROOT) not in sys.path:
 
 from src.data.gt_editor import PANEL_DRAWERS as _GT_PANEL_DRAWERS  # noqa: E402
 from src.data.gt_editor import TYPE_COLORS  # noqa: E402
+from src.data.load_data import enrich_loaded  # noqa: E402
+from src.data.loadFromDB import LoadedSignal as _BaseLoadedSignal  # noqa: E402
 from src.data.loader import (  # noqa: E402
     RAW_DATA_ROOT,
     STRUCTURED_DATA_DIR,
@@ -167,6 +169,16 @@ class PredictionEditor(tk.Tk):
         # widens / narrows the viewing window.
         self._last_sel: tuple[str, tuple] | None = None
         self.detail_pad_var = tk.DoubleVar(value=5.0)
+
+        # Trapezoid override (predictor-stage manual edit). Same contract
+        # as the Streamlit boutique pipeline: when ``_override_enabled``
+        # is True, ``_run_all_predictors`` passes ``trapezoid_override``
+        # to ``Predictor.predict`` so the TRAPEZOID_ACCEL estimator
+        # bypasses its joint fit and uses the (W, f, |A|) below directly.
+        self._override_enabled = tk.BooleanVar(value=False)
+        self._override_W = tk.DoubleVar(value=1.0)
+        self._override_f = tk.DoubleVar(value=0.5)
+        self._override_A = tk.DoubleVar(value=1.5)
 
         self._build_ui()
         self._populate_experiments()
@@ -370,6 +382,7 @@ class PredictionEditor(tk.Tk):
 
         pred_tab = ttk.Frame(self.detail_nb)
         self.detail_nb.add(pred_tab, text="Prediction")
+        self._build_override_controls(pred_tab)
         pred_split = ttk.Panedwindow(pred_tab, orient=tk.VERTICAL)
         pred_split.pack(fill=tk.BOTH, expand=True)
         pred_table_frame = ttk.Frame(pred_split, padding=2)
@@ -458,29 +471,45 @@ class PredictionEditor(tk.Tk):
             messagebox.showerror("Load failed", f"{type(e).__name__}: {e}")
             return
 
+        # Route the native ACC through the same shared loader the Streamlit
+        # boutique pipeline uses (resample to 50 Hz, detect gaps, split into
+        # parts). Without this the editor would plot native cadence and the
+        # detector would land peaks at different t values than Streamlit on
+        # the same recording — that's the time-axis "shift" the two tools
+        # used to disagree on.
+        acc_native = sensors.get("ACC")
+        if acc_native is None or acc_native.empty:
+            messagebox.showerror(
+                "No ACC",
+                f"Experiment {name!r} has no ACC samples — the editor "
+                "needs ACC to anchor the time axis.",
+            )
+            return
+
+        base = _BaseLoadedSignal(
+            acc=acc_native, source=name, meta={},
+            prs=sensors.get("PRS"), gyr=sensors.get("GYR"),
+            mag=sensors.get("MAG"), ori=sensors.get("ORI"),
+        )
+        enriched = enrich_loaded(base, resample=True)
+        sensors["ACC"] = enriched.acc
+        acc = enriched.acc
+
         self.exp_name = name
         self.sensors = sensors
         self.gt = gt
 
-        prs = sensors.get("PRS")
-        acc = sensors.get("ACC")
-        if acc is not None and not acc.empty:
-            self._t0_ms = int(acc["timestamp_ms"].iloc[0])
-        elif prs is not None and not prs.empty:
-            self._t0_ms = int(prs["timestamp_ms"].iloc[0])
-        else:
-            self._t0_ms = 0
-
+        # Both _t0_ms (session anchor used by every panel) and _acc_t0_ms
+        # (detail-pane anchor) are now the first sample of the resampled
+        # ACC — same value Streamlit uses for ``state['t0_ms']``.
+        self._t0_ms = int(acc["timestamp_ms"].iloc[0])
         self._acc_t0_ms = float(self._t0_ms)
-        if acc is not None and not acc.empty:
-            self._acc_t0_ms = float(acc["timestamp_ms"].iloc[0])
 
-        # Per-sensor valid intervals were stashed by the loader; ACC drives
-        # this UI's detection and plotting. Anything outside is a "no data"
-        # gap that the user must not label.
-        self._acc_valid_intervals: list[tuple[int, int]] = (
-            gt.attrs.get("valid_intervals_per_sensor", {}).get("ACC", [])
-            if gt is not None else []
+        # Valid intervals come from the same enrichment pass that produced
+        # the resampled ACC — single source of truth for the gaps the
+        # detector and the "no data" overlays must agree on.
+        self._acc_valid_intervals: list[tuple[int, int]] = list(
+            enriched.valid_intervals
         )
 
         self.status_var.set(f"Running detector on {name}…")
@@ -584,10 +613,12 @@ class PredictionEditor(tk.Tk):
                 for ax in axes:
                     ax.axvspan(s, e, color=color, alpha=0.15, zorder=0)
 
-        offset = self._acc_offset_seconds()
+        # _t0_ms and _acc_t0_ms are always equal (both anchored on the
+        # resampled ACC's first sample), so predictions live directly on
+        # the session time axis — no offset needed.
         for p in self.predictions:
-            s = p["t_start_s"] + offset
-            e = p["t_end_s"] + offset
+            s = p["t_start_s"]
+            e = p["t_end_s"]
             col = PRED_COLORS[p["ride_type"]]
             for ax in axes:
                 ax.axvspan(s, e, color=col, alpha=0.18, hatch="//", zorder=1)
@@ -639,11 +670,6 @@ class PredictionEditor(tk.Tk):
         self._axes = list(axes)
         self.fig.tight_layout()
         self.canvas.draw()
-
-    def _acc_offset_seconds(self) -> float:
-        if self._state is None:
-            return 0.0
-        return (self._acc_t0_ms - self._t0_ms) / 1000.0
 
     # ---------- Time formatting (mirror of gt_editor.py) ----------
 
@@ -743,10 +769,7 @@ class PredictionEditor(tk.Tk):
         match = next((p for p in self.predictions if int(p["index"]) == idx), None)
         if match is None:
             return
-        offset = self._acc_offset_seconds()
-        self._highlight_on_plot(
-            match["t_start_s"] + offset, match["t_end_s"] + offset,
-        )
+        self._highlight_on_plot(match["t_start_s"], match["t_end_s"])
         self._last_sel = ("pred", (idx,))
         self._render_detail_for_prediction(match)
 
@@ -807,8 +830,7 @@ class PredictionEditor(tk.Tk):
         if match is None:
             return
         _, t_s_acc, t_e_acc, rt = match
-        offset = self._acc_offset_seconds()
-        self._highlight_on_plot(t_s_acc + offset, t_e_acc + offset)
+        self._highlight_on_plot(t_s_acc, t_e_acc)
         self._last_sel = ("gt", (t_s_acc, t_e_acc, rt, gi))
         self._render_detail_for_gt(t_s_acc, t_e_acc, rt, gi)
 
@@ -854,6 +876,110 @@ class PredictionEditor(tk.Tk):
         mask = (ts >= t_lo_ms) & (ts <= t_hi_ms)
         return df.loc[mask].reset_index(drop=True)
 
+    def _build_override_controls(self, parent) -> None:
+        """Override-shape row at the top of the Prediction tab.
+
+        Tk equivalent of the Streamlit step-4 controls: when "Use override"
+        is ticked, ``_run_all_predictors`` passes the (W, f, |A|) values
+        below to the trapezoid estimator instead of running its joint
+        shape fit. "Seed from prediction" copies the selected detector
+        prediction's lobe-1 fit into the spinboxes as a sane starting
+        point; "Re-predict" reruns every algorithm with the current
+        override state (same code path as the top-bar Predict button).
+        """
+        frame = ttk.LabelFrame(
+            parent, text="Trapezoid override (predictor)", padding=4,
+        )
+        frame.pack(fill=tk.X, padx=2, pady=(2, 4))
+
+        ttk.Checkbutton(
+            frame, text="Use override",
+            variable=self._override_enabled,
+        ).pack(side=tk.LEFT, padx=(2, 8))
+
+        ttk.Label(frame, text="W (s):").pack(side=tk.LEFT)
+        ttk.Spinbox(
+            frame, from_=0.01, to=30.0, increment=0.1, width=7,
+            textvariable=self._override_W, format="%.3f",
+        ).pack(side=tk.LEFT, padx=(2, 8))
+
+        ttk.Label(frame, text="f:").pack(side=tk.LEFT)
+        ttk.Spinbox(
+            frame, from_=0.0, to=1.0, increment=0.05, width=6,
+            textvariable=self._override_f, format="%.3f",
+        ).pack(side=tk.LEFT, padx=(2, 8))
+
+        ttk.Label(frame, text="|A| (m/s²):").pack(side=tk.LEFT)
+        ttk.Spinbox(
+            frame, from_=0.0, to=30.0, increment=0.05, width=7,
+            textvariable=self._override_A, format="%.3f",
+        ).pack(side=tk.LEFT, padx=(2, 8))
+
+        ttk.Button(
+            frame, text="Reset",
+            command=self._reset_override_to_estimated,
+        ).pack(side=tk.LEFT, padx=(8, 2))
+        ttk.Button(
+            frame, text="Re-predict",
+            command=self._on_predict_clicked,
+        ).pack(side=tk.LEFT, padx=2)
+
+    def _reset_override_to_estimated(self) -> None:
+        """Restore the override spinboxes to the predictor's estimated
+        (W, f, |A|) for the currently-selected prediction and untick
+        "Use override". This is the user's escape hatch back to the
+        baseline fit after fiddling with the values.
+
+        The estimated shape comes from the detector's matching prediction
+        — its joint matched-filter fit. GT selections have no matched
+        detector shape, so the values stay where they are and we just
+        clear the checkbox.
+        """
+        self._override_enabled.set(False)
+        if self._last_sel is None or self._last_sel[0] != "pred":
+            self.status_var.set("Override cleared.")
+            return
+        (idx,) = self._last_sel[1]
+        match = next(
+            (p for p in self.predictions if int(p["index"]) == idx), None,
+        )
+        if match is None:
+            self.status_var.set("Override cleared.")
+            return
+        l1 = match.get("lobe1") or {}
+        try:
+            W = float(l1.get("half_width_s", self._override_W.get()))
+            f = float(l1.get("frac_flat", self._override_f.get()))
+            A = abs(float(l1.get("a_peak", self._override_A.get())))
+        except (TypeError, ValueError):
+            self.status_var.set("Override cleared.")
+            return
+        self._override_W.set(round(W, 3))
+        self._override_f.set(round(f, 3))
+        self._override_A.set(round(A, 3))
+        self.status_var.set(
+            f"Reset override to estimated shape for pred #{idx:02d} "
+            f"(W={W:.2f}s, f={f:.2f}, |A|={A:.2f})."
+        )
+
+    def _current_override(self) -> dict | None:
+        """Return the override dict the predictor expects, or ``None``
+        when the override checkbox is unticked. The mode tag is kept
+        consistent with the Streamlit boutique pipeline so the predictor
+        emits the same meta annotation regardless of caller.
+        """
+        if not self._override_enabled.get():
+            return None
+        try:
+            return {
+                "mode":  "manual",
+                "W":     float(self._override_W.get()),
+                "f":     float(self._override_f.get()),
+                "abs_A": abs(float(self._override_A.get())),
+            }
+        except (tk.TclError, TypeError, ValueError):
+            return None
+
     def _run_all_predictors(
         self, t_start_acc: float, t_end_acc: float,
     ) -> dict:
@@ -882,6 +1008,7 @@ class PredictionEditor(tk.Tk):
             alt = pressure_to_altitude(ride_prs["pressure"].to_numpy(dtype=float))
             results["gt_dh"] = float(alt[-1] - alt[0])
 
+        override = self._current_override()
         for algo in PredictAlgorithm:
             try:
                 predictor = Predictor(PREDICT_ALGORITHM_CONFIG(algorithm=algo))
@@ -897,6 +1024,7 @@ class PredictionEditor(tk.Tk):
                     out = predictor.predict(
                         ride_acc, phone_model="",
                         pre=pre_acc, post=post_acc,
+                        trapezoid_override=override,
                     )
                 results[algo.value] = {
                     "dh":       float(out.height_diff),
@@ -1073,12 +1201,18 @@ class PredictionEditor(tk.Tk):
             ci_str = (
                 f"±{row['ci']:.2f}" if math.isfinite(row["ci"]) else "±inf"
             )
+            ov_meta = (row.get("meta") or {}).get("trapezoid_override")
             verdict = "OK" if row["accepted"] else "REJECT"
+            if ov_meta:
+                verdict = f"{verdict} (override)"
             tag = "ok" if row["accepted"] else "reject"
+            algo_label = (
+                f"{algo.value}  ✱" if ov_meta else algo.value
+            )
             self.pred_table.insert(
                 "", "end", iid=algo.value,
                 values=(
-                    algo.value,
+                    algo_label,
                     _fmt_float(row["dh"], "+.2f"),
                     ci_str,
                     _fmt_float(row["sigma"], ".2f"),
@@ -1559,12 +1693,11 @@ class PredictionEditor(tk.Tk):
         if tb and getattr(tb, "mode", ""):
             return
         x = float(event.xdata)
-        offset = self._acc_offset_seconds()
 
         # 1) Predictions (on top).
         for p in self.predictions:
-            s = p["t_start_s"] + offset
-            e = p["t_end_s"] + offset
+            s = p["t_start_s"]
+            e = p["t_end_s"]
             if s <= x <= e:
                 iid = str(p["index"])
                 if iid in self.tree_pred.get_children():
@@ -1574,7 +1707,7 @@ class PredictionEditor(tk.Tk):
 
         # 2) GT (behind).
         for gi, t_s, t_e, _rt in self._gt_rows():
-            if (t_s + offset) <= x <= (t_e + offset):
+            if t_s <= x <= t_e:
                 iid = f"gt:{gi}"
                 if iid in self.tree_gt.get_children():
                     self.tree_gt.selection_set(iid)

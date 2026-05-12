@@ -209,12 +209,17 @@ def predict(acc: pd.DataFrame,
             for aid in predictors:
                 rows_by_algo[aid].append(_empty_pred_row(base, "empty_slice"))
             continue
+        # Manual trapezoid override (Streamlit step-3 UI) — only the
+        # trapezoid estimator consumes it; other algorithms ignore the
+        # kwarg via the Predictor dispatcher.
+        seg_override = seg.get("trapezoid_override")
         for aid, predictor in predictors.items():
             try:
                 out = predictor.predict(
                     slice_df,
                     phone_model=phone_model,
                     pre=pre_df, post=post_df,
+                    trapezoid_override=seg_override,
                 )
                 dh = float(out.height_diff)
                 ci = (float(out.ci_half_width)

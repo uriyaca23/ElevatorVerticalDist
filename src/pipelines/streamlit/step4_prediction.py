@@ -23,6 +23,7 @@ from .common import (
     SELECTED_COLOR,
     STEP_REPORT,
     STEP_SEGMENT,
+    effective_trapezoid_params,
     find_matching_prediction,
     goto,
     hover_time_template,
@@ -76,18 +77,29 @@ def _run_predictions(
         float(loaded.acc["timestamp_ms"].iloc[0])
         if not loaded.acc.empty else None
     )
+    # Step 3 keyed overrides by the row position in the valid_segments
+    # dataframe — we iterate the same dataframe here, so the position
+    # matches one-to-one. Overrides on skipped (gap-spanning) segments
+    # silently drop with the rest of that segment.
+    overrides: dict[int, dict] = (
+        st.session_state.get("lobe_overrides") or {}
+    )
     seg_dicts: list[dict] = []
     skipped = 0
-    for _, row in segments.iterrows():
+    for pos, (_, row) in enumerate(segments.iterrows()):
         s = float(row["start_s"]); e = float(row["end_s"])
         if not _segment_inside_valid_interval(s, e, loaded.valid_intervals, t0_ms):
             skipped += 1
             continue
-        seg_dicts.append({
+        seg_dict: dict = {
             "type":    str(row["type"]).lower(),
             "start_s": s,
             "end_s":   e,
-        })
+        }
+        ov = overrides.get(pos)
+        if ov is not None:
+            seg_dict["trapezoid_override"] = ov
+        seg_dicts.append(seg_dict)
     if skipped:
         st.warning(
             f"Skipped {skipped} segment(s) that overlap a no-data gap. "
@@ -397,6 +409,198 @@ def _build_comparison_table(rows_by_algo: dict[str, list[dict]]) -> pd.DataFrame
     return pd.DataFrame(out)
 
 
+_OVERRIDE_MODE_LABELS = {
+    "none":   "No override",
+    "manual": "Manual edit",
+}
+
+
+def _repredict_single_segment(
+    loaded: LoadedSignal, segments: pd.DataFrame,
+    seg_pos: int, override: dict | None,
+) -> None:
+    """Re-run all algorithms for a single segment and patch the result
+    into ``st.session_state["prediction_rows_by_algo"]`` in place.
+
+    Why per-segment: every Streamlit interaction reruns the script. The
+    naive "invalidate the whole cache on override change" path then
+    re-predicts every segment × every algorithm on each keystroke —
+    rapidly clicking the spinbox arrows queues up that work and the UI
+    hangs. We only need to recompute the one segment whose override
+    just moved; other rows are untouched.
+    """
+    if seg_pos < 0 or seg_pos >= len(segments):
+        return
+    row = segments.iloc[seg_pos]
+    seg_dict: dict = {
+        "type":    str(row["type"]).lower(),
+        "start_s": float(row["start_s"]),
+        "end_s":   float(row["end_s"]),
+    }
+    if override is not None:
+        seg_dict["trapezoid_override"] = override
+    new_rows_by_algo, _ = api_client.predict(loaded.acc, [seg_dict])
+
+    by_algo: dict[str, list[dict]] = (
+        st.session_state.get("prediction_rows_by_algo") or {}
+    )
+    for algo_id, new_rows in new_rows_by_algo.items():
+        if not new_rows:
+            continue
+        new_row = dict(new_rows[0])
+        # api_client.predict numbered the single segment as ``segment=0``;
+        # restore the canonical seg_pos so the row keys line up with the
+        # rest of the cache.
+        new_row["segment"] = seg_pos
+        existing = by_algo.get(algo_id, [])
+        for i, r in enumerate(existing):
+            if int(r["segment"]) == seg_pos:
+                existing[i] = new_row
+                break
+        else:
+            existing.append(new_row)
+        by_algo[algo_id] = existing
+    st.session_state["prediction_rows_by_algo"] = by_algo
+    st.session_state["prediction_rows"] = list(by_algo.get(PRIMARY_ALGO_ID, []))
+
+
+def _render_override_controls(
+    sel: int, matching: dict | None,
+    loaded: LoadedSignal, valid: pd.DataFrame,
+) -> None:
+    """Trapezoid-shape override editor for the predictor.
+
+    UX contract:
+      * Typing into the spinboxes only updates Streamlit widget state —
+        no recompute, no spinner, no lag.
+      * The **Apply** button is the single action that runs the
+        predictor for this segment with the current override.
+      * **Reset** clears the override AND restores the input widgets
+        to the detector's estimated (W, f, |A|).
+
+    Per-segment recompute (see ``_repredict_single_segment``) keeps the
+    cost bounded regardless of how many segments are on the page.
+    """
+    if matching is None:
+        st.caption(
+            "Override controls unavailable — this segment has no detector "
+            "match to seed the shape from."
+        )
+        return
+
+    overrides: dict[int, dict] = (
+        st.session_state.setdefault("lobe_overrides", {})
+    )
+    cur = overrides.get(sel)
+    cur_mode = (cur or {}).get("mode", "none")
+
+    l1 = matching.get("lobe1") or {}
+    det = {
+        "W":     float(l1.get("half_width_s", 0.5)),
+        "f":     float(l1.get("frac_flat",    0.5)),
+        "abs_A": abs(float(l1.get("a_peak",   1.0))),
+    }
+
+    st.markdown("**Override trapezoid shape (predictor)**")
+    st.caption(
+        "Use when one lobe is corrupted (footstep, sensor glitch). "
+        "Switch to **Manual edit**, type (W, f, |A|), then press "
+        "**Apply** to re-run the predictor on this segment. **Reset** "
+        "restores the detector's estimated values."
+    )
+
+    options = ["none", "manual"]
+    selected_mode = st.radio(
+        "Override mode",
+        options=options,
+        index=options.index(cur_mode) if cur_mode in options else 0,
+        format_func=lambda m: _OVERRIDE_MODE_LABELS[m],
+        horizontal=True,
+        key=f"pred_override_mode_{sel}",
+        label_visibility="collapsed",
+    )
+
+    # Mode flipping from override -> none clears the override and runs
+    # one cheap recompute (no override) so this segment's row reflects
+    # the predictor's default fit again.
+    if selected_mode == "none" and sel in overrides:
+        overrides.pop(sel, None)
+        _repredict_single_segment(loaded, valid, sel, None)
+        st.rerun()
+        return
+
+    if selected_mode != "manual":
+        return
+
+    # Manual edit branch — number_inputs do NOT trigger recompute.
+    seed = cur if cur_mode == "manual" else {**det, "mode": "manual"}
+    col_W, col_f, col_A = st.columns(3)
+    new_W = col_W.number_input(
+        "W (s)",
+        value=float(seed.get("W", det["W"])),
+        min_value=0.01, max_value=30.0, step=0.1, format="%.3f",
+        key=f"pred_override_W_{sel}",
+    )
+    new_f = col_f.number_input(
+        "f (flat fraction)",
+        value=float(seed.get("f", det["f"])),
+        min_value=0.0, max_value=1.0, step=0.05, format="%.3f",
+        key=f"pred_override_f_{sel}",
+    )
+    new_A = col_A.number_input(
+        "|A| (m/s²)",
+        value=float(seed.get("abs_A", det["abs_A"])),
+        min_value=0.0, max_value=30.0, step=0.05, format="%.3f",
+        key=f"pred_override_A_{sel}",
+    )
+
+    col_apply, col_reset, _ = st.columns([1, 1, 3])
+    apply_clicked = col_apply.button(
+        "Apply override", type="primary",
+        key=f"pred_override_apply_{sel}",
+    )
+    reset_clicked = col_reset.button(
+        "Reset", key=f"pred_override_reset_{sel}",
+        help="Drop the override and restore the inputs to the "
+             "detector's estimated W, f, |A|.",
+    )
+
+    if reset_clicked:
+        # Restore spinboxes to detector defaults and clear the override
+        # for this segment. Recompute is implicit: the cached non-
+        # overridden row is still valid, but we re-predict to keep the
+        # behaviour consistent with the "switched to none" path above.
+        st.session_state[f"pred_override_W_{sel}"] = det["W"]
+        st.session_state[f"pred_override_f_{sel}"] = det["f"]
+        st.session_state[f"pred_override_A_{sel}"] = det["abs_A"]
+        had_override = sel in overrides
+        overrides.pop(sel, None)
+        if had_override:
+            _repredict_single_segment(loaded, valid, sel, None)
+        st.rerun()
+        return
+
+    if apply_clicked:
+        candidate = {
+            "mode":  "manual",
+            "W":     float(new_W),
+            "f":     float(new_f),
+            "abs_A": float(new_A),
+        }
+        if overrides.get(sel) != candidate:
+            overrides[sel] = candidate
+            _repredict_single_segment(loaded, valid, sel, candidate)
+            st.rerun()
+
+    if sel in overrides:
+        ov = overrides[sel]
+        st.markdown(
+            f":orange[**Override active** — "
+            f"W = {ov['W']:.2f} s · f = {ov['f']:.2f} · "
+            f"|A| = {ov['abs_A']:.2f} m/s².]"
+        )
+
+
 def render() -> None:
     loaded: LoadedSignal | None = st.session_state["loaded"]
     segments: pd.DataFrame | None = st.session_state["segments_df"]
@@ -506,6 +710,15 @@ def render() -> None:
             )
             if sel.get("reject_reason"):
                 st.caption(f"reject_reason: `{sel['reject_reason']}`")
+            ov_meta = (sel.get("meta") or {}).get("trapezoid_override")
+            if ov_meta:
+                st.caption(
+                    f":orange[**override active** — "
+                    f"mode={ov_meta.get('source', 'manual')}, "
+                    f"W={ov_meta.get('W', float('nan')):.2f}s, "
+                    f"f={ov_meta.get('f', float('nan')):.2f}, "
+                    f"|A|={ov_meta.get('abs_A', float('nan')):.2f} m/s²]"
+                )
 
     # Per-algorithm diagnostic charts for the selected segment:
     # the trapezoid template overlay (trap algo) and the ZUPT integrated
@@ -556,8 +769,24 @@ def render() -> None:
             predictions,
             float(sel_primary["start_s"]), float(sel_primary["end_s"]),
         )
-        st.markdown("**Fitted trapezoid parameters (from segmentation)**")
-        render_trapezoid_params(matching)
+        # Show the *effective* (override-applied) values so the card
+        # reflects what the predictor just used. With no override this
+        # is identical to the detector's matching prediction.
+        active_override = (
+            (st.session_state.get("lobe_overrides") or {}).get(selected)
+        )
+        effective = (
+            effective_trapezoid_params(matching, active_override) or matching
+        )
+        title = (
+            "**Trapezoid shape used by the predictor**"
+            if active_override
+            else "**Fitted trapezoid parameters (detector fit)**"
+        )
+        st.markdown(title)
+        render_trapezoid_params(effective)
+
+        _render_override_controls(int(selected), matching, loaded, valid)
 
     st.markdown("### All segments — both algorithms")
     df = _build_comparison_table(rows_by_algo)

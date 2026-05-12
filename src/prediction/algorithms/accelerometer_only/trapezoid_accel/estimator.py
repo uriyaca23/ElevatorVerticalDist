@@ -196,6 +196,7 @@ class TrapezoidAccelEstimator:
     def predict_segment(
         self, ride: pd.DataFrame, phone_model: str = "",
         pre: Optional[pd.DataFrame] = None, post: Optional[pd.DataFrame] = None,
+        trapezoid_override: Optional[dict] = None,
     ) -> PredictionOutput:
         c = self.config
         inp = self._extract(ride, phone_model, pre, post)
@@ -274,15 +275,102 @@ class TrapezoidAccelEstimator:
             else:
                 mode = "pair"; fit = pair_fit
 
+        # Sensor noise + median dt — needed by every downstream sigma
+        # path (override, ZUPT fallback, full pipeline). Hoisted above
+        # the override block so they're defined before any return.
+        sigma_a_datasheet = get_phone_accel_noise_sigma(inp.phone, inp.fs)
+        dt_sec = float(np.median(np.diff(inp.t_sec))) if inp.t_sec.size > 1 else 1.0 / inp.fs
+
+        # ---- Manual trapezoid override ----
+        # The Streamlit UI lets the user mark one lobe as corrupted (so
+        # the corrupt lobe inherits the clean lobe's (W, f, |A|)) or edit
+        # the shared shape directly. When that override is supplied we
+        # trust the detector-found t_c1, t_c2, sign and replace only the
+        # shape/amplitude — velocity anchoring and quality gating are
+        # skipped because they re-introduce dependence on the corrupt
+        # signal. If both matched-filter fits failed we have no t_c to
+        # anchor the override to, so we fall through to the ZUPT fallback
+        # below and surface that fact in meta.
+        if (trapezoid_override is not None
+                and fit is not None
+                and mode in ("pair", "joined")):
+            from dataclasses import replace as _replace
+            try:
+                ov_W = float(trapezoid_override["W"])
+                ov_f = float(trapezoid_override["f"])
+                ov_abs_A = float(trapezoid_override["abs_A"])
+            except (KeyError, TypeError, ValueError) as exc:
+                ov_W = ov_f = ov_abs_A = math.nan
+                override_error = f"bad override: {exc}"
+            else:
+                override_error = ""
+
+            if not override_error:
+                ov_fit = _replace(fit, A=ov_abs_A, W=ov_W, f=ov_f)
+                if mode == "joined":
+                    height_diff = float(
+                        ov_fit.sign * 2.0 * ov_fit.A * ov_fit.W * ov_fit.W
+                        * (1.0 + ov_fit.f)
+                    )
+                    sig = theoretical_sigma_height_joined(
+                        ov_fit, sigma_a=sigma_a_datasheet,
+                        joint_r2=fit.joint_r2, r2_epsilon=c.r2_epsilon,
+                    )
+                else:
+                    height_diff = height_from_fit(ov_fit)
+                    sig = theoretical_sigma_height(
+                        ov_fit, sigma_a=sigma_a_datasheet, dt_sec=dt_sec,
+                        joint_r2=fit.joint_r2, r2_epsilon=c.r2_epsilon,
+                        cruise_sec=0.0, anchored=False,
+                        overlap_delta=c.overlap_delta,
+                    )
+                theo_sigma = max(sig["sigma_dh"], c.min_theoretical_sigma_m)
+                ci = self.conformal.half_width(theo_sigma)
+                ci = max(c.ci_absolute_floor_m, min(ci, c.ci_absolute_cap_m))
+                a_template_ov = (
+                    ov_fit.sign * ov_fit.A * trapezoid_kernel(
+                        inp.t_sec, ov_fit.t_c1, ov_fit.W, ov_fit.f,
+                    )
+                    - ov_fit.sign * ov_fit.A * trapezoid_kernel(
+                        inp.t_sec, ov_fit.t_c2, ov_fit.W, ov_fit.f,
+                    )
+                )
+                meta_ov: dict[str, Any] = {
+                    "vert_method": vert_method,
+                    "mode": mode,
+                    "trapezoid_override": {
+                        "W": ov_W, "f": ov_f, "abs_A": ov_abs_A,
+                        "source": str(trapezoid_override.get("mode", "manual")),
+                    },
+                    "params": {
+                        "A_fit": fit.A, "A_used": ov_fit.A,
+                        "W": ov_fit.W, "f": ov_fit.f,
+                        "t_c1": ov_fit.t_c1, "t_c2": ov_fit.t_c2,
+                        "sign": ov_fit.sign, "joint_r2": fit.joint_r2,
+                        "v_peak_measured": float("nan"),
+                    },
+                    "sigma_breakdown": sig,
+                    "a_smooth": a_smooth,
+                    "a_template": a_template_ov,
+                    "t_sec": inp.t_sec,
+                }
+                return PredictionOutput(
+                    height_diff=float(height_diff),
+                    ci_half_width=float(ci),
+                    theoretical_sigma=float(theo_sigma),
+                    accepted=True,
+                    quality_score=1.0,
+                    reject_reason="manual_override",
+                    meta=meta_ov,
+                )
+
         # ---- ZUPT fallback ----
         # Kicks in when both matched-filter fits failed, OR when the
         # kept fit has R² below ``zupt_fallback_r2`` — a sign that the
         # signal doesn't look like an elevator ride at all, and
         # integrating the vertical velocity is more honest than
-        # forcing a pulse model.
-        sigma_a_datasheet = get_phone_accel_noise_sigma(inp.phone, inp.fs)
-        dt_sec = float(np.median(np.diff(inp.t_sec))) if inp.t_sec.size > 1 else 1.0 / inp.fs
-
+        # forcing a pulse model. ``sigma_a_datasheet`` and ``dt_sec`` are
+        # already defined above (the override block needs them too).
         zupt_height = None
         if mode == "zupt_fallback" or (fit is not None and fit.joint_r2 < c.zupt_fallback_r2):
             pos, vel = zupt_integrate(a_smooth, inp.t_sec)

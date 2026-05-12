@@ -71,6 +71,7 @@ class Predictor:
         phone_model: str = "",
         pre: Optional[pd.DataFrame] = None,
         post: Optional[pd.DataFrame] = None,
+        trapezoid_override: Optional[dict] = None,
     ) -> PredictionOutput:
         algo = self.config.algorithm
         if algo is PredictAlgorithm.BAROMETER_HEIGHT_DIFF:
@@ -82,6 +83,13 @@ class Predictor:
                 accepted=True, quality_score=0.0, reject_reason="",
                 meta={"method": "barometer"},
             )
+        if algo is PredictAlgorithm.TRAPEZOID_ACCEL:
+            return self._algo_impl.predict_segment(
+                data, phone_model=phone_model, pre=pre, post=post,
+                trapezoid_override=trapezoid_override,
+            )
+        # ZUPT and other accel estimators don't consume the trapezoid
+        # override — call them with their existing signature.
         return self._algo_impl.predict_segment(
             data, phone_model=phone_model, pre=pre, post=post,
         )

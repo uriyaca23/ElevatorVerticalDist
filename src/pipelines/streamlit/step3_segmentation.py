@@ -135,6 +135,10 @@ def _run_detector(loaded: LoadedSignal) -> None:
         rows, columns=["type", "start_s", "end_s", "joint_r2"],
     )
     st.session_state["selected_segment"] = 0 if rows else None
+    # Detector re-run invalidates any manual trapezoid overrides — the
+    # segment indices they were keyed against no longer mean the same
+    # thing once the segments table has been rebuilt from scratch.
+    st.session_state["lobe_overrides"] = {}
 
 
 def _gap_spans_seconds(
@@ -547,7 +551,7 @@ def render() -> None:
             use_container_width=True, key=f"trap_{sel}",
         )
 
-        st.markdown("**Fitted trapezoid parameters**")
+        st.markdown("**Fitted trapezoid parameters (detector fit)**")
         render_trapezoid_params(matching)
 
     # Spreadsheet-style fallback — the sidebar list covers most flows,
@@ -581,6 +585,11 @@ def render() -> None:
         )
         if not edited.equals(segments_df):
             st.session_state["segments_df"] = edited.reset_index(drop=True)
+            # Bulk-edits invalidate the index-keyed overrides (rows may
+            # have been added/deleted/reordered). Easiest correct answer
+            # is to drop them all; the user can re-tick the affected
+            # segments after the table settles.
+            st.session_state["lobe_overrides"] = {}
             st.rerun()
 
     st.divider()
