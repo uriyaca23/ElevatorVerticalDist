@@ -94,6 +94,30 @@ diagnose_window = _detect.diagnose_window
 PRED_COLORS = {"up": "#1f3a5f", "down": "#7d3c98"}
 HIGHLIGHT_COLOR = "#e67e22"
 
+
+def _autoscale_y_to_visible(ax, x_lo: float, x_hi: float) -> None:
+    """Tighten ``ax.set_ylim`` to the data of every Line2D on this axis
+    that falls inside ``[x_lo, x_hi]``. No-op if the panel has no
+    in-window data (preserves the prior ylim)."""
+    y_chunks: list[np.ndarray] = []
+    for line in ax.get_lines():
+        xd = np.asarray(line.get_xdata(), dtype=float)
+        yd = np.asarray(line.get_ydata(), dtype=float)
+        if xd.size == 0:
+            continue
+        m = (xd >= x_lo) & (xd <= x_hi)
+        if m.any():
+            y_chunks.append(yd[m])
+    if not y_chunks:
+        return
+    arr = np.concatenate(y_chunks)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return
+    lo, hi = float(arr.min()), float(arr.max())
+    pad = (hi - lo) * 0.08 if hi > lo else max(abs(hi) * 0.1, 1.0)
+    ax.set_ylim(lo - pad, hi + pad)
+
 # Seconds of pre/post stationary window passed to accelerometer predictors
 # for gravity calibration. 2 s at typical phone sampling rates (50–200 Hz)
 # gives 100–400 samples — comfortably above the grav_window_sec · fs floor
@@ -321,6 +345,9 @@ class PredictionEditor(tk.Tk):
         )
         self.tree_pred.tag_configure("up",   foreground=PRED_COLORS["up"])
         self.tree_pred.tag_configure("down", foreground=PRED_COLORS["down"])
+        self.tree_pred.bind(
+            "<Double-Button-1>", self._on_pred_double_click,
+        )
 
         gt_block = ttk.Frame(trees_frame)
         gt_block.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
@@ -340,6 +367,9 @@ class PredictionEditor(tk.Tk):
         )
         self.tree_gt.tag_configure("up",   foreground=TYPE_COLORS["up"])
         self.tree_gt.tag_configure("down", foreground=TYPE_COLORS["down"])
+        self.tree_gt.bind(
+            "<Double-Button-1>", self._on_gt_double_click,
+        )
 
         # Detail pane (bottom-right) — matplotlib figure on top + text box.
         detail_frame = ttk.Frame(right_pane, padding=4)
@@ -773,6 +803,25 @@ class PredictionEditor(tk.Tk):
         self._last_sel = ("pred", (idx,))
         self._render_detail_for_prediction(match)
 
+    def _on_pred_double_click(self, _event=None):
+        """Double-click a prediction row → zoom the main plot to that
+        interval (±15 s window, tight Y per panel)."""
+        sel = self.tree_pred.selection()
+        if not sel:
+            return
+        try:
+            idx = int(sel[0])
+        except ValueError:
+            return
+        match = next(
+            (p for p in self.predictions if int(p["index"]) == idx), None,
+        )
+        if match is None:
+            return
+        self._focus_zoom_to_seconds(
+            float(match["t_start_s"]), float(match["t_end_s"]), pad_s=15.0,
+        )
+
     # ---------- GT tree ----------
 
     def _gt_rows(self) -> list[tuple[int, float, float, str]]:
@@ -833,6 +882,26 @@ class PredictionEditor(tk.Tk):
         self._highlight_on_plot(t_s_acc, t_e_acc)
         self._last_sel = ("gt", (t_s_acc, t_e_acc, rt, gi))
         self._render_detail_for_gt(t_s_acc, t_e_acc, rt, gi)
+
+    def _on_gt_double_click(self, _event=None):
+        """Double-click a GT row → zoom the main plot to that interval
+        (±15 s window, tight Y per panel)."""
+        sel = self.tree_gt.selection()
+        if not sel or not sel[0].startswith("gt:"):
+            return
+        try:
+            gi = int(sel[0].split(":", 1)[1])
+        except ValueError:
+            return
+        match = next(
+            (row for row in self._gt_rows() if row[0] == gi), None,
+        )
+        if match is None:
+            return
+        _, t_s_acc, t_e_acc, _rt = match
+        self._focus_zoom_to_seconds(
+            float(t_s_acc), float(t_e_acc), pad_s=15.0,
+        )
 
     # ---------- "Predict all algorithms" button ----------
 
@@ -1693,12 +1762,16 @@ class PredictionEditor(tk.Tk):
         if tb and getattr(tb, "mode", ""):
             return
         x = float(event.xdata)
+        is_dbl = bool(getattr(event, "dblclick", False))
 
         # 1) Predictions (on top).
         for p in self.predictions:
             s = p["t_start_s"]
             e = p["t_end_s"]
             if s <= x <= e:
+                if is_dbl:
+                    self._focus_zoom_to_seconds(float(s), float(e), pad_s=15.0)
+                    return
                 iid = str(p["index"])
                 if iid in self.tree_pred.get_children():
                     self.tree_pred.selection_set(iid)
@@ -1708,6 +1781,9 @@ class PredictionEditor(tk.Tk):
         # 2) GT (behind).
         for gi, t_s, t_e, _rt in self._gt_rows():
             if t_s <= x <= t_e:
+                if is_dbl:
+                    self._focus_zoom_to_seconds(float(t_s), float(t_e), pad_s=15.0)
+                    return
                 iid = f"gt:{gi}"
                 if iid in self.tree_gt.get_children():
                     self.tree_gt.selection_set(iid)
@@ -1780,6 +1856,21 @@ class PredictionEditor(tk.Tk):
             ylim = ax.get_ylim()
             shift = (ylim[1] - ylim[0]) * frac
             ax.set_ylim(ylim[0] + shift, ylim[1] + shift)
+        self.canvas.draw_idle()
+
+    def _focus_zoom_to_seconds(
+        self, t_start_s: float, t_end_s: float, *, pad_s: float = 15.0,
+    ) -> None:
+        """Pan X to ``[t_start_s - pad_s, t_end_s + pad_s]`` and tighten
+        each panel's Y to the data visible inside that X window.
+        ``t_start_s``/``t_end_s`` are on the same axis units the main
+        plot uses (the predictions/GT axvspans live on it already)."""
+        if not self._axes:
+            return
+        x_lo, x_hi = float(t_start_s) - pad_s, float(t_end_s) + pad_s
+        self._axes[0].set_xlim(x_lo, x_hi)  # sharex propagates
+        for ax in self._axes:
+            _autoscale_y_to_visible(ax, x_lo, x_hi)
         self.canvas.draw_idle()
 
     def _fit_x(self) -> None:

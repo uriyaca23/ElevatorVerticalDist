@@ -4827,4 +4827,26 @@ that produced this section, so the signal the user sees in the
 Streamlit UI (step 3, "Segmentation") matches what the matched
 filter actually scores against.
 
+% ------------------------------------------------------------------
+% Auto-generated noise-split result sections.
+%
+% Each \input below points at a snippet emitted by the corresponding
+% evaluation entry point:
+%
+%   * results_noise_segmentation.tex
+%       ← src.segmentation.evaluate.evaluateOnData
+%   * results_noise_prediction.tex
+%       ← src.prediction.evaluation.evaluateOnData
+%   * results_noise_pipeline.tex
+%       ← src.pipelines.evaluate.evaluateOnData
+%
+% Re-run an evaluation to refresh its snippet. The --source flag on
+% each script (experiment / ido / real_world) carries through to the
+% section header. \IfFileExists keeps the document buildable before
+% any of the scripts have ever been run.
+% ------------------------------------------------------------------
+\IfFileExists{results_noise_segmentation.tex}{\input{results_noise_segmentation.tex}}{}
+\IfFileExists{results_noise_prediction.tex}{\input{results_noise_prediction.tex}}{}
+\IfFileExists{results_noise_pipeline.tex}{\input{results_noise_pipeline.tex}}{}
+
 \end{document}

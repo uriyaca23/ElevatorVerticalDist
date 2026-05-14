@@ -1306,6 +1306,155 @@ def _build_pdf(
 # Streamlit entry point
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Signatures CSV — long-form record of every segment's trapezoid shape
+# plus the session metadata, suitable for cross-session analysis later.
+# ---------------------------------------------------------------------------
+
+_FS_UNSAFE_RE = _re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _fs_safe(s: str) -> str:
+    """Reduce ``s`` to characters legal in a filename on every common OS.
+    Collapses runs of unsafe characters into a single underscore and
+    trims leading / trailing underscores.
+    """
+    cleaned = _FS_UNSAFE_RE.sub("_", str(s or "")).strip("_")
+    return cleaned or "session"
+
+
+def _signatures_filename(loaded: LoadedSignal) -> str:
+    """``{tool_id}_{start}_{end}.csv`` for phone-DB sessions, falling
+    back to ``{filename_stem}_{utc_stamp}.csv`` for uploaded files.
+    """
+    meta = loaded.meta or {}
+    mode = str(meta.get("input_mode", "")).lower()
+    if mode == "phone":
+        tool_id = _fs_safe(meta.get("phone_id", "tool"))
+        start = _fs_safe(meta.get("session_start_iso", ""))
+        end = _fs_safe(meta.get("session_end_iso", ""))
+        if start and end:
+            return f"{tool_id}_{start}_{end}.csv"
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        return f"{tool_id}_{stamp}.csv"
+    # File-upload mode or unknown: stem the filename + utc timestamp.
+    filename = str(meta.get("filename", "session"))
+    stem = _fs_safe(Path(filename).stem)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"{stem}_{stamp}.csv"
+
+
+def _row_for_segment(rs: list[dict], seg_id: int) -> dict | None:
+    return next(
+        (x for x in rs if int(x.get("segment", -1)) == seg_id), None,
+    )
+
+
+def _build_signatures_csv(
+    loaded: LoadedSignal,
+    segments: pd.DataFrame,
+    predictions: list[dict],
+    rows_by_algo: dict[str, list[dict]],
+    overrides: dict[int, dict],
+) -> bytes:
+    """One row per segment, wide-format, with the session metadata
+    replicated on every row. Goal: accumulate across many sessions into
+    a single dataframe with ``pd.concat`` for shape (W, f, A) analysis.
+    """
+    meta = loaded.meta or {}
+    base_metadata = {
+        "tool_id":             meta.get("phone_id", ""),
+        "phone_type":          meta.get("phone_type", ""),
+        "input_mode":          meta.get("input_mode", ""),
+        "session_start_iso":   meta.get("session_start_iso", ""),
+        "session_end_iso":     meta.get("session_end_iso", ""),
+        "session_start_date":  meta.get("session_start_date", ""),
+        "session_end_date":    meta.get("session_end_date", ""),
+        "session_start_time":  meta.get("session_start_time", ""),
+        "session_end_time":    meta.get("session_end_time", ""),
+        "data_source":         str(loaded.source),
+        "filename":            meta.get("filename", ""),
+        "time_format":         meta.get("time_format", ""),
+        "samples":             meta.get("samples", ""),
+        "sample_rate":         meta.get("sample_rate", ""),
+        "resampled_hz":        meta.get("resampled_hz", ""),
+        "valid_intervals":     meta.get("valid_intervals_count", ""),
+        "report_generated_utc": utcnow_iso(),
+    }
+
+    trap_rows = rows_by_algo.get("trap", [])
+    zupt_rows = rows_by_algo.get("zupt", [])
+
+    out_rows: list[dict] = []
+    for pos in range(len(segments)):
+        row = segments.iloc[pos]
+        try:
+            t_lo = float(row["start_s"]); t_hi = float(row["end_s"])
+        except (TypeError, ValueError):
+            continue
+        seg_type = str(row.get("type", "")).lower()
+        matching = find_matching_prediction(predictions, t_lo, t_hi)
+        l1 = (matching or {}).get("lobe1") or {}
+        l2 = (matching or {}).get("lobe2") or {}
+
+        ov = overrides.get(pos) if overrides else None
+        trap_r = _row_for_segment(trap_rows, pos) or {}
+        zupt_r = _row_for_segment(zupt_rows, pos) or {}
+        # Joint-fit shape comes from the predictor's actual params dict
+        # so it reflects the override when one is active. Falls back to
+        # the detector's lobe1 (the shared-shape detector matches lobe1
+        # === lobe2 by construction).
+        trap_params = (trap_r.get("meta") or {}).get("params") or {}
+        joint_W = trap_params.get("W", l1.get("half_width_s"))
+        joint_f = trap_params.get("f", l1.get("frac_flat"))
+        joint_A_used = trap_params.get("A_used", abs(l1.get("a_peak", float("nan"))))
+
+        row_dict = {
+            **base_metadata,
+            "segment_idx":          int(pos),
+            "segment_type":         seg_type,
+            "segment_start_s":      t_lo,
+            "segment_end_s":        t_hi,
+            "segment_duration_s":   t_hi - t_lo,
+            # Detector's per-lobe fit (what the segmenter found).
+            "lobe1_t_c":            l1.get("t_c", ""),
+            "lobe1_W":              l1.get("half_width_s", ""),
+            "lobe1_f":              l1.get("frac_flat", ""),
+            "lobe1_A":              l1.get("a_peak", ""),
+            "lobe1_r2":             l1.get("r2_local", ""),
+            "lobe2_t_c":            l2.get("t_c", ""),
+            "lobe2_W":              l2.get("half_width_s", ""),
+            "lobe2_f":              l2.get("frac_flat", ""),
+            "lobe2_A":              l2.get("a_peak", ""),
+            "lobe2_r2":             l2.get("r2_local", ""),
+            # Joint shape the predictor actually used (reflects override).
+            "joint_W":              joint_W if joint_W is not None else "",
+            "joint_f":              joint_f if joint_f is not None else "",
+            "joint_abs_A":          joint_A_used if joint_A_used is not None else "",
+            "joint_r2":             (matching or {}).get("joint_r2_mean", ""),
+            # Override status (empty if no override was applied).
+            "override_active":      bool(ov),
+            "override_W":           (ov or {}).get("W", ""),
+            "override_f":           (ov or {}).get("f", ""),
+            "override_abs_A":       (ov or {}).get("abs_A", ""),
+            # Predictor outputs per algorithm.
+            "trap_delta_height_m":  trap_r.get("delta_height_m", ""),
+            "trap_ci_m":            trap_r.get("ci_half_width", ""),
+            "trap_quality":         trap_r.get("quality_score", ""),
+            "trap_accepted":        trap_r.get("accepted", ""),
+            "trap_reject_reason":   trap_r.get("reject_reason", ""),
+            "zupt_delta_height_m":  zupt_r.get("delta_height_m", ""),
+            "zupt_ci_m":            zupt_r.get("ci_half_width", ""),
+            "zupt_quality":         zupt_r.get("quality_score", ""),
+            "zupt_accepted":        zupt_r.get("accepted", ""),
+            "zupt_reject_reason":   zupt_r.get("reject_reason", ""),
+        }
+        out_rows.append(row_dict)
+
+    df_out = pd.DataFrame(out_rows)
+    return df_out.to_csv(index=False).encode("utf-8")
+
+
 def render() -> None:
     loaded: LoadedSignal | None = st.session_state["loaded"]
     rows = st.session_state.get("prediction_rows") or []
@@ -1339,12 +1488,44 @@ def render() -> None:
         return
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    st.download_button(
-        "Download Summary PDF",
-        data=pdf_bytes,
-        file_name=f"boutique_report_{stamp}.pdf",
-        mime="application/pdf",
-    )
+    overrides = st.session_state.get("lobe_overrides") or {}
+
+    # Two side-by-side download buttons: the PDF (human-readable report)
+    # and a signatures CSV (one row per segment, full session metadata
+    # replicated on each row, suitable for cross-session W/f/A analysis
+    # via ``pd.concat``).
+    dl_pdf, dl_csv = st.columns(2)
+    with dl_pdf:
+        st.download_button(
+            "Download Summary PDF",
+            data=pdf_bytes,
+            file_name=f"boutique_report_{stamp}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    with dl_csv:
+        try:
+            csv_bytes = _build_signatures_csv(
+                loaded, segments, predictions, rows_by_algo, overrides,
+            )
+            csv_name = _signatures_filename(loaded)
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"CSV build failed: {type(exc).__name__}: {exc}")
+        else:
+            st.download_button(
+                "Download Signatures CSV",
+                data=csv_bytes,
+                file_name=csv_name,
+                mime="text/csv",
+                use_container_width=True,
+                help=(
+                    "One row per segment with the session metadata "
+                    "(tool_id, dates, etc.) replicated on every row and "
+                    "the trapezoid shape parameters (W, f, |A|) the "
+                    "predictor used. Suitable for collecting W/f/A "
+                    "across many sessions for offline analysis."
+                ),
+            )
 
     with st.expander("Preview PDF inline", expanded=True):
         b64 = base64.b64encode(pdf_bytes).decode()

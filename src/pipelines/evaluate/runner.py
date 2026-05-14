@@ -219,17 +219,25 @@ def run_experiment(
     preds = _segments_to_interval_dicts(segments_df)
     gt_status, pred_status, gt_match, pred_match = _classify(gt_rides, preds)
 
-    # Truth Δh per GT ride (only up/down rows in gt)
+    # Truth Δh and noise-polarity per GT ride (only up/down rows in gt)
     gt_dh_per_ride: list[float] = []
+    gt_signal_clear_per_ride: list[bool] = []
     for _, row in gt.iterrows():
         if row.get("type") not in ("up", "down"):
             continue
         gt_dh_per_ride.append(
             float(row.get("height_diff_m", float("nan")))
         )
+        sc = row.get("signalClearRecording", True)
+        gt_signal_clear_per_ride.append(
+            bool(sc) if sc is not None else True
+        )
     if len(gt_dh_per_ride) != len(gt_rides):
         gt_dh_per_ride = (
             gt_dh_per_ride + [float("nan")] * len(gt_rides)
+        )[: len(gt_rides)]
+        gt_signal_clear_per_ride = (
+            gt_signal_clear_per_ride + [True] * len(gt_rides)
         )[: len(gt_rides)]
 
     # Predictor on every GT interval (oracle view)
@@ -243,6 +251,7 @@ def run_experiment(
             "type": g.get("type"),
             "duration_s": g["t_end_s"] - g["t_start_s"],
             "true_dh": gt_dh_per_ride[i],
+            "signal_clear": gt_signal_clear_per_ride[i],
             "status": gt_status[i],
             "oracle_pred_dh":  oracle[0] if oracle else float("nan"),
             "oracle_ci":       oracle[1] if oracle else float("inf"),
@@ -261,6 +270,10 @@ def run_experiment(
             gt_dh_per_ride[match_i]
             if 0 <= match_i < len(gt_dh_per_ride) else float("nan")
         )
+        matched_signal_clear = (
+            gt_signal_clear_per_ride[match_i]
+            if 0 <= match_i < len(gt_signal_clear_per_ride) else None
+        )
         seg_records.append({
             "exp": exp_name, "kind": exp_kind, "pred_idx": j,
             "type": p.get("type"),
@@ -268,6 +281,10 @@ def run_experiment(
             "status": pred_status[j],
             "matched_gt_idx": match_i,
             "matched_gt_dh":  matched_gt_dh,
+            # FP preds have no matched GT → signal_clear is None; the
+            # noise filter in build_views drops these from clean/noisy
+            # passes and keeps them in the "both" pass.
+            "signal_clear":   matched_signal_clear,
             "pred_dh":        out[0] if out else float("nan"),
             "pred_ci":        out[1] if out else float("inf"),
             "pred_accepted":  out[2] if out else False,
@@ -297,10 +314,29 @@ def _summary(arr: np.ndarray) -> dict:
     }
 
 
+def _apply_noise_filter(
+    gt_df: pd.DataFrame, seg_df: pd.DataFrame,
+    signal_clear: bool | None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Slice the pooled DataFrames to a noise polarity.
+
+    ``signal_clear`` is ``True`` for clean only, ``False`` for noisy only,
+    ``None`` to keep all rows. seg rows with ``signal_clear is None``
+    (FP preds with no matched GT) are dropped from clean/noisy passes
+    and retained in the ``None`` ("both") pass.
+    """
+    if signal_clear is None:
+        return gt_df, seg_df
+    gt_df = gt_df[gt_df["signal_clear"] == signal_clear]
+    seg_df = seg_df[seg_df["signal_clear"] == signal_clear]
+    return gt_df, seg_df
+
+
 def build_views(
     gt_df: pd.DataFrame,
     seg_df: pd.DataFrame,
     accepted_only: bool = False,
+    signal_clear: bool | None = None,
 ) -> dict[str, dict]:
     """Build the three error views (gt / matched / all) from the pooled
     DataFrames :func:`run_experiment` produces.
@@ -308,8 +344,10 @@ def build_views(
     ``accepted_only`` restricts every view to predictions the quality
     filter accepted (``oracle_accepted`` for the GT view,
     ``pred_accepted`` for the matched / all views) — the production
-    deployment view.
+    deployment view. ``signal_clear`` slices to one noise polarity (see
+    :func:`_apply_noise_filter`).
     """
+    gt_df, seg_df = _apply_noise_filter(gt_df, seg_df, signal_clear)
     if accepted_only:
         gt_df = gt_df[gt_df["oracle_accepted"] == True]    # noqa: E712
         seg_df = seg_df[seg_df["pred_accepted"] == True]   # noqa: E712
@@ -756,6 +794,143 @@ def per_exp_mae_bar(gt_df: pd.DataFrame, seg_df: pd.DataFrame,
     plt.close(fig)
 
 
+DURATION_BIN_EDGES = np.array([0.0, 5.0, 10.0, 20.0, 40.0, 90.0])
+
+
+def _gt_view_arrays(gt_df: pd.DataFrame):
+    """Return (duration_s, abs_err, covered) over the GT (oracle) view."""
+    sub = gt_df.dropna(subset=["true_dh", "oracle_pred_dh"])
+    if sub.empty:
+        return (np.array([]), np.array([]), np.array([], dtype=bool))
+    err = (sub["oracle_pred_dh"] - sub["true_dh"]).abs().to_numpy(dtype=float)
+    ci = sub["oracle_ci"].to_numpy(dtype=float)
+    covered = err <= ci
+    return (sub["duration_s"].to_numpy(dtype=float), err, covered)
+
+
+def coverage_vs_duration_bins(gt_df: pd.DataFrame, out_path: Path,
+                              title: str = "Coverage by ride-duration bin",
+                              bin_edges: np.ndarray | None = None) -> None:
+    """Pipeline coverage rate per ride-duration bin (oracle GT view).
+
+    Bars = coverage (P(|err| ≤ oracle CI)); overlaid line = MAE.
+    """
+    dur, err, cov = _gt_view_arrays(gt_df)
+    if bin_edges is None:
+        bin_edges = DURATION_BIN_EDGES
+    fig, ax1 = plt.subplots(figsize=(8, 5))
+    if dur.size == 0:
+        ax1.text(0.5, 0.5, "no data", ha="center", va="center",
+                 transform=ax1.transAxes)
+        ax1.set_title(title); fig.savefig(out_path, dpi=120); plt.close(fig)
+        return
+    bins = np.digitize(dur, bin_edges) - 1
+    rows = []
+    for b in range(len(bin_edges) - 1):
+        m = bins == b
+        if m.sum() == 0:
+            continue
+        rows.append({
+            "label": f"{bin_edges[b]:.0f}–{bin_edges[b+1]:.0f} s",
+            "n":        int(m.sum()),
+            "coverage": float(np.mean(cov[m])),
+            "mae":      float(np.mean(err[m])),
+        })
+    if not rows:
+        ax1.text(0.5, 0.5, "no data in bins", ha="center", va="center",
+                 transform=ax1.transAxes)
+        ax1.set_title(title); fig.savefig(out_path, dpi=120); plt.close(fig)
+        return
+    df_b = pd.DataFrame(rows)
+    x = np.arange(len(df_b))
+    ax1.bar(x, df_b["coverage"], color=COLOR["gt"], alpha=0.6, label="coverage")
+    ax1.axhline(0.9, color="b", ls=":", alpha=0.8, label="90% target")
+    ax1.set_xticks(x); ax1.set_xticklabels(df_b["label"])
+    ax1.set_xlabel("ride duration (s)")
+    ax1.set_ylabel("coverage"); ax1.set_ylim(0, 1.05)
+    ax2 = ax1.twinx()
+    ax2.plot(x, df_b["mae"], "r-o", lw=1.5, label="MAE")
+    ax2.set_ylabel("MAE (m)")
+    for xi, n in zip(x, df_b["n"]):
+        ax1.text(xi, 0.03, f"n={n}", ha="center", color="black", fontsize=8)
+    ax1.set_title(title)
+    h1, l1 = ax1.get_legend_handles_labels()
+    h2, l2 = ax2.get_legend_handles_labels()
+    ax1.legend(h1 + h2, l1 + l2, loc="lower right")
+    ax1.grid(True, axis="y", alpha=0.3)
+    fig.tight_layout(); fig.savefig(out_path, dpi=120); plt.close(fig)
+
+
+def error_vs_duration_bins(gt_df: pd.DataFrame, out_path: Path,
+                           title: str = "Δh error by ride-duration bin",
+                           bin_edges: np.ndarray | None = None) -> None:
+    """Pipeline signed + absolute error per ride-duration bin (oracle GT view)."""
+    dur, abs_err, _cov = _gt_view_arrays(gt_df)
+    sub = gt_df.dropna(subset=["true_dh", "oracle_pred_dh"])
+    if bin_edges is None:
+        bin_edges = DURATION_BIN_EDGES
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    if dur.size == 0:
+        for ax in axes:
+            ax.text(0.5, 0.5, "no data", ha="center", va="center",
+                    transform=ax.transAxes)
+        fig.suptitle(title); fig.tight_layout()
+        fig.savefig(out_path, dpi=120); plt.close(fig); return
+    signed = (sub["oracle_pred_dh"] - sub["true_dh"]).to_numpy(dtype=float)
+    bins = np.digitize(dur, bin_edges) - 1
+    rows = []
+    for b in range(len(bin_edges) - 1):
+        m = bins == b
+        if m.sum() == 0:
+            continue
+        rows.append({
+            "label": f"{bin_edges[b]:.0f}–{bin_edges[b+1]:.0f} s",
+            "n":             int(m.sum()),
+            "median_signed": float(np.median(signed[m])),
+            "mae":           float(np.mean(abs_err[m])),
+            "p95_abs":       float(np.quantile(abs_err[m], 0.95)),
+        })
+    if not rows:
+        for ax in axes:
+            ax.text(0.5, 0.5, "no data in bins", ha="center", va="center",
+                    transform=ax.transAxes)
+        fig.suptitle(title); fig.tight_layout()
+        fig.savefig(out_path, dpi=120); plt.close(fig); return
+    df_b = pd.DataFrame(rows)
+    x = np.arange(len(df_b))
+
+    axes[0].bar(x, df_b["median_signed"], color=COLOR["gt"], alpha=0.7,
+                label="median signed error")
+    axes[0].axhline(0, color="black", lw=0.6)
+    axes[0].axhline(1.5, color="b", ls=":", alpha=0.6, label="±1.5 m")
+    axes[0].axhline(-1.5, color="b", ls=":", alpha=0.6)
+    axes[0].set_xticks(x); axes[0].set_xticklabels(df_b["label"])
+    axes[0].set_xlabel("ride duration (s)")
+    axes[0].set_ylabel("signed error: pred $-$ truth (m)")
+    axes[0].set_title("Signed error by duration bin")
+    for xi, n in zip(x, df_b["n"]):
+        axes[0].text(xi, axes[0].get_ylim()[0], f"n={n}",
+                     ha="center", va="bottom", fontsize=8, color="black")
+    axes[0].grid(True, axis="y", alpha=0.3)
+    axes[0].legend(loc="upper right", fontsize=8)
+
+    w = 0.4
+    axes[1].bar(x - w / 2, df_b["mae"], width=w, color="tab:red",
+                alpha=0.75, label="MAE")
+    axes[1].bar(x + w / 2, df_b["p95_abs"], width=w, color="tab:orange",
+                alpha=0.75, label="P95 |error|")
+    axes[1].axhline(1.5, color="b", ls=":", alpha=0.6, label="±1.5 m")
+    axes[1].set_xticks(x); axes[1].set_xticklabels(df_b["label"])
+    axes[1].set_xlabel("ride duration (s)")
+    axes[1].set_ylabel("|error| (m)")
+    axes[1].set_title("Absolute error by duration bin")
+    axes[1].grid(True, axis="y", alpha=0.3)
+    axes[1].legend(loc="upper right", fontsize=8)
+
+    fig.suptitle(title); fig.tight_layout()
+    fig.savefig(out_path, dpi=120); plt.close(fig)
+
+
 def baro_vs_gt_consistency(seg_df: pd.DataFrame, out_path: Path) -> None:
     matched = seg_df[
         (seg_df["status"] == "clean")
@@ -844,6 +1019,12 @@ def render_view_figures(
     fp_predicted_altitude(seg_df, _w("fp_predicted_altitude"))
     fp_vs_clean_predicted_dh(seg_df, _w("fp_vs_clean_dh"))
     clean_predicted_altitude(gt_df, seg_df, _w("clean_predicted_altitude"))
+
+    # Pipeline's mirror of the prediction per-duration plots — uses the
+    # GT (oracle) view so both axes (true_dh and oracle_ci) are well-defined.
+    coverage_vs_duration_bins(gt_df, _w("coverage_vs_duration"))
+    error_vs_duration_bins(gt_df, _w("err_vs_duration"))
+
     if not suffix:
         baro_vs_gt_consistency(seg_df, _w("baro_vs_gt_sanity"))
     return paths

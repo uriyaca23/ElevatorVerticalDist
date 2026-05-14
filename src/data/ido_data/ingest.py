@@ -433,8 +433,13 @@ def _where_str(location: str, lat: float, long: float) -> str:
     return f"{loc}_{float(lat):.4f}_{float(long):.4f}"
 
 
-def _build_exp_name(tool_id: str, where: str, date_str: str) -> str:
-    return f"{tool_id}_{where}_{tool_id}_{date_str}"
+def _build_exp_name(
+    tool_id: str, where: str, date_str: str, time_str: str,
+) -> str:
+    """Experiment name. ``time_str`` (``HH-MM-SS`` from the first elevator
+    row's start time) disambiguates multiple recordings of the same
+    tool_id+location on the same day."""
+    return f"{tool_id}_{where}_{tool_id}_{date_str}_{time_str}"
 
 
 def _stamp_exp_name(
@@ -473,8 +478,9 @@ def _process_group(
         first_elev[cfg.col_start_time], dayfirst=cfg.time_day_first,
     )
     date_str = first_dt.strftime("%d-%m-%Y")
+    time_str = first_dt.strftime("%H-%M-%S")
     where = _where_str(location, lat, long_)
-    name = _build_exp_name(tool_id, where, date_str)
+    name = _build_exp_name(tool_id, where, date_str, time_str)
 
     # Skip-if-exists — do this BEFORE any sensor I/O.
     if (STRUCTURED_DATA_DIR / name).exists():

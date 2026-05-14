@@ -63,6 +63,7 @@ from src.data.loader.pipeline import (
     rebuild_metadata_index,
 )
 from src.data.loadFromDB import LoadedSignal, PhoneType, loadDataFromS3
+from src.data.load_data import enrich_loaded
 from src.physics import calculate_velocity_from_accelerometer, pressure_to_altitude
 from src.utils.accelerometer_utils import vertical_accel_magnitude
 from src.segmentation.algorithms import (
@@ -70,11 +71,43 @@ from src.segmentation.algorithms import (
     SegmentAlgorithm,
     Segmenter,
 )
+from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E501
+    detect as _seg_detect,
+)
 
 
 VALID_TYPES = ["outside", "up", "down"]
 TYPE_COLORS = {"up": "#2ca02c", "down": "#d62728", "outside": "#b8b8b8"}
 HIGHLIGHT_COLOR = "#1f77b4"
+# Color/hatch for segmenter suggestion bands. Distinct from TYPE_COLORS
+# (green/red GT) and HIGHLIGHT_COLOR (blue outline) so the three layers
+# never read as the same thing.
+SUGGESTION_COLOR = "#f5b041"
+SUGGESTION_EDGE = "#b9770e"
+
+
+def _autoscale_y_to_visible(ax, x_lo: float, x_hi: float) -> None:
+    """Tighten ``ax.set_ylim`` to the data of every Line2D on this axis
+    that falls inside ``[x_lo, x_hi]``. No-op if the panel has no
+    in-window data (preserves the prior ylim)."""
+    y_chunks: list[np.ndarray] = []
+    for line in ax.get_lines():
+        xd = np.asarray(line.get_xdata(), dtype=float)
+        yd = np.asarray(line.get_ydata(), dtype=float)
+        if xd.size == 0:
+            continue
+        m = (xd >= x_lo) & (xd <= x_hi)
+        if m.any():
+            y_chunks.append(yd[m])
+    if not y_chunks:
+        return
+    arr = np.concatenate(y_chunks)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return
+    lo, hi = float(arr.min()), float(arr.max())
+    pad = (hi - lo) * 0.08 if hi > lo else max(abs(hi) * 0.1, 1.0)
+    ax.set_ylim(lo - pad, hi + pad)
 
 
 class _AddExperimentValidationError(ValueError):
@@ -302,6 +335,12 @@ class GtEditor(tk.Tk):
         self._drag_active: bool = False
         self._drag_edge: str | None = None   # "start" | "end"
         self._drag_idx: int | None = None
+        # Segmenter suggestions (lazy-computed on first toggle per experiment).
+        # ``None`` means "not yet run for this experiment". Each entry:
+        # ``{"start_ms": int, "end_ms": int, "type": str}``.
+        self._suggestions: list[dict] | None = None
+        self._suggestions_visible: bool = False
+        self._suggestion_spans: list = []
 
         self._build_ui()
         self._populate_experiments()
@@ -396,13 +435,21 @@ class GtEditor(tk.Tk):
         widget.bind("<Button-4>", lambda e: self._on_tk_wheel(e, delta=+120))
         widget.bind("<Button-5>", lambda e: self._on_tk_wheel(e, delta=-120))
 
-        # --- Right: treeview + edit form ---
-        right = ttk.Frame(main, padding=6)
-        main.add(right, weight=1)
+        # --- Right: notebook with two tabs (GT intervals / Suggestions).
+        # Tabs keep small-screen layouts from stacking the GT edit form
+        # and the suggestions tree on top of each other.
+        right_outer = ttk.Frame(main, padding=6)
+        main.add(right_outer, weight=1)
+        right_nb = ttk.Notebook(right_outer)
+        right_nb.pack(fill=tk.BOTH, expand=True)
+        gt_tab = ttk.Frame(right_nb, padding=4)
+        sug_tab = ttk.Frame(right_nb, padding=4)
+        right_nb.add(gt_tab, text="GT intervals")
+        right_nb.add(sug_tab, text="Suggestions")
+        self._right_nb = right_nb
+        self._sug_tab = sug_tab
 
-        ttk.Label(right, text="GT Intervals", font=("", 10, "bold")).pack(anchor=tk.W)
-
-        tree_frame = ttk.Frame(right)
+        tree_frame = ttk.Frame(gt_tab)
         tree_frame.pack(fill=tk.BOTH, expand=True)
         self.tree = ttk.Treeview(
             tree_frame,
@@ -426,6 +473,7 @@ class GtEditor(tk.Tk):
         self.tree.configure(yscrollcommand=scroll.set)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+        self.tree.bind("<Double-Button-1>", self._on_tree_double_click)
 
         # Color tags for types in the tree
         self.tree.tag_configure("up",      foreground="#2ca02c")
@@ -433,7 +481,7 @@ class GtEditor(tk.Tk):
         self.tree.tag_configure("outside", foreground="#666666")
 
         # Edit form
-        edit = ttk.LabelFrame(right, text="Edit selected", padding=6)
+        edit = ttk.LabelFrame(gt_tab, text="Edit selected", padding=6)
         edit.pack(fill=tk.X, pady=6)
 
         ttk.Label(edit, text="start (ms):").grid(row=0, column=0, sticky=tk.W)
@@ -472,7 +520,7 @@ class GtEditor(tk.Tk):
             .grid(row=6, column=0, columnspan=2, pady=4, sticky=tk.EW)
 
         # Actions
-        actions = ttk.Frame(right)
+        actions = ttk.Frame(gt_tab)
         actions.pack(fill=tk.X, pady=4)
         ttk.Button(actions, text="+ Add (Ctrl+N)", command=self._on_add)\
             .pack(side=tk.LEFT)
@@ -480,6 +528,48 @@ class GtEditor(tk.Tk):
             .pack(side=tk.LEFT, padx=4)
         ttk.Button(actions, text="Auto-fix", command=self._on_autofix)\
             .pack(side=tk.LEFT, padx=4)
+
+        # ---- Suggestions tab ----
+        # Segmenter-proposed intervals that don't overlap any GT row.
+        # Toggle to show/hide on the plot; Approve promotes the selected
+        # suggestion to a new GT row.
+        sug_header = ttk.Frame(sug_tab)
+        sug_header.pack(fill=tk.X)
+        self.sug_toggle_text = tk.StringVar(value="Show suggestions")
+        ttk.Button(sug_header, textvariable=self.sug_toggle_text,
+                   command=self._on_toggle_suggestions)\
+            .pack(side=tk.LEFT)
+
+        sug_tree_frame = ttk.Frame(sug_tab)
+        sug_tree_frame.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
+        self.sug_tree = ttk.Treeview(
+            sug_tree_frame,
+            columns=("idx", "start_s", "dur_s", "type"),
+            show="headings", selectmode="browse", height=6,
+        )
+        for col, text, w, anchor in [
+            ("idx",     "#",         40,  tk.E),
+            ("start_s", "start (s)", 80,  tk.E),
+            ("dur_s",   "dur (s)",   70,  tk.E),
+            ("type",    "type",      80,  tk.CENTER),
+        ]:
+            self.sug_tree.heading(col, text=text)
+            self.sug_tree.column(col, width=w, anchor=anchor)
+        self.sug_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sug_scroll = ttk.Scrollbar(sug_tree_frame, orient=tk.VERTICAL,
+                                   command=self.sug_tree.yview)
+        self.sug_tree.configure(yscrollcommand=sug_scroll.set)
+        sug_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.sug_tree.bind("<<TreeviewSelect>>", self._on_sug_tree_select)
+        self.sug_tree.bind(
+            "<Double-Button-1>", self._on_sug_tree_double_click,
+        )
+
+        sug_actions = ttk.Frame(sug_tab)
+        sug_actions.pack(fill=tk.X, pady=4)
+        ttk.Button(sug_actions, text="✓ Approve",
+                   command=self._on_approve_suggestion)\
+            .pack(side=tk.LEFT)
 
         # Keyboard shortcuts
         self.bind("<Control-s>", lambda e: self.save_gt())
@@ -539,6 +629,12 @@ class GtEditor(tk.Tk):
             self._t0_ms = 0
 
         self._dirty = False
+        # Suggestions are per-experiment: drop the previous experiment's
+        # cache so the next "Show suggestions" re-runs the segmenter.
+        self._suggestions = None
+        self._suggestions_visible = False
+        self.sug_toggle_text.set("Show suggestions")
+        self._refresh_suggestion_tree()
         self._refresh_plot()
         self._refresh_tree()
         self.status_var.set(
@@ -600,6 +696,10 @@ class GtEditor(tk.Tk):
         self.pipeline = None
         self.exp_path = None
         self._dirty = False
+        self._suggestions = None
+        self._suggestions_visible = False
+        self.sug_toggle_text.set("Show suggestions")
+        self._refresh_suggestion_tree()
         self.exp_var.set("")
         self._populate_experiments()
         self._refresh_plot()
@@ -608,18 +708,29 @@ class GtEditor(tk.Tk):
 
     # ---------- Plot ----------
 
-    def _refresh_plot(self, preserve_xlim: bool = False):
-        # Save the current x view so edits don't reset the user's zoom.
+    def _refresh_plot(
+        self, preserve_xlim: bool = False, preserve_ylim: bool = False,
+    ):
+        # Save the current x/y view so edits don't reset the user's zoom.
+        # ylim is per-panel; we snapshot positionally and only restore when
+        # the panel count matches after the rebuild (same experiment).
         prev_xlim = None
         if preserve_xlim and self._axes:
             try:
                 prev_xlim = self._axes[0].get_xlim()
             except Exception:
                 prev_xlim = None
+        prev_ylims: list[tuple[float, float]] | None = None
+        if preserve_ylim and self._axes:
+            try:
+                prev_ylims = [ax.get_ylim() for ax in self._axes]
+            except Exception:
+                prev_ylims = None
 
         self.fig.clear()
         self._axes = []
         self._hl_spans = []
+        self._suggestion_spans = []
         if self.pipeline is None:
             self.canvas.draw()
             return
@@ -649,6 +760,9 @@ class GtEditor(tk.Tk):
         axes[-1].set_xlabel("time  (s since start · wall clock)")
         if prev_xlim is not None:
             axes[0].set_xlim(prev_xlim)  # sharex propagates to all panels
+        if prev_ylims is not None and len(prev_ylims) == len(axes):
+            for ax, yl in zip(axes, prev_ylims):
+                ax.set_ylim(yl)
 
         # GT spans on all panels + note annotation on the top panel.
         for _, row in self.pipeline.gt.iterrows():
@@ -665,6 +779,20 @@ class GtEditor(tk.Tk):
                     ha="center", va="bottom", fontsize=7, color="#333",
                     clip_on=True,
                 )
+
+        # Segmenter-proposed bands (toggleable). Hatched orange so they
+        # can't be confused with the solid colored GT bands.
+        if self._suggestions_visible and self._suggestions:
+            for s in self._suggestions:
+                ss = (int(s["start_ms"]) - self._t0_ms) / 1000.0
+                ee = (int(s["end_ms"]) - self._t0_ms) / 1000.0
+                for ax in axes:
+                    sp = ax.axvspan(
+                        ss, ee, facecolor=SUGGESTION_COLOR, alpha=0.18,
+                        hatch="//", edgecolor=SUGGESTION_EDGE,
+                        linewidth=1.0, zorder=1,
+                    )
+                    self._suggestion_spans.append(sp)
 
         # Blue "no data" overlays for sub-threshold-frequency / missing
         # regions. The loader marks valid intervals per sensor; we shade
@@ -810,6 +938,16 @@ class GtEditor(tk.Tk):
         if tb_mode and getattr(tb_mode, "mode", ""):
             return
 
+        # Double-click on a GT or suggestion span → focus zoom ±15 s with
+        # tight per-panel Y. Single-click selection already happened on the
+        # preceding press, so we don't need to set the tree selection here.
+        if getattr(event, "dblclick", False):
+            click_ms = int(self._t0_ms + event.xdata * 1000)
+            hit = self._interval_at_ms(click_ms)
+            if hit is not None:
+                self._focus_zoom_to_ms(hit[0], hit[1], pad_s=15.0)
+            return
+
         # Edge drag if clicking near any edge.
         edge_hit = self._closest_edge(event.inaxes, event.xdata)
         if edge_hit is not None:
@@ -893,7 +1031,7 @@ class GtEditor(tk.Tk):
         self._recompute_height_diffs()
         self._mark_dirty(f"Dragged interval {idx} — unsaved")
         # Full refresh so the colored GT span catches up with the final bounds.
-        self._refresh_plot(preserve_xlim=True)
+        self._refresh_plot(preserve_xlim=True, preserve_ylim=True)
         self._refresh_tree()
         if idx is not None and str(idx) in self.tree.get_children():
             self.tree.selection_set(str(idx))
@@ -987,6 +1125,42 @@ class GtEditor(tk.Tk):
             ax.set_ylim(ylim[0] + shift, ylim[1] + shift)
         self.canvas.draw_idle()
 
+    def _interval_at_ms(self, click_ms: int) -> tuple[int, int] | None:
+        """Return ``(start_ms, end_ms)`` of the GT or visible-suggestion
+        interval containing ``click_ms``. GT wins over suggestions on
+        overlap (matches the band z-order). ``None`` if no match.
+        """
+        if self.pipeline is not None:
+            gt = self.pipeline.gt
+            mask = (
+                (gt["start_ms"].astype(int) <= click_ms)
+                & (gt["end_ms"].astype(int) > click_ms)
+            )
+            matches = gt[mask]
+            if len(matches):
+                r = matches.iloc[0]
+                return int(r["start_ms"]), int(r["end_ms"])
+        if self._suggestions_visible and self._suggestions:
+            for s in self._suggestions:
+                if int(s["start_ms"]) <= click_ms < int(s["end_ms"]):
+                    return int(s["start_ms"]), int(s["end_ms"])
+        return None
+
+    def _focus_zoom_to_ms(
+        self, start_ms: int, end_ms: int, *, pad_s: float = 15.0,
+    ) -> None:
+        """Pan X to ``interval ± pad_s`` and tighten each panel's Y to
+        the data visible inside that X window."""
+        if not self._axes:
+            return
+        s_s = (int(start_ms) - self._t0_ms) / 1000.0
+        e_s = (int(end_ms) - self._t0_ms) / 1000.0
+        x_lo, x_hi = s_s - pad_s, e_s + pad_s
+        self._axes[0].set_xlim(x_lo, x_hi)  # sharex propagates
+        for ax in self._axes:
+            _autoscale_y_to_visible(ax, x_lo, x_hi)
+        self.canvas.draw_idle()
+
     def _fit_x(self) -> None:
         """Reset the x-axis to the full data range."""
         if self.pipeline is None or not self._axes:
@@ -1050,7 +1224,10 @@ class GtEditor(tk.Tk):
             self.pipeline.gt["description"] = ""
         if "signalClearRecording" not in self.pipeline.gt.columns:
             self.pipeline.gt["signalClearRecording"] = True
-        for i, row in self.pipeline.gt.iterrows():
+        # Display rows in time order (start_ms ascending) — sort_values
+        # preserves the original DataFrame index, so the iid (= row
+        # index used by every edit callback) stays valid.
+        for i, row in self.pipeline.gt.sort_values("start_ms").iterrows():
             s_s = (int(row["start_ms"]) - self._t0_ms) / 1000.0
             e_s = (int(row["end_ms"]) - self._t0_ms) / 1000.0
             dur = e_s - s_s
@@ -1081,6 +1258,23 @@ class GtEditor(tk.Tk):
         dh = row.get("height_diff_m", float("nan"))
         self.height_diff_var.set(f"{dh:+.3f}" if pd.notna(dh) else "—")
         self._highlight_on_plot(row["start_ms"], row["end_ms"])
+
+    def _on_tree_double_click(self, _event=None):
+        """Double-click a GT row → zoom the plot to that interval
+        with the same ±15 s window used for plot dblclick."""
+        sel = self.tree.selection()
+        if not sel or self.pipeline is None:
+            return
+        try:
+            idx = int(sel[0])
+        except ValueError:
+            return
+        if idx not in self.pipeline.gt.index:
+            return
+        row = self.pipeline.gt.loc[idx]
+        self._focus_zoom_to_ms(
+            int(row["start_ms"]), int(row["end_ms"]), pad_s=15.0,
+        )
 
     # ---------- Edit actions ----------
 
@@ -1130,7 +1324,7 @@ class GtEditor(tk.Tk):
         self.pipeline.gt.loc[idx, "signalClearRecording"] = clear
         self._recompute_height_diffs()
         self._mark_dirty(f"Updated interval {idx}")
-        self._refresh_plot(preserve_xlim=True)
+        self._refresh_plot(preserve_xlim=True, preserve_ylim=True)
         self._refresh_tree()
         self.tree.selection_set(str(idx))
         self.tree.see(str(idx))
@@ -1157,10 +1351,12 @@ class GtEditor(tk.Tk):
             columns=["start_ms", "end_ms", "type", "description",
                      "signalClearRecording"],
         )
-        self.pipeline.gt = pd.concat([self.pipeline.gt, new_row], ignore_index=True)
+        self.pipeline.gt = pd.concat(
+            [self.pipeline.gt, new_row], ignore_index=True,
+        )
         self._recompute_height_diffs()
         self._mark_dirty("Added interval")
-        self._refresh_plot(preserve_xlim=True)
+        self._refresh_plot(preserve_xlim=True, preserve_ylim=True)
         self._refresh_tree()
         new_idx = str(len(self.pipeline.gt) - 1)
         self.tree.selection_set(new_idx)
@@ -1171,10 +1367,11 @@ class GtEditor(tk.Tk):
         if not sel or self.pipeline is None:
             return
         idx = int(sel[0])
-        self.pipeline.gt = self.pipeline.gt.drop(index=idx).reset_index(drop=True)
+        self.pipeline.gt = self.pipeline.gt.drop(index=idx)\
+            .reset_index(drop=True)
         self._recompute_height_diffs()
         self._mark_dirty(f"Deleted interval {idx}")
-        self._refresh_plot(preserve_xlim=True)
+        self._refresh_plot(preserve_xlim=True, preserve_ylim=True)
         self._refresh_tree()
 
     def _on_autofix(self):
@@ -1189,7 +1386,7 @@ class GtEditor(tk.Tk):
                     f"Fix manually, then try Auto-fix again.",
                 )
                 self.pipeline.gt = gt
-                self._refresh_plot(preserve_xlim=True)
+                self._refresh_plot(preserve_xlim=True, preserve_ylim=True)
                 self._refresh_tree()
                 return
         fixed: list[dict] = []
@@ -1218,8 +1415,231 @@ class GtEditor(tk.Tk):
         )
         self._recompute_height_diffs()
         self._mark_dirty(f"Auto-fixed → {len(self.pipeline.gt)} intervals")
-        self._refresh_plot(preserve_xlim=True)
+        self._refresh_plot(preserve_xlim=True, preserve_ylim=True)
         self._refresh_tree()
+
+    # ---------- Segmenter suggestions ----------
+
+    def _run_segmenter_suggestions(self) -> list[dict]:
+        """Run the matched-filter detector on the loaded experiment.
+
+        Mirrors ``src/segmentation/algorithms/editor.py`` end-to-end so
+        the two tools surface the same hits on the same experiment:
+
+        * ACC is run through ``enrich_loaded(resample=True)`` (50 Hz
+          resample + gap detection).
+        * The detector is invoked directly with
+          ``DetectConfig(input_signal="a_mag_minus_g")``. The
+          ``Segmenter`` dispatcher would default to ``"a_vert"`` and
+          also tighten the amplitude floor when a phone model is known.
+        * When the experiment has multiple valid intervals (gaps in
+          ACC), the detector is re-run per chunk and the results are
+          merged. Without this the single-pass detector spans the gap
+          and produces fewer hits than editor.py shows.
+
+        Returns ``[{start_ms, end_ms, type}, …]`` in epoch ms.
+        """
+        if self.pipeline is None:
+            return []
+        acc_native = self.pipeline.data.get("ACC")
+        if acc_native is None or acc_native.empty:
+            raise RuntimeError("Experiment has no ACC data.")
+        base = LoadedSignal(
+            acc=acc_native,
+            source=(self.exp_path.name if self.exp_path else ""),
+            meta={},
+            prs=self.pipeline.data.get("PRS"),
+            gyr=self.pipeline.data.get("GYR"),
+            mag=self.pipeline.data.get("MAG"),
+            ori=self.pipeline.data.get("ORI"),
+        )
+        enriched = enrich_loaded(base, resample=True)
+        acc = enriched.acc
+        valid_intervals = list(enriched.valid_intervals)
+        acc_t0_ms = float(acc["timestamp_ms"].iloc[0])
+        cfg = _seg_detect.DetectConfig(input_signal="a_mag_minus_g")
+
+        # Full-signal pass — used when there is at most one valid chunk.
+        predictions, _state = _seg_detect.predict_intervals(acc, cfg)
+
+        # Per-chunk pass: replaces the full-signal predictions when the
+        # ACC has more than one valid interval, matching editor.py.
+        if len(valid_intervals) > 1:
+            ts = acc["timestamp_ms"].astype("int64").to_numpy()
+            preds: list[dict] = []
+            for s_ms, e_ms in valid_intervals:
+                mask = (ts >= s_ms) & (ts <= e_ms)
+                chunk = acc.loc[mask].reset_index(drop=True)
+                if len(chunk) < 2:
+                    continue
+                try:
+                    chunk_preds, _ = _seg_detect.predict_intervals(chunk, cfg)
+                except Exception:  # noqa: BLE001
+                    continue
+                chunk_t0_ms = float(chunk["timestamp_ms"].iloc[0])
+                shift_s = (chunk_t0_ms - acc_t0_ms) / 1000.0
+                for p in chunk_preds:
+                    q = dict(p)
+                    q["t_start_s"] = float(p["t_start_s"]) + shift_s
+                    q["t_end_s"] = float(p["t_end_s"]) + shift_s
+                    preds.append(q)
+            predictions = preds
+
+        out: list[dict] = []
+        for p in predictions:
+            t_s = float(p["t_start_s"])
+            t_e = float(p["t_end_s"])
+            out.append({
+                "start_ms": int(acc_t0_ms + t_s * 1000.0),
+                "end_ms":   int(acc_t0_ms + t_e * 1000.0),
+                "type": str(p.get("ride_type") or "ride"),
+            })
+        return out
+
+    def _filter_non_overlapping(
+        self, suggestions: list[dict],
+    ) -> list[dict]:
+        """Keep only suggestions that don't overlap any labelled ride
+        (``up`` / ``down``).
+
+        ``outside`` rows are background coverage produced by the
+        contiguous-GT invariant, not actual labelled rides — a
+        segmenter hit inside an outside region is exactly the
+        "uncovered ride" we want the user to review.
+        """
+        if self.pipeline is None:
+            return suggestions
+        gt = self.pipeline.gt
+        if gt is None or len(gt) == 0:
+            return suggestions
+        rides = gt[gt["type"].astype(str).isin(("up", "down"))]
+        if rides.empty:
+            return suggestions
+        gt_s = rides["start_ms"].astype(int).to_numpy()
+        gt_e = rides["end_ms"].astype(int).to_numpy()
+        kept: list[dict] = []
+        for s in suggestions:
+            s_lo, s_hi = int(s["start_ms"]), int(s["end_ms"])
+            if not ((gt_s < s_hi) & (gt_e > s_lo)).any():
+                kept.append(s)
+        return kept
+
+    def _on_toggle_suggestions(self):
+        """Show/hide segmenter-proposed bands. Runs the segmenter lazily
+        on the first toggle per loaded experiment."""
+        if self.pipeline is None:
+            messagebox.showinfo("No experiment", "Load an experiment first.")
+            return
+        if self._suggestions is None:
+            self.status_var.set("Running segmenter…")
+            self.update_idletasks()
+            try:
+                raw = self._run_segmenter_suggestions()
+            except Exception as e:
+                messagebox.showerror(
+                    "Segmenter failed", f"{type(e).__name__}: {e}",
+                )
+                self.status_var.set("Segmenter failed.")
+                return
+            self._suggestions = self._filter_non_overlapping(raw)
+            dropped = len(raw) - len(self._suggestions)
+            self.status_var.set(
+                f"Segmenter: {len(raw)} hit(s); "
+                f"{dropped} overlap an existing up/down ride; "
+                f"{len(self._suggestions)} new suggestion(s)."
+            )
+            self._refresh_suggestion_tree()
+        self._suggestions_visible = not self._suggestions_visible
+        self.sug_toggle_text.set(
+            "Hide suggestions" if self._suggestions_visible
+            else "Show suggestions"
+        )
+        self._refresh_plot(preserve_xlim=True, preserve_ylim=True)
+
+    def _refresh_suggestion_tree(self):
+        for item in self.sug_tree.get_children():
+            self.sug_tree.delete(item)
+        if not self._suggestions:
+            return
+        for i, s in enumerate(self._suggestions):
+            s_s = (int(s["start_ms"]) - self._t0_ms) / 1000.0
+            e_s = (int(s["end_ms"]) - self._t0_ms) / 1000.0
+            self.sug_tree.insert(
+                "", tk.END, iid=str(i),
+                values=(
+                    i, f"{s_s:.1f}", f"{e_s - s_s:.1f}",
+                    str(s.get("type", "ride")),
+                ),
+            )
+
+    def _on_sug_tree_select(self, _event=None):
+        sel = self.sug_tree.selection()
+        if not sel or not self._suggestions:
+            return
+        try:
+            i = int(sel[0])
+        except ValueError:
+            return
+        if not (0 <= i < len(self._suggestions)):
+            return
+        s = self._suggestions[i]
+        self._highlight_on_plot(s["start_ms"], s["end_ms"])
+
+    def _on_sug_tree_double_click(self, _event=None):
+        """Double-click a suggestion row → zoom the plot to that
+        interval (±15 s window)."""
+        sel = self.sug_tree.selection()
+        if not sel or not self._suggestions:
+            return
+        try:
+            i = int(sel[0])
+        except ValueError:
+            return
+        if not (0 <= i < len(self._suggestions)):
+            return
+        s = self._suggestions[i]
+        self._focus_zoom_to_ms(
+            int(s["start_ms"]), int(s["end_ms"]), pad_s=15.0,
+        )
+
+    def _on_approve_suggestion(self):
+        """Promote the selected suggestion to a new GT row.
+
+        Inserts with ``description="auto-segmenter"`` so approved rows
+        are findable later. The suggestion is dropped from the tree
+        once promoted.
+        """
+        sel = self.sug_tree.selection()
+        if (not sel or self._suggestions is None
+                or self.pipeline is None):
+            return
+        try:
+            i = int(sel[0])
+        except ValueError:
+            return
+        if not (0 <= i < len(self._suggestions)):
+            return
+        s = self._suggestions.pop(i)
+        new_row = pd.DataFrame(
+            [{"start_ms": int(s["start_ms"]), "end_ms": int(s["end_ms"]),
+              "type": str(s.get("type") or "outside"),
+              "description": "auto-segmenter",
+              "signalClearRecording": True}],
+            columns=["start_ms", "end_ms", "type", "description",
+                     "signalClearRecording"],
+        )
+        self.pipeline.gt = pd.concat(
+            [self.pipeline.gt, new_row], ignore_index=True,
+        )
+        self._recompute_height_diffs()
+        self._mark_dirty("Approved suggestion")
+        self._refresh_suggestion_tree()
+        self._refresh_plot(preserve_xlim=True, preserve_ylim=True)
+        self._refresh_tree()
+        new_idx = str(len(self.pipeline.gt) - 1)
+        if new_idx in self.tree.get_children():
+            self.tree.selection_set(new_idx)
+            self.tree.see(new_idx)
 
     # ---------- Add experiment ----------
 

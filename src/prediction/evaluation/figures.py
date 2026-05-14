@@ -47,8 +47,12 @@ def _ensure_dir(d: Path | str) -> Path:
 # Figure helpers
 # ---------------------------------------------------------------------------
 
+# Historically this filtered to ``signal_clear == True``. The noise pass
+# in evaluateOnData now pre-filters by signal_clear before calling
+# ``save_all_figures``, so this is a passthrough — every figure operates
+# on the active noise subset (clean / noisy / both).
 def _clean(df: pd.DataFrame) -> pd.DataFrame:
-    return df[df["signal_clear"] == True].copy()  # noqa: E712
+    return df.copy()
 
 
 def _safe_quantile(x: np.ndarray, q: float) -> float:
@@ -101,10 +105,10 @@ def fig_error_cdf(df: pd.DataFrame, out_path: Path, title: str) -> None:
     fig, ax = plt.subplots(figsize=(7, 5))
     if err_all.size:
         ax.plot(err_all, np.linspace(0, 1, err_all.size), "r-", lw=1.5,
-                label=f"all clean (n={err_all.size}, med={np.median(err_all):.2f}m)")
+                label=f"all (n={err_all.size}, med={np.median(err_all):.2f}m)")
     if err_acc.size:
         ax.plot(err_acc, np.linspace(0, 1, err_acc.size), "g-", lw=2,
-                label=f"accepted clean (n={err_acc.size}, med={np.median(err_acc):.2f}m)")
+                label=f"accepted (n={err_acc.size}, med={np.median(err_acc):.2f}m)")
     ax.axvline(1.5, color="b", ls=":", alpha=0.7, label="±1.5 m target")
     ax.axvline(3.0, color="k", ls=":", alpha=0.5, label="±3.0 m")
     ax.set_xlabel("|error| (m)")
@@ -140,7 +144,7 @@ def fig_per_ride_errors(df: pd.DataFrame, out_path: Path, title: str) -> None:
     ax.bar(xs, sub["abs_error"], color=colours, alpha=0.85, width=0.8)
     ax.axhline(1.5, color="b", ls=":", label="±1.5 m")
     ax.axhline(3.0, color="k", ls=":", label="±3.0 m")
-    ax.set_xlabel("clean segment (sorted by error)")
+    ax.set_xlabel("segment (sorted by error)")
     ax.set_ylabel("|error| (m)")
     ax.set_title(title)
     ax.set_ylim(0, max(6.0, _safe_quantile(sub["abs_error"].to_numpy(), 0.98) + 0.5))
@@ -157,7 +161,7 @@ def fig_ci_coverage(df: pd.DataFrame, out_path: Path, title: str) -> None:
     sub = sub.sort_values("true_dh").reset_index(drop=True)
     if sub.empty:
         fig, ax = plt.subplots(figsize=(8, 5))
-        ax.set_title(title + " (no clean segments)")
+        ax.set_title(title + " (empty subset)")
         fig.savefig(out_path); plt.close(fig); return
 
     xs = np.arange(len(sub))
@@ -178,7 +182,7 @@ def fig_ci_coverage(df: pd.DataFrame, out_path: Path, title: str) -> None:
 
     cov_all = float(np.mean(sub["covered"]))
     med_ci = float(np.median(sub["ci_half_width"]))
-    ax.set_xlabel("clean segment (sorted by true Δh)")
+    ax.set_xlabel("segment (sorted by true Δh)")
     ax.set_ylabel("Δh (m)")
     ax.set_title(f"{title} — coverage={cov_all:.1%}, median CI=±{med_ci:.2f} m")
     ax.legend(loc="upper left", framealpha=0.9)
@@ -309,9 +313,134 @@ def fig_coverage_vs_distance_bins(df: pd.DataFrame, out_path: Path, title: str,
     plt.close(fig)
 
 
+DURATION_BIN_EDGES = np.array([0.0, 5.0, 10.0, 20.0, 40.0, 90.0])
+
+
+def fig_coverage_vs_duration_bins(df: pd.DataFrame, out_path: Path, title: str,
+                                   bin_edges: np.ndarray | None = None) -> None:
+    """Coverage rate broken down by ride duration bin (seconds).
+
+    Mirror of :func:`fig_coverage_vs_distance_bins` with the X axis swapped
+    from |Δh| to ride duration. Bars = coverage; overlaid line = MAE.
+    """
+    sub = _clean(df)
+    if sub.empty:
+        fig, ax = plt.subplots(figsize=(7, 5)); ax.set_title(title + " (empty)")
+        fig.savefig(out_path); plt.close(fig); return
+
+    if bin_edges is None:
+        bin_edges = DURATION_BIN_EDGES
+
+    dur = sub["duration_sec"].to_numpy(dtype=float)
+    bins = np.digitize(dur, bin_edges) - 1
+    rows = []
+    for b in range(len(bin_edges) - 1):
+        mask = bins == b
+        if mask.sum() == 0:
+            continue
+        rows.append({
+            "label": f"{bin_edges[b]:.0f}–{bin_edges[b+1]:.0f} s",
+            "n": int(mask.sum()),
+            "coverage": float(np.mean(sub["covered"].to_numpy()[mask])),
+            "mae": float(np.mean(sub["abs_error"].to_numpy()[mask])),
+        })
+    if not rows:
+        fig, ax = plt.subplots(figsize=(7, 5)); ax.set_title(title + " (empty)")
+        fig.savefig(out_path); plt.close(fig); return
+    df_b = pd.DataFrame(rows)
+
+    fig, ax1 = plt.subplots(figsize=(8, 5))
+    x = np.arange(len(df_b))
+    ax1.bar(x, df_b["coverage"], color="tab:green", alpha=0.6, label="coverage")
+    ax1.axhline(0.9, color="b", ls=":", alpha=0.8, label="90% target")
+    ax1.set_xticks(x); ax1.set_xticklabels(df_b["label"])
+    ax1.set_xlabel("ride duration (s)")
+    ax1.set_ylabel("coverage"); ax1.set_ylim(0, 1.05)
+    ax2 = ax1.twinx()
+    ax2.plot(x, df_b["mae"], "r-o", lw=1.5, label="MAE")
+    ax2.set_ylabel("MAE (m)")
+    for xi, n in zip(x, df_b["n"]):
+        ax1.text(xi, 0.03, f"n={n}", ha="center", color="black", fontsize=8)
+    ax1.set_title(title)
+    h1, l1 = ax1.get_legend_handles_labels()
+    h2, l2 = ax2.get_legend_handles_labels()
+    ax1.legend(h1 + h2, l1 + l2, loc="lower right")
+    fig.savefig(out_path)
+    plt.close(fig)
+
+
+def fig_error_vs_duration_bins(df: pd.DataFrame, out_path: Path, title: str,
+                                bin_edges: np.ndarray | None = None) -> None:
+    """Signed and absolute Δh error binned by ride duration (seconds)."""
+    sub = _clean(df)
+    if sub.empty:
+        fig, ax = plt.subplots(figsize=(8, 5)); ax.set_title(title + " (empty)")
+        fig.savefig(out_path); plt.close(fig); return
+
+    if bin_edges is None:
+        bin_edges = DURATION_BIN_EDGES
+
+    dur = sub["duration_sec"].to_numpy(dtype=float)
+    bins = np.digitize(dur, bin_edges) - 1
+    signed = (sub["pred_dh"] - sub["true_dh"]).to_numpy(dtype=float)
+    abs_err = sub["abs_error"].to_numpy(dtype=float)
+
+    rows = []
+    for b in range(len(bin_edges) - 1):
+        mask = bins == b
+        if mask.sum() == 0:
+            continue
+        rows.append({
+            "label": f"{bin_edges[b]:.0f}–{bin_edges[b+1]:.0f} s",
+            "n": int(mask.sum()),
+            "median_signed": float(np.median(signed[mask])),
+            "mae": float(np.mean(abs_err[mask])),
+            "median_abs": float(np.median(abs_err[mask])),
+            "p95_abs": float(np.quantile(abs_err[mask], 0.95)),
+        })
+    if not rows:
+        fig, ax = plt.subplots(figsize=(8, 5)); ax.set_title(title + " (empty)")
+        fig.savefig(out_path); plt.close(fig); return
+    df_b = pd.DataFrame(rows)
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    x = np.arange(len(df_b))
+
+    axes[0].bar(x, df_b["median_signed"], color="tab:blue", alpha=0.7,
+                label="median signed error")
+    axes[0].axhline(0, color="black", lw=0.6)
+    axes[0].axhline(1.5, color="b", ls=":", alpha=0.6, label="±1.5 m")
+    axes[0].axhline(-1.5, color="b", ls=":", alpha=0.6)
+    axes[0].set_xticks(x); axes[0].set_xticklabels(df_b["label"])
+    axes[0].set_xlabel("ride duration (s)")
+    axes[0].set_ylabel(r"signed error $\hat{\Delta h}-\Delta h$ (m)")
+    axes[0].set_title("Signed error by duration bin")
+    for xi, n in zip(x, df_b["n"]):
+        axes[0].text(xi, axes[0].get_ylim()[0], f"n={n}",
+                     ha="center", va="bottom", fontsize=8, color="black")
+    axes[0].legend(loc="upper right", fontsize=8)
+
+    width = 0.4
+    axes[1].bar(x - width / 2, df_b["mae"], width=width, color="tab:red",
+                alpha=0.75, label="MAE")
+    axes[1].bar(x + width / 2, df_b["p95_abs"], width=width, color="tab:orange",
+                alpha=0.75, label="P95 |error|")
+    axes[1].axhline(1.5, color="b", ls=":", alpha=0.6, label="±1.5 m")
+    axes[1].set_xticks(x); axes[1].set_xticklabels(df_b["label"])
+    axes[1].set_xlabel("ride duration (s)")
+    axes[1].set_ylabel("|error| (m)")
+    axes[1].set_title("Absolute error by duration bin")
+    axes[1].legend(loc="upper right", fontsize=8)
+
+    fig.suptitle(title)
+    fig.tight_layout()
+    fig.savefig(out_path)
+    plt.close(fig)
+
+
 def fig_compare_algorithms(dfs: dict[str, pd.DataFrame], out_path: Path,
                             title: str = "Algorithm comparison") -> None:
-    """CDFs of |error| for each algorithm (clean data only)."""
+    """CDFs of |error| for each algorithm over the active subset."""
     fig, ax = plt.subplots(figsize=(7, 5))
     colour_cycle = ["tab:blue", "tab:orange", "tab:green", "tab:red"]
     for (name, df), col in zip(dfs.items(), colour_cycle):
@@ -416,6 +545,10 @@ def save_all_figures(
     _f("reject", fig_rejection_reasons, "Rejection reasons")
     _f("ci_vs_dh", fig_ci_vs_distance, "CI width vs. |true Δh|")
     _f("cov_bins", fig_coverage_vs_distance_bins, "Coverage by distance bin")
+    _f("cov_bins_duration", fig_coverage_vs_duration_bins,
+       "Coverage by ride-duration bin")
+    _f("err_vs_duration", fig_error_vs_duration_bins,
+       "Δh error by ride-duration bin")
     _f("reliability", fig_reliability_diagram, "Reliability diagram")
     _f("signed_err", fig_error_sign_analysis, "Signed error vs. true Δh")
 

@@ -87,10 +87,15 @@ def _gt_to_interval_dicts(gt: pd.DataFrame | None, t0_ms: float) -> list[dict]:
     for _, row in gt.iterrows():
         if row.get("type") not in ("up", "down"):
             continue
+        # ``signalClearRecording`` is the gt.csv quality marker (True = clean,
+        # False = noisy). Default to True when the column is missing so older
+        # GT files don't silently get classified as noisy.
+        sc = row.get("signalClearRecording", True)
         rides.append({
-            "type":      row["type"],
-            "t_start_s": (float(row["start_ms"]) - t0_ms) / 1000.0,
-            "t_end_s":   (float(row["end_ms"])   - t0_ms) / 1000.0,
+            "type":         row["type"],
+            "t_start_s":    (float(row["start_ms"]) - t0_ms) / 1000.0,
+            "t_end_s":      (float(row["end_ms"])   - t0_ms) / 1000.0,
+            "signal_clear": bool(sc) if sc is not None else True,
         })
     return rides
 
@@ -325,6 +330,10 @@ def _collect_matched_pairs(exps: list[_ExpResult]) -> list[dict]:
                 "duration_error_s": (p[1] - p[0]) - (g[1] - g[0]),
                 "gt_start_s":  g[0], "gt_end_s":  g[1],
                 "pred_start_s": p[0], "pred_end_s": p[1],
+                # Noise polarity comes from the matched GT row; the noise
+                # loop in the segmentation evaluator uses this to slice the
+                # matched-pair set per pass (clean / noisy / both).
+                "signal_clear": bool(e.gt_rides[j].get("signal_clear", True)),
             })
     return records
 

@@ -40,6 +40,7 @@ def _csv_to_loaded_signal(
     acc, info = parse_csv_to_acc(df, mapping)
     cols = {k: mapping[k] for k in CANONICAL_COLUMNS}
     meta: dict[str, object] = {
+        "input_mode":  "file",
         "filename":    filename,
         "samples":     info.n_samples,
         "sample_rate": f"{info.fs_hz:.1f} Hz",
@@ -193,6 +194,20 @@ def _render_phone_form() -> None:
                 # parts. Kept out of loadDataFromS3 itself so the DB loader
                 # stays a pure fetcher.
                 loaded = enrich_loaded(loaded)
+            # Stash the user's form parameters on the loaded signal so the
+            # step-5 signatures CSV can quote them verbatim. ISO-formatted
+            # values stay parseable on the analysis side.
+            loaded.meta.update({
+                "input_mode":         "phone",
+                "phone_type":         str(phone),
+                "phone_id":           phone_id_raw.strip(),
+                "session_start_iso":  t_start.isoformat(timespec="seconds"),
+                "session_end_iso":    t_end.isoformat(timespec="seconds"),
+                "session_start_date": d_start.isoformat(),
+                "session_end_date":   d_end.isoformat(),
+                "session_start_time": t_start_time.strftime("%H:%M:%S"),
+                "session_end_time":   t_end_time.strftime("%H:%M:%S"),
+            })
             st.session_state["loaded"] = loaded
             reset_downstream_state()
             goto(STEP_SEGMENT)

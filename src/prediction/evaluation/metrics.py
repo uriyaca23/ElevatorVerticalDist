@@ -2,14 +2,16 @@
 
 The headline metrics (per project convention) are:
 
-  * coverage — ``P(|err| ≤ CI)`` on clean segments,
-  * median / mean absolute error on clean segments,
-  * median CI half-width on clean segments.
+  * coverage — ``P(|err| ≤ CI)`` on the active subset,
+  * median / mean absolute error on the active subset,
+  * median CI half-width on the active subset.
 
-All metrics are computed on **clean** data only (per
-``signalClearRecording == True``) since that is what the analysis
-cares about. The quality filter's accept/reject split is reported
-separately so we can assess false-accept / false-reject rates.
+The noise-pass loop in :mod:`evaluateOnData` filters the predictions
+DataFrame by ``signal_clear`` *before* calling :func:`compute_metrics`,
+so the field names below carry the legacy ``clean_`` prefix but actually
+describe whichever subset is currently under evaluation (clean / noisy /
+both). The quality filter's accept/reject split is reported separately
+so we can assess false-accept / false-reject rates.
 """
 
 from __future__ import annotations
@@ -69,7 +71,11 @@ def compute_metrics(df: pd.DataFrame) -> MetricsBundle:
     :func:`collect_predictions`.
     """
     total = len(df)
-    clean = df[df["signal_clear"] == True]                 # noqa: E712
+    # The active noise subset is whatever the outer loop handed us; the
+    # legacy ``clean_*`` field names describe it. ``unclean`` is a probe
+    # for any signal_clear=False rows that snuck through and is normally
+    # empty under clean/noisy passes (and equal-to-full under ``both``).
+    clean = df
     unclean = df[df["signal_clear"] == False]              # noqa: E712
     accepted_clean = clean[clean["accepted"] == True]      # noqa: E712
 
@@ -109,8 +115,8 @@ def compute_metrics(df: pd.DataFrame) -> MetricsBundle:
 
 
 def per_experiment_metrics(df: pd.DataFrame) -> pd.DataFrame:
-    """Coverage / MAE per experiment on clean segments."""
-    sub = df[df["signal_clear"] == True]                   # noqa: E712
+    """Coverage / MAE per experiment over the active noise subset."""
+    sub = df
     rows = []
     for exp, grp in sub.groupby("exp_name"):
         if grp.empty: continue
