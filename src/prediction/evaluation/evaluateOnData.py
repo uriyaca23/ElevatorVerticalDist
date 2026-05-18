@@ -1,33 +1,75 @@
 """Reproducible Δh-prediction evaluation across an experiment subset.
 
 Loads every elevator segment surviving the requested filters, runs the
-two accelerometer-only predictors (ZUPT + trapezoid) on them, refits the
-conformal calibrator on the train half (when train segments are
-present), then renders the per-algorithm figure bundle that
-``docs/latex/prediction_sections.tex`` consumes (scatter, error CDF,
-per-segment CI bars, coverage-by-distance bins, reliability diagram,
-signed-error scatter, …) plus the cross-algorithm comparison CDF on
-both train and test halves.
+two accelerometer-only predictors (ZUPT + trapezoid) on them, fits (or
+loads) the conformal calibrator, then renders the per-algorithm figure
+bundle (scatter, error CDF, per-segment CI bars, coverage-by-distance
+bins, reliability diagram, signed-error scatter, …) plus the
+cross-algorithm comparison CDF.
+
+``--kind`` picks which experiments feed the run — ``train``, ``test`` or
+``all`` — and the run works on exactly that data, mirroring the
+segmentation and pipeline evaluators. Every run renders three figure
+bundles — for the full set and the clean / noisy subsets — into ``all/``,
+``clean/`` and ``noisy/`` sub-directories, so one run shows prediction
+accuracy on each noise class. ``signal_clear`` is sourced from
+``signalClearRecording`` in gt.csv.
+
+Conformal calibration is fit once on the resolved segments and applied
+to all three subsets. Pass ``--calibration-dir`` to load an existing
+``calibration_<algo>.json`` bundle instead (the held-out workflow: one
+``--kind train`` run produces the calibration, a second
+``--kind test --calibration-dir <that run>`` scores the test half).
 
 Typical usage::
 
+    # 1. Defaults: every source, train+test, refit calibration
     venv/bin/python -m src.prediction.evaluation.evaluateOnData
+
+    # 2. One source only
     venv/bin/python -m src.prediction.evaluation.evaluateOnData \\
-        --kind train --source experiment \\
+        --source experiment
+
+    # 3. Two sources (Ido + real-world)
+    venv/bin/python -m src.prediction.evaluation.evaluateOnData \\
+        --source ido --source real_world
+
+    # 4. Train half only (refit + score on the train experiments)
+    venv/bin/python -m src.prediction.evaluation.evaluateOnData \\
+        --kind train --source experiment
+
+    # 5. Test half, reusing a calibration produced by an earlier run
+    venv/bin/python -m src.prediction.evaluation.evaluateOnData \\
+        --kind test \\
+        --calibration-dir elevator_reports/pred_eval/run_<earlier-train>
+
+    # 6. Drop a known-bad experiment
+    venv/bin/python -m src.prediction.evaluation.evaluateOnData \\
+        --source experiment \\
         --exclude UriyaCohenEliya_BarIlan2Herzelia_Pixel10_24-3-2026
 
-A timestamped ``run_YYYYMMDD-HHMMSS/`` directory is created under
-``--out-root`` (default ``elevator_reports/pred_eval``). It contains:
+    # 7. Whitelist a couple of experiments
+    venv/bin/python -m src.prediction.evaluation.evaluateOnData \\
+        --include eyalyakir_milleniumHotel_SamsungSM-A235F_15-04-2026_exp1 \\
+                  UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp1
+
+    # 8. Custom output root + stable run name
+    venv/bin/python -m src.prediction.evaluation.evaluateOnData \\
+        --source experiment \\
+        --out-root /tmp/pred_eval --run-name source_experiment_only
+
+Each invocation writes a timestamped directory ``run_YYYYMMDD-HHMMSS/``
+under ``--out-root`` (default ``elevator_reports/pred_eval``):
 
 * ``run_settings.json``           — every flag, resolved experiments,
                                     active config dump.
-* ``train/figures_<algo>/``       — per-algo figure bundle.
-* ``test/figures_<algo>/``        — same on the held-out test half.
-* ``train/predictions_<algo>.csv``, ``test/predictions_<algo>.csv``.
-* ``train/per_experiment_<algo>.csv`` (and the test mirror).
-* ``train/calibration_<algo>.json`` — refit conformal checkpoint.
-* ``train/fig_compare_algorithms.png`` (and test mirror).
-* ``metrics.json``                — aggregate :class:`MetricsBundle`.
+* ``calibration_<algo>.json``     — conformal checkpoint (refit runs).
+* ``all/`` ``clean/`` ``noisy/``  — one sub-directory per noise subset,
+  each holding ``predictions_<algo>.csv``, ``per_experiment_<algo>.csv``,
+  ``figures_<algo>/`` (per-algorithm figure bundle) and
+  ``fig_compare_algorithms.png``.
+* ``metrics.json``                — aggregate :class:`MetricsBundle`
+                                    per subset per algorithm.
 """
 
 from __future__ import annotations
@@ -37,6 +79,7 @@ import datetime as _dt
 import json
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 
@@ -67,21 +110,20 @@ from .runner import (
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUT_ROOT = REPO_ROOT / "elevator_reports" / "pred_eval"
-DEFAULT_LATEX_OUT = REPO_ROOT / "docs" / "latex" / "results_noise_prediction.tex"
 
 ALGORITHMS: dict[str, PredictAlgorithm] = {
     "zupt":      PredictAlgorithm.ZUPT_ACCEL,
     "trapezoid": PredictAlgorithm.TRAPEZOID_ACCEL,
 }
 
-# (label, predicate over SegmentRecord) — the three noise passes the
-# evaluation always runs side-by-side. ``signal_clear`` is sourced from
-# ``signalClearRecording`` in gt.csv (True == clean recording).
-NOISE_PASSES: list[tuple[str, callable]] = [
-    ("clean", lambda r: bool(r.signal_clear)),
-    ("noisy", lambda r: not bool(r.signal_clear)),
-    ("both",  lambda r: True),
-]
+# Noise subsets rendered every run. Each selector slices a prediction
+# DataFrame by its ``signal_clear`` column (True == clean recording,
+# sourced from gt.csv:signalClearRecording).
+NOISE_SUBSETS: dict[str, Callable[[pd.DataFrame], pd.DataFrame]] = {
+    "all":   lambda df: df,
+    "clean": lambda df: df[df["signal_clear"] == True],   # noqa: E712
+    "noisy": lambda df: df[df["signal_clear"] == False],  # noqa: E712
+}
 
 
 # --------------------------------------------------------------------------
@@ -116,7 +158,7 @@ def _resolve_experiments(
             if src not in sources:
                 continue
         out.append(name)
-    return out
+    return sorted(out)
 
 
 def _load_records(experiments: list[str], verbose: bool):
@@ -130,36 +172,27 @@ def _load_records(experiments: list[str], verbose: bool):
 
 
 # --------------------------------------------------------------------------
-# Per-half runner
+# Evaluation runner
 # --------------------------------------------------------------------------
-def _run_split(
-    split_name: str,
+def _run_evaluation(
     records: list,
-    split_dir: Path,
+    run_dir: Path,
     *,
     refit_calibration: bool,
     calibration_dir: Path | None = None,
-) -> tuple[dict[str, pd.DataFrame], dict[str, dict]]:
-    """Run every algorithm on ``records`` and dump figures + CSVs.
+) -> dict[str, dict]:
+    """Predict with each algorithm, then write a figure bundle + metrics
+    for the full set and the clean / noisy subsets, each into its own
+    ``all/`` / ``clean/`` / ``noisy/`` sub-directory of ``run_dir``.
 
-    When ``refit_calibration`` is True, the conformal multiplier is
-    refit on the supplied records and persisted alongside the figures.
-    Otherwise we expect a calibration JSON to already exist under
-    ``calibration_dir``; passing ``None`` falls back to the algorithm's
-    default multiplier (1.645).
+    Conformal calibration is fit once on ``records`` (or loaded from
+    ``calibration_dir``) and applied to all three subsets.
     """
-    split_dir.mkdir(parents=True, exist_ok=True)
-    dfs: dict[str, pd.DataFrame] = {}
-    summary: dict[str, dict] = {}
-
-    if not records:
-        return dfs, summary
-
+    # 1. predict once per algorithm on the full resolved record set
+    full_dfs: dict[str, pd.DataFrame] = {}
+    calibs: dict[str, dict | None] = {}
     for algo_name, algo_enum in ALGORITHMS.items():
-        fig_dir = split_dir / f"figures_{algo_name}"
-        fig_dir.mkdir(exist_ok=True)
-        print(f"\n[{split_name}][{algo_name}] predicting on "
-              f"{len(records)} segments ...")
+        print(f"\n[{algo_name}] predicting on {len(records)} segments ...")
         t0 = time.time()
         p = Predictor(PREDICT_ALGORITHM_CONFIG(algorithm=algo_enum))
 
@@ -167,45 +200,65 @@ def _run_split(
             preds = run_predictions(p, records)
             calib = p.calibrate(to_calibration_samples(preds))
             print(f"  conformal fit: {calib}")
-            calib_path = split_dir / f"calibration_{algo_name}.json"
-            p.save_calibration(calib_path)
+            p.save_calibration(run_dir / f"calibration_{algo_name}.json")
         else:
             calib = None
             if calibration_dir is not None:
                 calib_path = calibration_dir / f"calibration_{algo_name}.json"
                 if calib_path.exists():
                     p.load_calibration(calib_path)
-                    print(f"  loaded calibration from {calib_path.name}")
+                    print(f"  loaded calibration from {calib_path}")
                 else:
                     print(f"  [warn] no calibration at {calib_path}; "
                           "using algorithm default multiplier")
 
         # Re-run inference so CIs reflect the active multiplier.
         preds_cal = run_predictions(p, records)
-        df = collect_predictions(preds_cal)
-        dfs[algo_name] = df
-        df.to_csv(split_dir / f"predictions_{algo_name}.csv", index=False)
+        full_dfs[algo_name] = collect_predictions(preds_cal)
+        calibs[algo_name] = calib
+        print(f"  done ({time.time() - t0:.1f}s)")
 
-        metrics = asdict(compute_metrics(df))
-        summary[algo_name] = {"calibration": calib, "metrics": metrics}
-        print(f"  clean coverage={metrics['clean_coverage_90']:.1%} "
-              f"accepted-clean coverage={metrics['accepted_clean_coverage_90']:.1%} "
-              f"median |err|={metrics['clean_median_abs_err']:.2f}m "
-              f"median CI=±{metrics['clean_median_ci']:.2f}m "
-              f"({time.time() - t0:.1f}s)")
+    # 2. one figure bundle + metrics per noise subset, in its own subdir
+    summary: dict[str, dict] = {}
+    for subset, select in NOISE_SUBSETS.items():
+        sub_dir = run_dir / subset
+        sub_dir.mkdir(parents=True, exist_ok=True)
+        sub_dfs: dict[str, pd.DataFrame] = {}
+        algo_summary: dict[str, dict] = {}
 
-        per_exp = per_experiment_metrics(df)
-        per_exp.to_csv(split_dir / f"per_experiment_{algo_name}.csv",
-                       index=False)
-        save_all_figures(df, fig_dir,
-                         label=f"{algo_name.upper()} / {split_name.upper()}")
+        for algo_name in ALGORITHMS:
+            df = select(full_dfs[algo_name])
+            df.to_csv(sub_dir / f"predictions_{algo_name}.csv", index=False)
+            if df.empty:
+                algo_summary[algo_name] = {
+                    "calibration": calibs[algo_name],
+                    "n_segments": 0, "note": "empty subset",
+                }
+                continue
+            sub_dfs[algo_name] = df
+            algo_summary[algo_name] = {
+                "calibration": calibs[algo_name],
+                "n_segments": int(len(df)),
+                "metrics": asdict(compute_metrics(df)),
+            }
+            per_experiment_metrics(df).to_csv(
+                sub_dir / f"per_experiment_{algo_name}.csv", index=False)
+            fig_dir = sub_dir / f"figures_{algo_name}"
+            fig_dir.mkdir(exist_ok=True)
+            save_all_figures(df, fig_dir,
+                             label=f"{algo_name.upper()} / {subset.upper()}")
 
-    fig_compare_algorithms(
-        {k.upper(): v for k, v in dfs.items()},
-        split_dir / f"fig_compare_algorithms_{split_name}.png",
-        title=f"{split_name.title()} — algorithm comparison (clean only)",
-    )
-    return dfs, summary
+        if sub_dfs:
+            fig_compare_algorithms(
+                {k.upper(): v for k, v in sub_dfs.items()},
+                sub_dir / "fig_compare_algorithms.png",
+                title=f"{subset.title()} — algorithm comparison (clean only)",
+            )
+        n_seg = max((len(d) for d in sub_dfs.values()), default=0)
+        print(f"  [{subset}] {n_seg} segments → {sub_dir}")
+        summary[subset] = algo_summary
+
+    return summary
 
 
 # --------------------------------------------------------------------------
@@ -215,21 +268,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="evaluateOnData",
         description="Reproducible prediction evaluation: filter "
-                    "experiments, run ZUPT + trapezoid predictors, refit "
-                    "conformal, and render every figure consumed by the "
-                    "prediction subsection of docs/latex/main.tex.",
+                    "experiments, run ZUPT + trapezoid predictors, fit or "
+                    "load conformal calibration, and render every "
+                    "evaluation figure into the run directory.",
     )
     p.add_argument(
         "--kind", default="all",
         choices=("all", *EXPERIMENT_TYPES),
-        help="Restrict to train, test, or all experiments. With 'all' "
-             "(default) the script refits calibration on the train half "
-             "and applies it to the test half.",
+        help="Which experiments to run on — train, test, or all "
+             "(default). The run works on exactly that data.",
     )
     p.add_argument(
         "--source", action="append", default=None,
-        choices=list(VALID_SOURCES),
-        help="Filter by metadata.source — repeatable.",
+        choices=[*VALID_SOURCES, "all"],
+        help="Filter by metadata.source — repeatable. Pass 'all' (or "
+             "omit the flag) to keep every source.",
     )
     p.add_argument(
         "--include", nargs="*", default=None,
@@ -240,17 +293,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Drop these experiment names from the run.",
     )
     p.add_argument(
-        "--mode", default="auto",
-        choices=("auto", "train", "test"),
-        help="auto = refit on train + apply to test (default). train = "
-             "only refit/score on the train half. test = only run on the "
-             "test half, expecting --calibration-dir to point at an "
-             "existing calibration_*.json bundle.",
-    )
-    p.add_argument(
         "--calibration-dir", type=Path, default=None,
-        help="Directory holding calibration_<algo>.json checkpoints "
-             "(used when --mode test).",
+        help="Directory holding calibration_<algo>.json checkpoints. When "
+             "given, calibration is loaded from it instead of refit on "
+             "the resolved segments (the held-out test workflow).",
     )
     p.add_argument(
         "--out-root", type=Path, default=DEFAULT_OUT_ROOT,
@@ -260,115 +306,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--run-name", default=None,
         help="Override the timestamp folder name.",
     )
-    p.add_argument(
-        "--latex-out", type=Path, default=DEFAULT_LATEX_OUT,
-        help=(
-            "Where to write the LaTeX results snippet that main.tex "
-            f"\\inputs (default: {DEFAULT_LATEX_OUT}). Pass empty string "
-            "to skip the snippet."
-        ),
-    )
     p.add_argument("--verbose", action="store_true")
-    return p.parse_args(argv)
-
-
-def _latex_relpath(target: Path, latex_file: Path) -> str:
-    """Return a path string usable inside ``latex_file`` to reference ``target``.
-
-    LaTeX resolves \\includegraphics paths relative to the master document's
-    directory; we walk it up to a common ancestor with the absolute target
-    path. Falls back to the absolute path when no common ancestor exists.
-    """
-    try:
-        rel = Path(target).resolve().relative_to(
-            Path(latex_file).resolve().parent
-        )
-        return rel.as_posix()
-    except ValueError:
-        # Different drives / no common ancestor — try repo-root-relative,
-        # else give an absolute path.
-        try:
-            return ("../" * len(latex_file.resolve().parent.relative_to(REPO_ROOT).parts)
-                    + Path(target).resolve().relative_to(REPO_ROOT).as_posix())
-        except ValueError:
-            return Path(target).resolve().as_posix()
-
-
-def _write_latex_snippet(
-    latex_path: Path,
-    run_dir: Path,
-    args: argparse.Namespace,
-    pass_dirs: dict[str, Path],
-    pass_summaries: dict[str, dict],
-) -> None:
-    """Emit a self-contained LaTeX section to ``latex_path``.
-
-    The section walks the three noise passes and includes the headline
-    per-duration / per-distance figures for the deployed *trapezoid*
-    algorithm, on the split that exists (test if available, else train).
-    """
-    if not latex_path:
-        return
-    latex_path.parent.mkdir(parents=True, exist_ok=True)
-
-    source = ", ".join(args.source) if args.source else "all sources"
-    kind = args.kind
-    figs_to_show = [
-        ("cov_bins",          r"Coverage by $|\Delta h|$ bin"),
-        ("cov_bins_duration", r"Coverage by ride-duration bin"),
-        ("err_vs_duration",   r"$\Delta h$ error by ride-duration bin"),
-        ("cdf",               r"Error CDF"),
-    ]
-
-    lines: list[str] = []
-    lines.append(r"% Auto-generated by src.prediction.evaluation.evaluateOnData.")
-    lines.append(r"% Do not edit by hand; re-run the evaluation to refresh.")
-    lines.append(r"\section{Prediction --- results on clean vs.\ noisy data}")
-    lines.append(rf"\noindent\textit{{Source filter: {source}.\quad Kind: {kind}.\quad "
-                 rf"Run: \texttt{{{run_dir.name}}}.}}")
-    lines.append("")
-
-    for pass_name in ("clean", "noisy", "both"):
-        if pass_name not in pass_dirs:
-            continue
-        pass_dir = pass_dirs[pass_name]
-        # Prefer test (held-out) figures; fall back to train if missing.
-        candidate = pass_dir / "test" / "figures_trapezoid"
-        split_label = "test"
-        if not candidate.exists():
-            candidate = pass_dir / "train" / "figures_trapezoid"
-            split_label = "train"
-        if not candidate.exists():
-            lines.append(rf"\subsection*{{Noise subset: {pass_name} --- no figures rendered}}")
-            lines.append("")
-            continue
-
-        summary = pass_summaries.get(pass_name, {}).get(split_label, {})
-        metrics = (summary.get("trapezoid", {}) or {}).get("metrics", {})
-        cov = metrics.get("clean_coverage_90", float("nan"))
-        med = metrics.get("clean_median_abs_err", float("nan"))
-        n   = metrics.get("n_clean", 0)
-        lines.append(
-            rf"\subsection*{{Noise subset: {pass_name} ({split_label} split, "
-            rf"n={n}, coverage={cov:.1%}, median $|err|$={med:.2f}\,m)}}"
-        )
-        lines.append(r"\begin{figure}[H]\centering")
-        for key, caption in figs_to_show:
-            img = candidate / f"fig_{key}.png"
-            if not img.exists():
-                continue
-            rel = _latex_relpath(img, latex_path)
-            lines.append(
-                rf"  \includegraphics[width=0.48\linewidth]{{{rel}}}\hfill"
-            )
-        lines.append(rf"  \caption{{{pass_name.title()} subset --- coverage and error "
-                     rf"by $|\Delta h|$ and ride duration (trapezoid, {split_label}).}}")
-        lines.append(rf"  \label{{fig:pred-noise-{pass_name}}}")
-        lines.append(r"\end{figure}")
-        lines.append("")
-
-    latex_path.write_text("\n".join(lines))
-    print(f"\nLaTeX snippet → {latex_path}")
+    args = p.parse_args(argv)
+    # 'all' is a convenience alias for "no source filter".
+    if args.source and "all" in args.source:
+        args.source = None
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -379,16 +322,11 @@ def main(argv: list[str] | None = None) -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
     print(f"writing run artefacts under {run_dir}")
 
-    # --- resolve experiments per split ---
-    train_exps = (_resolve_experiments(
-        kind="train", sources=args.source,
+    experiments = _resolve_experiments(
+        kind=args.kind, sources=args.source,
         include=args.include, exclude=args.exclude,
-    ) if args.kind in ("all", "train") else [])
-    test_exps = (_resolve_experiments(
-        kind="test", sources=args.source,
-        include=args.include, exclude=args.exclude,
-    ) if args.kind in ("all", "test") else [])
-    if not train_exps and not test_exps:
+    )
+    if not experiments:
         print("no experiments survived filtering; nothing to do",
               file=sys.stderr)
         return 1
@@ -410,81 +348,45 @@ def main(argv: list[str] | None = None) -> int:
                  for k, v in vars(args).items()},
         "configs": cfg_dump,
         "experiments": {
-            "train": train_exps, "test": test_exps,
-            "n_train": len(train_exps), "n_test": len(test_exps),
+            "names": experiments,
+            "n": len(experiments),
         },
-        "noise_passes": [p for p, _ in NOISE_PASSES],
+        "kind": args.kind,
     }
     (run_dir / "run_settings.json").write_text(
         json.dumps(settings, indent=2, default=str)
     )
 
-    # --- load segments per split (once; the noise loop only filters) ---
-    print(f"\nloading segments  (train={len(train_exps)} exps, "
-          f"test={len(test_exps)} exps)")
+    # --- load segments for the resolved experiments ---
+    print(f"\nloading segments  ({len(experiments)} experiments)")
     t0 = time.time()
-    train_records = _load_records(train_exps, args.verbose) if train_exps else []
-    test_records  = _load_records(test_exps,  args.verbose) if test_exps  else []
-    print(f"  → {len(train_records)} train segments, "
-          f"{len(test_records)} test segments "
-          f"({time.time() - t0:.1f}s)")
+    records = _load_records(experiments, args.verbose)
+    print(f"  → {len(records)} segments ({time.time() - t0:.1f}s)")
+    if not records:
+        print("no segments after filtering; nothing to do", file=sys.stderr)
+        return 2
 
-    n_train_clean = sum(1 for r in train_records if r.signal_clear)
-    n_test_clean  = sum(1 for r in test_records  if r.signal_clear)
-    print(f"  signal_clear: train={n_train_clean}/{len(train_records)} "
-          f"test={n_test_clean}/{len(test_records)}")
-
-    # --- 3-pass noise loop ---
-    pass_dirs: dict[str, Path] = {}
-    pass_summaries: dict[str, dict] = {}
-    for pass_name, keep in NOISE_PASSES:
-        pass_dir = run_dir / pass_name
-        pass_dir.mkdir(parents=True, exist_ok=True)
-        pass_dirs[pass_name] = pass_dir
-        train_sub = [r for r in train_records if keep(r)]
-        test_sub  = [r for r in test_records  if keep(r)]
-        print(f"\n=== noise pass: {pass_name}  "
-              f"(train={len(train_sub)}, test={len(test_sub)}) ===")
-
-        summary: dict = {}
-        if args.mode in ("auto", "train") and train_sub:
-            train_dir = pass_dir / "train"
-            _, train_metrics = _run_split(
-                "train", train_sub, train_dir,
-                refit_calibration=True,
-            )
-            summary["train"] = train_metrics
-
-        if args.mode in ("auto", "test") and test_sub:
-            test_dir = pass_dir / "test"
-            if args.mode == "auto":
-                calib_dir = pass_dir / "train"
-            else:
-                if args.calibration_dir is None:
-                    print("--mode test requires --calibration-dir; using "
-                          "default multiplier", file=sys.stderr)
-                    calib_dir = None
-                else:
-                    calib_dir = args.calibration_dir
-            _, test_metrics = _run_split(
-                "test", test_sub, test_dir,
-                refit_calibration=False,
-                calibration_dir=calib_dir,
-            )
-            summary["test"] = test_metrics
-
-        (pass_dir / "metrics.json").write_text(
-            json.dumps(summary, indent=2, default=str)
-        )
-        pass_summaries[pass_name] = summary
-
-    (run_dir / "metrics.json").write_text(
-        json.dumps(pass_summaries, indent=2, default=str)
+    # --- refit calibration on the resolved segments, or load an
+    # existing bundle when --calibration-dir is given ---
+    refit = args.calibration_dir is None
+    if refit:
+        print("refitting conformal calibration on the resolved segments")
+    else:
+        print(f"loading conformal calibration from {args.calibration_dir}")
+    summary = _run_evaluation(
+        records, run_dir,
+        refit_calibration=refit, calibration_dir=args.calibration_dir,
     )
 
-    if str(args.latex_out):
-        _write_latex_snippet(args.latex_out, run_dir, args,
-                             pass_dirs, pass_summaries)
+    metrics = {
+        "kind": args.kind,
+        "calibration_refit": refit,
+        "n_segments": len(records),
+        "by_noise": summary,
+    }
+    (run_dir / "metrics.json").write_text(
+        json.dumps(metrics, indent=2, default=str)
+    )
 
     print(f"\nartefacts: {run_dir}")
     return 0

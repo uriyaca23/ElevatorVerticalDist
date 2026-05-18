@@ -1,24 +1,69 @@
 """Reproducible segmentation evaluation across an experiment subset.
 
 Runs the active accelerometer-only template-match detector against every
-experiment that survives the requested filters, then renders the figures
-that appear in the *Segmentation & Detection / Evaluation* subsection of
-``docs/latex/main.tex`` (failure-mode bars, IoU CDF/PDF, per-experiment
-stack, phone-model breakdown, three picked timelines) and the headline
-``IntervalPredictionMetrics`` for train / test / pooled / cleaned-pooled.
+experiment that survives the requested filters, then renders the
+evaluation figures (failure-mode bars, IoU CDF/PDF, per-experiment
+stack, phone-model breakdown, three picked timelines) plus a
+``metrics.json`` with the run's full interval metrics and a GT-side
+detection breakdown by noise class (clean vs noisy rides).
+
+Segmentation always runs on the full resolved experiment set — there is
+no noise filter. ``metrics.json`` reports the run's ``overall`` interval
+metrics and, under ``by_noise``, how many clean vs noisy GT rides the
+detector caught — so one run shows its accuracy on each noise class.
+False positives stay in ``overall`` only: a prediction that matches no
+GT ride cannot be attributed to a noise class. ``--kind`` / ``--source``
+/ ``--include`` / ``--exclude`` pick *which experiments* feed the run.
 
 Typical usage::
 
+    # 1. Defaults: every source, train+test
     venv/bin/python -m src.segmentation.evaluate.evaluateOnData
+
+    # 2. One source only
     venv/bin/python -m src.segmentation.evaluate.evaluateOnData \\
-        --kind train --source experiment \\
+        --source experiment
+
+    # 3. Two sources (Ido + real-world, skip lab experiments)
+    venv/bin/python -m src.segmentation.evaluate.evaluateOnData \\
+        --source ido --source real_world
+
+    # 4. Train only / test only
+    venv/bin/python -m src.segmentation.evaluate.evaluateOnData --kind train
+    venv/bin/python -m src.segmentation.evaluate.evaluateOnData --kind test
+
+    # 5. Test split, Ido source
+    venv/bin/python -m src.segmentation.evaluate.evaluateOnData \\
+        --kind test --source ido
+
+    # 6. Drop a known-bad experiment
+    venv/bin/python -m src.segmentation.evaluate.evaluateOnData \\
+        --source experiment \\
         --exclude UriyaCohenEliya_BarIlan2Herzelia_Pixel10_24-3-2026
 
+    # 7. Whitelist a couple of experiments
+    venv/bin/python -m src.segmentation.evaluate.evaluateOnData \\
+        --include eyalyakir_milleniumHotel_SamsungSM-A235F_15-04-2026_exp1 \\
+                  UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp1
+
+    # 8. Custom output root + stable run name (no timestamp)
+    venv/bin/python -m src.segmentation.evaluate.evaluateOnData \\
+        --source experiment \\
+        --out-root /tmp/seg_eval --run-name source_experiment_only
+
+    # 9. Run a different detector (e.g. the pressure-filter fallback)
+    venv/bin/python -m src.segmentation.evaluate.evaluateOnData \\
+        --algorithm pressure_filter
+
 Each invocation writes a timestamped directory ``run_YYYYMMDD-HHMMSS/``
-under ``--out-root`` (default ``elevator_reports/seg_eval``) containing
-the figures, ``run_settings.json`` (every CLI flag, the resolved
-experiment list, the active config dump), ``metrics.json``, and
-``per_experiment.csv``.
+under ``--out-root`` (default ``elevator_reports/seg_eval``). Every
+figure, ``per_experiment.csv``, ``metrics.json`` and ``run_settings.json``
+is written flat into that one folder — no sub-directories. The figure
+bundle is rendered three times — for the full set and for the clean /
+noisy subsets — with ``_clean`` / ``_noisy`` filename suffixes (the
+full set carries no suffix). ``metrics.json`` holds the run's
+``overall`` metrics plus a ``by_noise`` detection breakdown (clean vs
+noisy GT rides).
 """
 
 from __future__ import annotations
@@ -50,23 +95,11 @@ from . import evaluator, plots as live_plots, report_plots
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUT_ROOT = REPO_ROOT / "elevator_reports" / "seg_eval"
-DEFAULT_LATEX_OUT = REPO_ROOT / "docs" / "latex" / "results_noise_segmentation.tex"
 ITER16_PER_GT_CSV = (
     REPO_ROOT
     / "src" / "segmentation" / "algorithms" / "improvement_iterations"
     / "iter_16_lower_peak_a" / "per_gt.csv"
 )
-
-# (label, keep_clean) — None == both. Filters _ExpResult.gt_rides by the
-# ``signal_clear`` flag the evaluator now carries on each GT dict (sourced
-# from gt.csv:signalClearRecording). Predictions stay the same across
-# passes; matching is re-run per pass so unmatched preds become FPs of
-# the active subset.
-NOISE_PASSES: list[tuple[str, "bool | None"]] = [
-    ("clean", True),
-    ("noisy", False),
-    ("both",  None),
-]
 
 
 # --------------------------------------------------------------------------
@@ -150,44 +183,19 @@ def _resolve_experiments(
             if src not in sources:
                 continue
         out.append(name)
-    return out
+    return sorted(out)
 
 
 # --------------------------------------------------------------------------
-# Per-split + cleaned aggregation
+# Aggregation
 # --------------------------------------------------------------------------
-def _evaluate_subset(
-    cfg: SEGMENT_ALGORITHM_CONFIG,
-    experiments: list[str],
-    out_dir: Path,
-    label: str,
-):
-    """Run the detector on ``experiments`` and dump live-plot bundle.
-
-    Returns ``(raw, per_exp, total, iou, matched_pairs)`` so the caller
-    can assemble pooled and cleaned-pooled views without re-running.
-    """
-    out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"\n[{label}] {len(experiments)} experiments")
-    raw = evaluator._run_on_experiments(cfg, experiments, verbose=True)
-
-    per_exp = [
-        (e.name,
-         IntervalPredictionMetrics.from_intervals(e.gt_rides, e.preds))
-        for e in raw
-    ]
-    total = IntervalPredictionMetrics.sum(m for _, m in per_exp)
-    pooled_gt, pooled_pred = evaluator._pool_intervals(raw)
-    iou_metrics = IntervalPredictionMetrics.iou_f1(
-        pooled_gt, pooled_pred, iou_threshold=0.5,
-    )
-    matched_pairs = evaluator._collect_matched_pairs(raw)
-    live_plots.render_all(matched_pairs, total, out_dir)
-
-    return raw, per_exp, total, iou_metrics, matched_pairs
-
-
 def _aggregate_filtered(raw_results, exclude_set: set[str]):
+    """Compute ``(per_exp, total, iou, matched_pairs)`` from raw results.
+
+    ``exclude_set`` drops experiments by name — pass an empty set for the
+    plain aggregate, or the ``--cleaned-exclude`` list for the cleaned
+    outlier-removal view.
+    """
     kept = [e for e in raw_results if e.name not in exclude_set]
     per_exp = [
         (e.name,
@@ -209,9 +217,11 @@ def _filter_raw_by_noise(
     """Return a copy of ``raw_results`` with ``gt_rides`` filtered by noise.
 
     ``keep_clean`` is ``True`` to retain only ``signal_clear==True`` GTs,
-    ``False`` for the opposite, ``None`` to keep everything. Predictions
-    are left untouched: matching is re-run downstream so preds that no
-    longer match anyone in the filtered GT set become FPs of the subset.
+    ``False`` for the opposite, ``None`` to keep everything. The
+    ``signal_clear`` flag is set by the evaluator from the gt.csv column
+    ``signalClearRecording``. Predictions are left untouched so a GT
+    ride's detected/missed status is unchanged by the filter — used to
+    score clean vs noisy GT rides independently within one run.
     """
     if keep_clean is None:
         return list(raw_results)
@@ -225,15 +235,6 @@ def _filter_raw_by_noise(
             name=e.name, gt_rides=filtered_gt, preds=list(e.preds),
         ))
     return out
-
-
-def _aggregate_raw(raw_results):
-    """Compute (per_exp, total, iou, matched_pairs) from a raw list.
-
-    Identical to the no-exclude path of :func:`_aggregate_filtered`, but
-    keeps the call site readable for the noise-pass loop.
-    """
-    return _aggregate_filtered(raw_results, exclude_set=set())
 
 
 # --------------------------------------------------------------------------
@@ -261,7 +262,6 @@ def _pick_timeline_examples(per_exp_pool, raw_pool):
 def _per_exp_csv(per_exp, out_path: Path) -> None:
     rows = []
     for name, m in per_exp:
-        r = m.rates()
         rows.append({
             "exp": name, "label": _short_label(name),
             "kind": classify_experiment_type(name),
@@ -277,6 +277,161 @@ def _metrics_payload(label: str, total, iou, n_exp):
     }
 
 
+def _detection_line(label: str, n_gt: int, missed: int, extra: str = "") -> str:
+    """One-line console summary of GT-side detection for a noise class."""
+    if not n_gt:
+        return f"  {label:7s}: (no GT rides in this run)"
+    detected = n_gt - missed
+    return (f"  {label:7s}: gt={n_gt} detected={detected} missed={missed} "
+            f"rate={detected / n_gt:.1%}{extra}")
+
+
+# --------------------------------------------------------------------------
+# Rendering
+# --------------------------------------------------------------------------
+def _render_figures(
+    raw: list,
+    run_dir: Path,
+    suffix: str,
+    phone_for_exp: dict[str, str],
+) -> None:
+    """Render the full figure bundle for one noise subset of ``raw``.
+
+    ``suffix`` ("" / "_clean" / "_noisy") is appended to every filename
+    so the three subsets share one flat run directory.
+    """
+    per_exp, total, _iou, pairs = _aggregate_filtered(raw, exclude_set=set())
+    label = suffix.lstrip("_") or "all"
+    print(f"  figures [{label}]: gt={total.n_gt}, pairs={len(pairs)}")
+
+    live_plots.render_all(pairs, total, run_dir, suffix=suffix)
+
+    if per_exp:
+        report_plots.per_experiment_failure_bar(
+            per_exp, run_dir / f"per_experiment_failure_bar{suffix}.png",
+            label_short={n: _short_label(n) for n, _ in per_exp},
+        )
+    if pairs:
+        report_plots.cdf_pdf_pair(
+            [p["iou"] for p in pairs],
+            title=f"IoU over matched pairs ({label})",
+            xlabel="IoU", out_path=run_dir / f"cdf_pdf_iou{suffix}.png",
+        )
+        report_plots.iou_vs_duration_scatter(
+            pairs, run_dir / f"iou_vs_duration{suffix}.png",
+        )
+        report_plots.pred_vs_gt_duration_scatter(
+            pairs, run_dir / f"pred_vs_gt_duration{suffix}.png",
+        )
+    if per_exp and phone_for_exp:
+        report_plots.phone_breakdown_bar(
+            per_exp, phone_for_exp, run_dir / f"phone_breakdown{suffix}.png",
+        )
+
+    # timelines (best / typical / worst) — picked from this subset
+    if per_exp and raw:
+        for tlabel, name, exp_result in _pick_timeline_examples(per_exp, raw):
+            try:
+                sensors, _, _ = getExperimentData(name)
+            except Exception as exc:
+                print(f"    [skip] timeline_{tlabel}{suffix}: {name} → {exc}")
+                continue
+            acc = sensors.get("ACC")
+            if acc is None or acc.empty:
+                continue
+            report_plots.per_experiment_timeline(
+                name, acc, exp_result.gt_rides, exp_result.preds,
+                run_dir / f"timeline_{tlabel}{suffix}.png",
+            )
+
+    if per_exp:
+        _per_exp_csv(per_exp, run_dir / f"per_experiment{suffix}.csv")
+
+
+def _render_run(
+    run_dir: Path,
+    raw: list,
+    kind_label: str,
+    phone_for_exp: dict[str, str],
+    cleaned_exclude: set[str],
+) -> dict:
+    """Render figure bundles for the full set + the clean / noisy
+    subsets (flat, ``_clean`` / ``_noisy`` filename suffixes), then
+    assemble the dict written to ``metrics.json``.
+    """
+    print("rendering figure sets — all / clean / noisy:")
+    for suffix, keep in (("", None), ("_clean", True), ("_noisy", False)):
+        _render_figures(_filter_raw_by_noise(raw, keep),
+                        run_dir, suffix, phone_for_exp)
+
+    per_exp, total, iou, _ = _aggregate_filtered(raw, exclude_set=set())
+
+    # cleaned aggregate — an orthogonal outlier-removal view (full set
+    # only); renders parallel ``*_cleaned`` figures into the flat folder.
+    cleaned_payload = None
+    if cleaned_exclude and raw:
+        print(f"cleaned aggregate (excluded: {sorted(cleaned_exclude)})")
+        c_per_exp, c_total, c_iou, c_pairs = _aggregate_filtered(
+            raw, cleaned_exclude,
+        )
+        if c_per_exp:
+            report_plots.per_experiment_failure_bar(
+                c_per_exp, run_dir / "per_experiment_failure_bar_cleaned.png",
+                label_short={n: _short_label(n) for n, _ in c_per_exp},
+            )
+        if c_pairs:
+            report_plots.cdf_pdf_pair(
+                [p["iou"] for p in c_pairs],
+                title="IoU over matched pairs (cleaned set)",
+                xlabel="IoU", out_path=run_dir / "cdf_pdf_iou_cleaned.png",
+            )
+            report_plots.iou_vs_duration_scatter(
+                c_pairs, run_dir / "iou_vs_duration_cleaned.png",
+            )
+        cleaned_payload = (
+            _metrics_payload("cleaned", c_total, c_iou, len(c_per_exp))
+            if c_per_exp else None
+        )
+
+    # metrics.json carries the run's full interval metrics (``overall``)
+    # plus a GT-side detection breakdown by the signal_clear flag
+    # (``by_noise`` → clean / noisy). Only GT-side numbers are split:
+    # ``detected`` / ``missed`` of a GT ride depend solely on whether a
+    # prediction overlaps *it*, so they partition cleanly by noise class.
+    # fp / precision do NOT — a false positive matches no GT ride at all,
+    # so it cannot be attributed to a class; those live in ``overall``.
+    by_noise: dict[str, dict] = {}
+    for lbl, keep in (("clean", True), ("noisy", False)):
+        sub = _filter_raw_by_noise(raw, keep)
+        _, s_total, _, _ = _aggregate_filtered(sub, set())
+        detected = s_total.n_gt - s_total.missed
+        by_noise[lbl] = {
+            "label": lbl,
+            "n_gt": s_total.n_gt,
+            "detected": detected,
+            "missed": s_total.missed,
+            "detection_rate": detected / s_total.n_gt if s_total.n_gt else 0.0,
+        }
+
+    print("\nnoise breakdown — GT rides detected per noise class:")
+    print(_detection_line(
+        "overall", total.n_gt, total.missed,
+        extra=(f"  [n_pred={total.n_pred} fp={total.fp} "
+               f"f1*={total.score():.3f}]") if total.n_gt else "",
+    ))
+    for lbl in ("clean", "noisy"):
+        d = by_noise[lbl]
+        print(_detection_line(lbl, d["n_gt"], d["missed"]))
+
+    metrics = {
+        "kind": kind_label,
+        "overall": _metrics_payload("overall", total, iou, len(per_exp)),
+        "by_noise": by_noise,
+        "cleaned": cleaned_payload,
+    }
+    return metrics
+
+
 # --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
@@ -284,9 +439,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="evaluateOnData",
         description="Reproducible segmentation evaluation: filter "
-                    "experiments, run the active detector, render every "
-                    "figure consumed by the segmentation subsection of "
-                    "docs/latex/main.tex.",
+                    "experiments, run the active detector, and render "
+                    "every evaluation figure into the run directory.",
     )
     p.add_argument(
         "--algorithm", default=SegmentAlgorithm.ACC_TEMPLATE_MATCH.value,
@@ -300,9 +454,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--source", action="append", default=None,
-        choices=list(VALID_SOURCES),
+        choices=[*VALID_SOURCES, "all"],
         help="Filter by metadata.source — repeat to allow multiple "
-             "(e.g. --source experiment --source ido). Default: any.",
+             "(e.g. --source experiment --source ido). Pass 'all' (or "
+             "omit the flag) to keep every source.",
     )
     p.add_argument(
         "--include", nargs="*", default=None,
@@ -319,9 +474,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp2",
             "eyalyakir_milleniumHotel_SamsungSM-A235F_15-04-2026_exp1",
         ),
-        help="Experiments excluded only from the *cleaned* aggregates "
+        help="Experiments excluded only from the *cleaned* aggregate "
              "(parallel of the 'after removing three outliers' panel). "
-             "Pass an empty list to skip the cleaned pass entirely.",
+             "Pass an empty list to skip the cleaned figures entirely.",
     )
     p.add_argument(
         "--out-root", type=Path, default=DEFAULT_OUT_ROOT,
@@ -332,258 +487,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--run-name", default=None,
         help="Override the timestamp folder name (used as-is).",
     )
-    p.add_argument(
-        "--latex-out", type=Path, default=DEFAULT_LATEX_OUT,
-        help=(
-            "LaTeX snippet path that main.tex \\inputs "
-            f"(default: {DEFAULT_LATEX_OUT}). Pass empty string to skip."
-        ),
-    )
-    return p.parse_args(argv)
-
-
-# --------------------------------------------------------------------------
-# LaTeX snippet
-# --------------------------------------------------------------------------
-def _latex_relpath(target: Path, latex_file: Path) -> str:
-    try:
-        return Path(target).resolve().relative_to(
-            Path(latex_file).resolve().parent
-        ).as_posix()
-    except ValueError:
-        try:
-            return ("../" * len(latex_file.resolve().parent.relative_to(REPO_ROOT).parts)
-                    + Path(target).resolve().relative_to(REPO_ROOT).as_posix())
-        except ValueError:
-            return Path(target).resolve().as_posix()
-
-
-def _write_latex_snippet(
-    latex_path: Path,
-    run_dir: Path,
-    args: argparse.Namespace,
-    pass_dirs: dict[str, Path],
-    pass_summaries: dict,
-) -> None:
-    if not latex_path:
-        return
-    latex_path.parent.mkdir(parents=True, exist_ok=True)
-    source = ", ".join(args.source) if args.source else "all sources"
-
-    lines: list[str] = []
-    lines.append(r"% Auto-generated by src.segmentation.evaluate.evaluateOnData.")
-    lines.append(r"\section{Segmentation --- results on clean vs.\ noisy data}")
-    lines.append(rf"\noindent\textit{{Source filter: {source}.\quad Kind: {args.kind}.\quad "
-                 rf"Run: \texttt{{{run_dir.name}}}.}}")
-    lines.append("")
-
-    fig_keys = [
-        ("cdf_pdf_iou.png",           r"Matched-pair IoU CDF/PDF"),
-        ("per_experiment_failure_bar.png", r"Per-experiment failure-mode breakdown"),
-        ("phone_breakdown.png",       r"Phone-model breakdown"),
-        ("iou_vs_duration.png",       r"IoU vs.\ ride duration"),
-    ]
-    for pass_name in ("clean", "noisy", "both"):
-        if pass_name not in pass_dirs:
-            continue
-        pass_dir = pass_dirs[pass_name]
-        s = pass_summaries.get(pass_name, {}).get("pooled")
-        if s is None:
-            sub_hdr = pass_name
-        else:
-            t = s["total"]
-            sub_hdr = (
-                f"{pass_name} (n\\_gt={t.get('n_gt', 0)}, "
-                f"clean={t.get('clean', 0)}, missed={t.get('missed', 0)}, "
-                f"fp={t.get('fp', 0)}, f1*={t.get('f1_like', 0):.3f})"
-            )
-        lines.append(rf"\subsection*{{Noise subset: {sub_hdr}}}")
-        lines.append(r"\begin{figure}[H]\centering")
-        for fname, _ in fig_keys:
-            img = pass_dir / fname
-            if not img.exists():
-                continue
-            rel = _latex_relpath(img, latex_path)
-            lines.append(
-                rf"  \includegraphics[width=0.48\linewidth]{{{rel}}}\hfill"
-            )
-        lines.append(rf"  \caption{{Segmentation, {pass_name} subset --- failure modes, "
-                     rf"IoU, and phone-model breakdown.}}")
-        lines.append(rf"  \label{{fig:seg-noise-{pass_name}}}")
-        lines.append(r"\end{figure}")
-        lines.append("")
-
-    latex_path.write_text("\n".join(lines))
-    print(f"\nLaTeX snippet → {latex_path}")
-
-
-def _render_pass(
-    pass_name: str,
-    pass_dir: Path,
-    train_raw_f: list,
-    test_raw_f: list,
-    phone_for_exp: dict[str, str],
-    cleaned_exclude: set[str],
-) -> dict:
-    """Aggregate + render every figure for one noise pass.
-
-    Mirrors the legacy main() flow but operates on noise-filtered
-    raw results. Cleaned-pooled is only computed when ``pass_name``
-    is ``"both"`` (the canonical outlier-removal view).
-    """
-    pass_dir.mkdir(parents=True, exist_ok=True)
-
-    train_per_exp = test_per_exp = []
-    train_total = test_total = None
-    train_iou = test_iou = None
-    train_pairs = test_pairs = []
-    if train_raw_f:
-        train_per_exp, train_total, train_iou, train_pairs = _aggregate_raw(train_raw_f)
-        sub = pass_dir / "train"; sub.mkdir(parents=True, exist_ok=True)
-        live_plots.render_all(train_pairs, train_total, sub)
-    if test_raw_f:
-        test_per_exp, test_total, test_iou, test_pairs = _aggregate_raw(test_raw_f)
-        sub = pass_dir / "test"; sub.mkdir(parents=True, exist_ok=True)
-        live_plots.render_all(test_pairs, test_total, sub)
-
-    pooled_pairs = list(train_pairs) + list(test_pairs)
-    pooled_per_exp = list(train_per_exp) + list(test_per_exp)
-    pooled_raw = list(train_raw_f) + list(test_raw_f)
-    pooled_total = sum((m for _, m in pooled_per_exp),
-                       start=IntervalPredictionMetrics())
-
-    print(f"[{pass_name}] rendering combined figures "
-          f"(gt={pooled_total.n_gt}, pairs={len(pooled_pairs)})")
-    if train_total is not None and test_total is not None:
-        report_plots.failure_modes_split_bar(
-            train_total, test_total,
-            pass_dir / "failure_modes_train_vs_test.png",
-        )
-    if pooled_per_exp:
-        report_plots.per_experiment_failure_bar(
-            pooled_per_exp, pass_dir / "per_experiment_failure_bar.png",
-            label_short={n: _short_label(n) for n, _ in pooled_per_exp},
-        )
-    if pooled_pairs:
-        report_plots.cdf_pdf_pair(
-            [p["iou"] for p in pooled_pairs],
-            title=f"IoU over matched pairs ({pass_name})",
-            xlabel="IoU", out_path=pass_dir / "cdf_pdf_iou.png",
-        )
-        report_plots.iou_vs_duration_scatter(
-            pooled_pairs, pass_dir / "iou_vs_duration.png",
-        )
-        report_plots.pred_vs_gt_duration_scatter(
-            pooled_pairs, pass_dir / "pred_vs_gt_duration.png",
-        )
-    if pooled_per_exp and phone_for_exp:
-        report_plots.phone_breakdown_bar(
-            pooled_per_exp, phone_for_exp,
-            pass_dir / "phone_breakdown.png",
-        )
-
-    # timelines (best / typical / worst) — pick from the pass subset
-    if pooled_per_exp and pooled_raw:
-        print(f"[{pass_name}] timeline picks")
-        for label, name, exp_result in _pick_timeline_examples(
-            pooled_per_exp, pooled_raw,
-        ):
-            try:
-                sensors, _, _ = getExperimentData(name)
-            except Exception as exc:
-                print(f"  [skip] timeline_{label}: {name} → {exc}")
-                continue
-            acc = sensors.get("ACC")
-            if acc is None or acc.empty:
-                continue
-            report_plots.per_experiment_timeline(
-                name, acc, exp_result.gt_rides, exp_result.preds,
-                pass_dir / f"timeline_{label}.png",
-            )
-            print(f"  timeline_{label}: {name}")
-
-    # cleaned aggregate is an orthogonal outlier-removal concept; only
-    # apply it on the canonical "both" pass to keep output volume sane.
-    cleaned_payload = None
-    if pass_name == "both" and cleaned_exclude and pooled_raw:
-        print(f"[{pass_name}] cleaned aggregates "
-              f"(excluded: {sorted(cleaned_exclude)})")
-        c_train = _aggregate_filtered(train_raw_f or [], cleaned_exclude)
-        c_test  = _aggregate_filtered(test_raw_f  or [], cleaned_exclude)
-        c_train_per_exp, c_train_total, c_train_iou, c_train_pairs = c_train
-        c_test_per_exp,  c_test_total,  c_test_iou,  c_test_pairs  = c_test
-        c_pairs = c_train_pairs + c_test_pairs
-        c_per_exp = c_train_per_exp + c_test_per_exp
-        if c_train_total is not None and c_test_total is not None and \
-           train_total is not None and test_total is not None:
-            report_plots.failure_modes_split_bar(
-                c_train_total, c_test_total,
-                pass_dir / "failure_modes_train_vs_test_cleaned.png",
-            )
-        if c_per_exp:
-            report_plots.per_experiment_failure_bar(
-                c_per_exp, pass_dir / "per_experiment_failure_bar_cleaned.png",
-                label_short={n: _short_label(n) for n, _ in c_per_exp},
-            )
-        if c_pairs:
-            report_plots.cdf_pdf_pair(
-                [p["iou"] for p in c_pairs],
-                title="IoU over matched pairs (cleaned set)",
-                xlabel="IoU", out_path=pass_dir / "cdf_pdf_iou_cleaned.png",
-            )
-            report_plots.iou_vs_duration_scatter(
-                c_pairs, pass_dir / "iou_vs_duration_cleaned.png",
-            )
-        cleaned_payload = {
-            "train": _metrics_payload("train_cleaned", c_train_total,
-                                      c_train_iou, len(c_train_per_exp))
-                       if c_train_total else None,
-            "test":  _metrics_payload("test_cleaned",  c_test_total,
-                                      c_test_iou,  len(c_test_per_exp))
-                       if c_test_total else None,
-        }
-
-    if pooled_per_exp:
-        _per_exp_csv(pooled_per_exp, pass_dir / "per_experiment.csv")
-
-    metrics_dump = {
-        "train":  _metrics_payload("train",  train_total, train_iou,
-                                   len(train_per_exp or []))
-                    if train_total else None,
-        "test":   _metrics_payload("test",   test_total,  test_iou,
-                                   len(test_per_exp or []))
-                    if test_total else None,
-        "pooled": _metrics_payload(
-            "pooled", pooled_total,
-            IntervalPredictionMetrics.iou_f1(
-                *evaluator._pool_intervals(pooled_raw),
-                iou_threshold=0.5,
-            ) if pooled_raw else {},
-            len(pooled_per_exp),
-        ) if pooled_per_exp else None,
-        "cleaned": cleaned_payload,
-    }
-    (pass_dir / "metrics.json").write_text(
-        json.dumps(metrics_dump, indent=2, default=str)
-    )
-
-    print(f"\n[{pass_name}] summary")
-    if train_total is not None:
-        print(f"  train : gt={train_total.n_gt} pred={train_total.n_pred} "
-              f"clean={train_total.clean} miss={train_total.missed} "
-              f"fp={train_total.fp} f1*={train_total.score():.3f} "
-              f"iou_f1={train_iou['iou_f1@0.5']:.3f}")
-    if test_total is not None:
-        print(f"  test  : gt={test_total.n_gt} pred={test_total.n_pred} "
-              f"clean={test_total.clean} miss={test_total.missed} "
-              f"fp={test_total.fp} f1*={test_total.score():.3f} "
-              f"iou_f1={test_iou['iou_f1@0.5']:.3f}")
-    if pooled_total.n_gt:
-        print(f"  pooled: gt={pooled_total.n_gt} pred={pooled_total.n_pred} "
-              f"clean={pooled_total.clean} miss={pooled_total.missed} "
-              f"fp={pooled_total.fp} f1*={pooled_total.score():.3f}")
-
-    return metrics_dump
+    args = p.parse_args(argv)
+    # 'all' is a convenience alias for "no source filter".
+    if args.source and "all" in args.source:
+        args.source = None
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -598,16 +506,11 @@ def main(argv: list[str] | None = None) -> int:
 
     cleaned_exclude = set(args.cleaned_exclude or [])
 
-    train_exps = _resolve_experiments(
-        kind="train", sources=args.source,
+    experiments = _resolve_experiments(
+        kind=args.kind, sources=args.source,
         include=args.include, exclude=args.exclude,
-    ) if args.kind in ("all", "train") else []
-    test_exps = _resolve_experiments(
-        kind="test", sources=args.source,
-        include=args.include, exclude=args.exclude,
-    ) if args.kind in ("all", "test") else []
-    all_exps = sorted(set(train_exps) | set(test_exps))
-    if not all_exps:
+    )
+    if not experiments:
         print("no experiments survived filtering; nothing to do",
               file=sys.stderr)
         return 1
@@ -624,48 +527,32 @@ def main(argv: list[str] | None = None) -> int:
             "active_params": cfg.load_params(),
         },
         "experiments": {
-            "train": train_exps, "test": test_exps,
-            "n_train": len(train_exps), "n_test": len(test_exps),
-            "n_total": len(all_exps),
+            "names": experiments,
+            "n": len(experiments),
             "cleaned_exclude": sorted(cleaned_exclude),
         },
-        "noise_passes": [p for p, _ in NOISE_PASSES],
+        "kind": args.kind,
     }
     (run_dir / "run_settings.json").write_text(
         json.dumps(settings, indent=2, default=str)
     )
 
-    # --- run detection ONCE per split, then reuse across noise passes ---
+    # --- run detection on the full resolved experiment set ---
     t0 = time.time()
-    train_raw_full = (evaluator._run_on_experiments(cfg, train_exps, verbose=True)
-                       if train_exps else [])
-    test_raw_full  = (evaluator._run_on_experiments(cfg, test_exps,  verbose=True)
-                       if test_exps  else [])
+    raw = evaluator._run_on_experiments(cfg, experiments, verbose=True)
     print(f"\ndetection finished in {time.time() - t0:.1f}s")
 
     phone_for_exp: dict[str, str] = {}
-    for e in (train_raw_full + test_raw_full):
+    for e in raw:
         meta = _experiment_metadata(e.name)
         phone_for_exp[e.name] = _phone_canonical(meta)
 
-    # --- 3-pass noise loop ---
-    pass_dirs: dict[str, Path] = {}
-    pass_summaries: dict[str, dict] = {}
-    for pass_name, keep_clean in NOISE_PASSES:
-        pass_dir = run_dir / pass_name
-        pass_dirs[pass_name] = pass_dir
-        train_raw_f = _filter_raw_by_noise(train_raw_full, keep_clean)
-        test_raw_f  = _filter_raw_by_noise(test_raw_full,  keep_clean)
-        n_train_gt = sum(len(e.gt_rides) for e in train_raw_f)
-        n_test_gt  = sum(len(e.gt_rides) for e in test_raw_f)
-        print(f"\n=== noise pass: {pass_name}  "
-              f"(train_gt={n_train_gt}, test_gt={n_test_gt}) ===")
-        pass_summaries[pass_name] = _render_pass(
-            pass_name, pass_dir, train_raw_f, test_raw_f,
-            phone_for_exp, cleaned_exclude,
-        )
+    # --- render flat into run_dir; metrics.json carries the noise split ---
+    metrics = _render_run(
+        run_dir, raw, args.kind, phone_for_exp, cleaned_exclude,
+    )
 
-    # --- constraint plots — config-only, identical across passes ---
+    # --- constraint plots — config-only, independent of the data ---
     if ITER16_PER_GT_CSV.exists():
         print(f"\nrendering constraint plots from {ITER16_PER_GT_CSV.name}")
         per_gt = pd.read_csv(ITER16_PER_GT_CSV)
@@ -717,12 +604,8 @@ def main(argv: list[str] | None = None) -> int:
               "constraint plots omitted")
 
     (run_dir / "metrics.json").write_text(
-        json.dumps(pass_summaries, indent=2, default=str)
+        json.dumps(metrics, indent=2, default=str)
     )
-
-    if str(args.latex_out):
-        _write_latex_snippet(args.latex_out, run_dir, args,
-                             pass_dirs, pass_summaries)
 
     print(f"\nartefacts: {run_dir}")
     return 0

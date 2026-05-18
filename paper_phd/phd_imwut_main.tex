@@ -1,0 +1,1230 @@
+%%
+%% IMWUT submission — single-column manuscript format.
+%% Proceedings of the ACM on Interactive, Mobile, Wearable and
+%% Ubiquitous Technologies (PACM IMWUT).
+%%
+%% Submission class options per ACM: `manuscript` (single column, double
+%% spaced) + `review` (line numbers for reviewers).  After acceptance, switch
+%% to `\documentclass[acmlarge,screen]{acmart}` for the camera-ready.
+%%
+\documentclass[manuscript,review,screen]{acmart}
+
+\AtBeginDocument{%
+  \providecommand\BibTeX{{%
+    Bib\TeX}}}
+
+%% Lightweight TODO macro so placeholders are easy to spot in drafts.
+%% Removed before the camera-ready.
+\usepackage{xcolor}
+\newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+
+%% Figures and graphics.
+\usepackage{graphicx}
+\graphicspath{{figures/}}
+
+%% TikZ for the S-curve schematic in Background.
+\usepackage{tikz}
+\usetikzlibrary{decorations.pathreplacing,arrows.meta}
+
+%% Subfigures (used in Background and Evaluation).
+\usepackage{subcaption}
+
+%% Side-positioned figures so the Background images sit alongside the prose
+%% rather than centred at full width.
+\usepackage{wrapfig}
+
+%% Rights / publication metadata — placeholders, filled in at acceptance.
+\setcopyright{acmlicensed}
+\copyrightyear{2026}
+\acmYear{2026}
+\acmDOI{XXXXXXX.XXXXXXX}
+
+%% Journal metadata — IMWUT.
+\acmJournal{IMWUT}
+\acmVolume{0}
+\acmNumber{0}
+\acmArticle{0}
+\acmMonth{0}
+
+\begin{document}
+
+\title{Smartphone-Only Estimation of Elevator Vertical Displacement
+       with Calibrated Confidence Intervals}
+
+\author{Eyal Yakir}
+\email{eyalyakir159@gmail.com}
+\affiliation{%
+  \institution{TBD}
+  \city{TBD}
+  \country{TBD}
+}
+
+\renewcommand{\shortauthors}{Yakir et al.}
+
+\begin{abstract}
+  Knowing which floor a smartphone user is on remains an open problem
+  on devices that lack a pressure sensor, and the single most common
+  floor-change event --- the elevator ride --- is exactly where the
+  three workhorses of indoor localisation each break down.
+  Pedestrian dead reckoning and step counting estimate horizontal
+  trajectory; the cabin removes the steps and the accelerometer
+  cannot be integrated vertically without unbounded drift.  Wi-Fi
+  fingerprinting demands a per-floor survey, degrades whenever the
+  radio environment drifts, and is shielded by the cabin itself.
+  Barometric altimetry resolves a floor in principle but assumes a
+  pressure sensor that entry-level phones omit, and demands
+  re-referencing against weather drift on phones that carry one.
+
+  We present a smartphone-only pipeline that estimates the signed
+  vertical displacement~$\Delta h$ of every elevator ride a user
+  takes and attaches a calibrated $90\,\%$ confidence interval to
+  it, using the phone's accelerometer alone.  The pipeline rests on
+  one observation.  The mechanical limits of an elevator cabin force
+  the gravity-removed acceleration trace a phone records during a
+  ride into a small parametric family of basis functions.  We
+  decompose every candidate ride against this family in two stages
+  --- segmentation of hours-long inertial streams into discrete
+  \texttt{up}\,/\,\texttt{down} ride intervals, and per-ride
+  prediction of~$\Delta h$ with a per-ride uncertainty.  Each
+  interval is distribution-free with finite-sample coverage
+  guarantees, adapts to ride duration, gravity-vector stability, and
+  fit quality, and remains valid under both white sensor noise and
+  the coloured (drift- and vibration-driven) noise that dominates
+  real hand-held recordings.  An optional addon fuses the phone's
+  orientation sensor on top of the accelerometer pipeline for
+  further accuracy gains.
+
+  We evaluate on \todo{150} experiments spanning \todo{TBD} elevators
+  in \todo{TBD} buildings (residential, office, hotel), with a strict
+  held-out blind test.  Median CI half-width on the held-out test
+  stays below \todo{$\pm 0.9$\,m} on short rides at $90\,\%$
+  coverage, an improvement of \todo{TBD\,\%} over the dataset's prior
+  best.  We open-source the pipeline, dataset, and evaluation
+  harness.
+\end{abstract}
+
+\begin{CCSXML}
+<ccs2012>
+ <concept>
+  <concept_id>10003120.10003138.10003140</concept_id>
+  <concept_desc>Human-centered computing~Ubiquitous and mobile computing</concept_desc>
+  <concept_significance>500</concept_significance>
+ </concept>
+ <concept>
+  <concept_id>10010147.10010178.10010224.10010225</concept_id>
+  <concept_desc>Computing methodologies~Sensor data processing</concept_desc>
+  <concept_significance>300</concept_significance>
+ </concept>
+</ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Human-centered computing~Ubiquitous and mobile computing}
+\ccsdesc[300]{Computing methodologies~Sensor data processing}
+
+\keywords{smartphone sensing, inertial measurement, elevator,
+          vertical localization, conformal prediction,
+          uncertainty quantification, indoor positioning,
+          building inventory}
+
+\maketitle
+
+\section{Introduction}
+\label{sec:intro}
+
+% Stakes: who suffers, why the domain matters.
+Indoor location services place a smartphone within metres of the right
+room on the horizontal plane, using Wi-Fi fingerprinting, BLE beacons,
+and visual pedestrian dead reckoning~\cite{liu2007indoor}.  The
+vertical axis lags behind.  Knowing the user's floor matters for
+emergency dispatch, which routes responders to a floor rather than to
+a building entrance.  It matters for venue-aware advertising and
+indoor delivery in malls and office towers, and for augmented-reality
+experiences anchored to a specific floor of a museum or conference
+centre.
+
+% Problem gap: structural limitations, numbered.
+Three structural limitations make floor estimation harder than its
+horizontal sibling.  \emph{(i)}~Step counting and pedestrian dead
+reckoning estimate horizontal trajectory and report nothing about
+height~\cite{harle2013pdr}.  \emph{(ii)}~Wi-Fi fingerprinting separates
+floors only where the survey covered every floor and the radio
+environment has not drifted since~\cite{bahl2000radar}.
+\emph{(iii)}~Barometric altimetry resolves a floor in principle, but
+the pressure sensor is absent on entry-level phones and demands
+re-referencing against weather drift on phones that carry
+one~\cite{muralidharan2014barometer}.  The single most common floor-change event
+--- the elevator ride --- sits in the regime where every
+horizontal-localisation signal degrades at once.
+
+% Insight: kinematic family, no S-curve mechanics, deferred to background.
+Elevators are not arbitrary motion.  We found that the mechanical
+limits of the cabin force the gravity-removed acceleration trace a
+phone records during a ride into a small parametric family of
+expected functions.  Section~\ref{sec:background} characterises this
+family precisely; what matters in the introduction is that the family
+is small enough to enumerate and structured enough to fit a candidate
+ride against.  Every claim in this paper rests on it.
+
+% Two capabilities: per-ride and building-level.
+Two capabilities follow from the family.  The first --- the focus of
+this paper --- is per-ride.  Given an inertial recording of a single
+elevator ride, return its signed vertical displacement~$\Delta h$
+together with a calibrated $90\,\%$ confidence interval.  The second
+is building-level.  From inertial recordings collected by passersby,
+classify whether a building has an elevator at all, and, when it
+does, identify the elevator type by the family parameters its rides
+span.  The combination converts a smartphone into both a per-ride
+displacement sensor and a passively built building inventory tool;
+Section~\ref{sec:building-inventory} develops the building-level
+capability.
+
+% Design intuition (Move 4): pipeline shape, no algorithmic detail.
+Our pipeline has two stages.  Segmentation extracts ride intervals
+from a continuous, possibly hours-long, inertial stream.  Prediction
+returns~$\Delta h$ for each interval together with a per-ride
+uncertainty.  The pipeline uses the phone's accelerometer
+alone --- no barometer at inference time, no Wi-Fi, no per-building
+calibration --- and an optional addon
+(\S\ref{sec:orientation-addon}) fuses the phone's orientation sensor
+on top of the accelerometer pipeline for further accuracy.  The
+per-ride confidence interval is distribution-free, carries
+finite-sample coverage guarantees, and remains valid under both
+white sensor noise and the coloured (drift- and vibration-driven)
+noise that dominates real hand-held recordings.
+
+% Results preview (Move 6).
+We evaluate on \todo{150} experiments spanning \todo{TBD} elevators
+across \todo{TBD} buildings (residential, office, hotel), with a
+strict held-out blind test.  The system retains its nominal
+$90\,\%$ coverage on the blind test.  The median CI half-width
+stays below~\todo{$\pm 0.9$\,m} on short rides, and per-bin error
+improves on the dataset's prior best by~\todo{TBD\,\%}.
+Section~\ref{sec:evaluation} reports the full coverage and error
+statistics.
+
+\paragraph{Contributions.}
+\begin{enumerate}
+  \item \textbf{Per-ride displacement with calibrated coverage.}
+    We deliver $90\,\%$, distribution-free, finite-sample confidence
+    intervals on~$\Delta h$ from accelerometer data alone, valid
+    under both white sensor noise and the coloured noise that
+    dominates hand-held recordings.
+  \item \textbf{Family-of-basis-functions framework.} We
+    characterise the family of expected gravity-removed acceleration
+    traces for an elevator ride from the cabin's mechanical limits,
+    and use the same family as the substrate for both segmentation
+    and per-ride prediction.
+  \item \textbf{Passively built building inventory.} We extend the
+    family-fitting machinery to a building-level capability that
+    determines whether a building has an elevator and classifies its
+    type from the family parameters of its rides.
+  \item \textbf{Orientation-sensor addon.} We describe an optional
+    addon that fuses the phone's orientation sensor on top of the
+    accelerometer pipeline, with quantified accuracy gain
+    (\S\ref{sec:orientation-addon}).
+  \item \textbf{Dataset and harness.} We release the multi-building
+    dataset (\todo{150} experiments, multiple phones per ride,
+    barometer ground-truth pipeline), the full evaluation harness,
+    and the operator UI used to triage rides.
+\end{enumerate}
+
+\paragraph{Roadmap.}
+Section~\ref{sec:background} characterises the elevator's mechanical
+structure, the physical limits it imposes on a ride, and the family
+of expected acceleration functions those limits force.
+Section~\ref{sec:building-inventory} presents the building-level
+inventory capability.  Section~\ref{sec:orientation-addon} presents
+the orientation-sensor addon.  Section~\ref{sec:evaluation}
+describes the data collection, the train/test split, and the
+results.  Sections~\ref{sec:discussion} and~\ref{sec:conclusion}
+discuss limitations and conclude.
+
+\section{Background: Elevator Kinematics}
+\label{sec:background}
+
+This section derives the family of acceleration functions an elevator
+ride can produce on a smartphone.  We start from the cabin's mechanical
+parts and the physical constraints they impose
+(\S\ref{sec:bg-mechanics}), translate those constraints into bounds on
+jerk, acceleration, and velocity (\S\ref{sec:bg-bounds}), and then
+write down the seven-segment S-curve that the bounds force every ride
+to follow (\S\ref{sec:bg-scurve}).  We close with the closed-form
+relations between machine parameters and the time constants of the
+ride (\S\ref{sec:bg-time-constants}) and the parametric family that
+this paper's segmentation and prediction stages
+fit~(\S\ref{sec:bg-family}); the heavy algebra lives in
+Appendix~\ref{app:derivations}.
+
+\subsection{How a passenger elevator works}
+\label{sec:bg-mechanics}
+
+\begin{wrapfigure}{r}{0.34\linewidth}
+  \vspace{-0.6em}
+  \centering
+  \includegraphics[width=\linewidth]{elevator_schematic.png}
+  \caption{A traction elevator at a glance.  A sheave of radius~$R$
+    couples the car~($m_c\!+\!\Delta m_c$) to a counterweight
+    ($m_w$).  The motor delivers torque~$T_j$ at angular
+    velocity~$\omega$; rope tensions $T_v$ and $T_w$ load the
+    sheave.  $H$ is the hoistway height; $h_0$ and $h_2$ are the
+    cabin and counterweight heights; $h_1$ is the headroom budget
+    above the sheave that the brake must respect.}
+  \label{fig:elevator-schematic}
+  \vspace{-0.5em}
+\end{wrapfigure}
+
+A passenger elevator is, mechanically, a single moving piece: a
+cabin (the \emph{car}) hanging on a steel rope that runs up over a
+sheave at the top of the shaft and down the other side to a
+counterweight (Figure~\ref{fig:elevator-schematic}).  A motor turns
+the sheave; the cabin and counterweight rise and fall in opposite
+directions.  The counterweight is sized to match the empty car
+plus roughly half the rated payload, so the motor only has to
+drive the small mass difference and the inertia of the moving
+parts.  A brake clamps the sheave shaft whenever the motor is
+unpowered or anything goes wrong.  Three machine pieces decide how
+the cabin can move: the rope (it stretches), the motor (it has a
+torque ceiling), and the brake (it has a maximum stopping
+distance fixed by the headroom~$h_1$).  The next subsection
+turns each into a hard limit on the cabin's motion.
+
+\subsection{Physical limitations and what they bound}
+\label{sec:bg-bounds}
+
+Four mechanical realities turn into four hard limits on the cabin's
+motion.  Each is the source of one of the parameters our pipeline
+fits.
+
+\paragraph{The rope sets the maximum jerk.}
+The main rope stretches.  If the motor changes torque too quickly,
+the cabin starts to bounce on the rope: the passenger feels it as
+a thump, and the rope itself fatigues over time.  Drive
+controllers therefore ramp torque through a slew-rate
+limit~\cite{macfarlane2003jerk}.  Slew-rate-limiting the torque
+is the same as putting a ceiling on the jerk $\dddot h$ the cabin
+feels.  The ride-comfort standard ISO~$18738$ pins this at
+$j_{\max}\!\approx\!1.0$--$1.6$\,m/s$^3$ for passenger
+elevators~\cite{iso18738}.
+
+\paragraph{The motor sets the maximum acceleration.}
+At constant velocity the motor only has to fight friction and the
+small mass mismatch between cabin and counterweight.  When it
+accelerates, it has to push the entire moving mass.  The motor has
+a torque ceiling, so cabin acceleration is also capped:
+$a_{\max}\!\approx\!0.8$--$1.5$\,m/s$^2$ on commercial traction
+elevators.  Older geared machines sit at the low end; newer
+gearless ones at the high end.
+
+\paragraph{The brake sets the maximum cruise velocity.}
+If anything goes wrong --- a slack rope, an overspeed sensor trip,
+loss of power --- the cabin has to stop before it hits the top of
+the shaft.  The brake decelerates the cabin at some rate
+$a_{\text{brake}}$ and has at most the headroom~$h_1$ above the top
+floor to do it in.  Energy says $v_{\max}^{2}\le 2\,a_{\text{brake}}\,h_1$,
+which in practice limits cruise velocity to
+$v_{\max}\!\approx\!1.0$--$2.5$\,m/s in low- and mid-rise
+buildings (CIBSE Guide~D~\cite{cibseguidd2020}).  Faster cabins
+exist in skyscrapers, but they require taller headroom and
+shaft-mounted buffers.
+
+\paragraph{Only the height changes from ride to ride.}
+Once the elevator is built, $j_{\max}$, $a_{\max}$, and $v_{\max}$
+are fixed for the building --- often fixed for the manufacturer
+and service class.  The only thing that changes ride to ride is
+the floor-to-floor height the cabin has to cover, which we
+write~$H$ (metres, signed for direction).  Putting the three
+limits together, the cabin obeys
+\begin{equation}
+  \big|\dddot h(t)\big|\le j_{\max},\qquad
+  \big|\ddot  h(t)\big|\le a_{\max},\qquad
+  \big|\dot   h(t)\big|\le v_{\max},
+  \label{eq:elevator-bounds}
+\end{equation}
+where $\ddot h\!=\!a$ is the gravity-removed vertical acceleration
+the phone measures.
+
+\subsection{Why the ride is an S-curve}
+\label{sec:bg-scurve}
+
+\paragraph{The optimisation problem.}
+The drive solves a simple problem: move the cabin~$H$ metres,
+starting and ending at rest, in the shortest possible time, without
+ever breaking the three limits in~\eqref{eq:elevator-bounds}.
+Write the cabin's altitude as~$h(t)$, its velocity as
+$v(t)\!=\!\dot h(t)$, its acceleration as $a(t)\!=\!\ddot h(t)$,
+and the controller's command as the jerk $j(t)\!=\!\dddot h(t)$.
+The controller picks~$j(t)$; everything else follows by
+integration.  Formally we solve
+\begin{equation}
+  \label{eq:elevator-opt}
+  \begin{aligned}
+    \underset{T,\,j(\cdot)}{\text{minimize}}\quad
+      & T \\[3pt]
+    \text{subject to}\quad
+      & h(0)=0,\quad h(T)=H,\quad v(0)=v(T)=0, \\
+      & |j(t)|\le j_{\max},\quad
+        |a(t)|\le a_{\max},\quad
+        |v(t)|\le v_{\max}, \\
+      & \forall\,t\in[0,T].
+  \end{aligned}
+\end{equation}
+
+\paragraph{The result.}
+Pontryagin's maximum principle, applied
+to~\eqref{eq:elevator-opt}, forces the optimal command to be
+\emph{bang-bang} on the highest-derivative input.  At every
+instant, the optimal jerk takes only three values,
+\begin{equation}
+  j^{*}(t)\;\in\;\{-j_{\max},\,0,\,+j_{\max}\},
+  \label{eq:bang-bang}
+\end{equation}
+with $j^{*}\!=\!0$ holding the cabin against $|a|\!=\!a_{\max}$ or
+$|v|\!=\!v_{\max}$ when one of the lower-order limits is itself
+saturated.  Intuitively, any moment spent at an interior value
+$|j|<j_{\max}$ is wasted: the cabin could have been pushing
+harder and finished sooner.  Appendix~\ref{app:bangbang} sketches
+the derivation; we use~\eqref{eq:bang-bang} below.
+
+
+\paragraph{The S-curve and its three regimes.}
+Stitching the bang-bang jerk command~\eqref{eq:bang-bang} together
+with the three limits yields the canonical \emph{S-curve}
+acceleration profile.  The floor-to-floor height~$H$ alone fixes
+how many of the limits a ride saturates, and so splits every ride
+into one of three regimes --- long, medium, or short --- shown
+side by side in Figure~\ref{fig:scurve-durations}.
+
+\newcommand{\scurvepanel}[5]{%
+  % #1 = Tj, #2 = Ta, #3 = Tv, #4 = a_peak (<= amax), #5 = amax (for axis label)
+  \begin{tikzpicture}[>=Stealth, font=\scriptsize, scale=0.55]
+    \pgfmathsetmacro{\Tj}{#1}
+    \pgfmathsetmacro{\Ta}{#2}
+    \pgfmathsetmacro{\Tv}{#3}
+    \pgfmathsetmacro{\apk}{#4}
+    \pgfmathsetmacro{\amx}{#5}
+    \pgfmathsetmacro{\Tend}{4*\Tj + 2*\Ta + \Tv}
+    \pgfmathsetmacro{\tA}{\Tj}
+    \pgfmathsetmacro{\tB}{\Tj+\Ta}
+    \pgfmathsetmacro{\tC}{2*\Tj+\Ta}
+    \pgfmathsetmacro{\tD}{2*\Tj+\Ta+\Tv}
+    \pgfmathsetmacro{\tE}{3*\Tj+\Ta+\Tv}
+    \pgfmathsetmacro{\tF}{3*\Tj+2*\Ta+\Tv}
+    \pgfmathsetmacro{\tG}{4*\Tj+2*\Ta+\Tv}
+    \draw[->] (0,-1.5*\amx) -- (0,1.6*\amx) node[above] {$a(t)$};
+    \draw[->] (-0.2,0) -- ({\Tend+0.4},0) node[right] {$t$};
+    \draw[dashed,gray!60] (0,{\amx}) -- ({\Tend},{\amx});
+    \draw[dashed,gray!60] (0,{-\amx}) -- ({\Tend},{-\amx});
+    \node[left,font=\tiny] at (0,{\amx}) {$+a_{\max}$};
+    \node[left,font=\tiny] at (0,{-\amx}) {$-a_{\max}$};
+    \draw[very thick, blue!70!black]
+      (0,0) --
+      ({\tA},{\apk}) --
+      ({\tB},{\apk}) --
+      ({\tC},0) --
+      ({\tD},0) --
+      ({\tE},{-\apk}) --
+      ({\tF},{-\apk}) --
+      ({\tG},0);
+  \end{tikzpicture}%
+}
+
+\begin{figure}[ht]
+\centering
+% One row per regime: acceleration profile (left) paired with its
+% defining time-constant condition and a one-line explanation (right).
+\begin{minipage}[c]{0.36\linewidth}\centering
+  \scurvepanel{0.6}{0.6}{2.4}{1.0}{1.0}
+\end{minipage}\hfill
+\begin{minipage}[c]{0.60\linewidth}
+  \textbf{Long ride --- 7 segments.}\\
+  $T_v>0,\quad T_a>0$\\
+  All three limits saturate; a flat $v_{\max}$ cruise splits the
+  two trapezoidal lobes.
+\end{minipage}
+
+\vspace{1.2em}
+\begin{minipage}[c]{0.36\linewidth}\centering
+  \scurvepanel{0.6}{0.6}{0.0}{1.0}{1.0}
+\end{minipage}\hfill
+\begin{minipage}[c]{0.60\linewidth}
+  \textbf{Medium ride --- 5 segments.}\\
+  $T_v=0,\quad T_a>0$\\
+  Jerk and acceleration saturate but the cabin never reaches
+  $v_{\max}$; the two lobes touch at the peak-velocity instant.
+\end{minipage}
+
+\vspace{1.2em}
+\begin{minipage}[c]{0.36\linewidth}\centering
+  \scurvepanel{0.5}{0.0}{0.0}{0.55}{1.0}
+\end{minipage}\hfill
+\begin{minipage}[c]{0.60\linewidth}
+  \textbf{Short ride --- 3 segments.}\\
+  $T_v=T_a=0$\\
+  Only jerk saturates; the two lobes are triangles that meet, with
+  peak $|a|<a_{\max}$.
+\end{minipage}
+
+\caption{The three S-curve regimes of the time-optimal acceleration
+  profile~$a(t)$, all produced by the bang-bang jerk
+  command~\eqref{eq:bang-bang} and selected by the floor-to-floor
+  height~$H$.  Each row pairs the profile with the time-constant
+  condition that defines its regime; longer~$H$ saturates more
+  limits.  Closed forms for $T_j$, $T_a$, and~$T_v$ follow
+  in~\S\ref{sec:bg-time-constants}.}
+\label{fig:scurve-durations}
+\end{figure}
+
+\subsection{From machine parameters to ride-time constants}
+\label{sec:bg-time-constants}
+
+The bang-bang structure pins every phase of the ride to a
+closed-form duration in the machine parameters and the
+floor-to-floor height~$H$.  Three durations describe any ride:
+\begin{align}
+  T_j &= \frac{a_{\max}}{j_{\max}}, \label{eq:Tj}\\
+  T_a &= \max\!\left(0,\;\frac{v_{\max}}{a_{\max}}-T_j\right),
+         \label{eq:Ta}\\
+  T_v &= \max\!\left(0,\;\frac{H}{v_{\max}}-2T_j-T_a\right),
+         \label{eq:Tv}
+\end{align}
+and they sum over the seven phases to the total ride duration
+\begin{equation}
+  T_{\text{ride}} \;=\; 4T_j + 2T_a + T_v
+  \;=\; \frac{H}{v_{\max}} + \frac{v_{\max}}{a_{\max}}
+        + \frac{a_{\max}}{j_{\max}}
+  \quad\text{(trapezoidal regime).}
+  \label{eq:elevator-durations}
+\end{equation}
+
+\begin{wrapfigure}{r}{0.46\linewidth}
+  \vspace{-0.6em}
+  \centering
+  \resizebox{\linewidth}{!}{%
+  \begin{tikzpicture}[>=Stealth, font=\small]
+    \pgfmathsetmacro{\Tj}{0.6}
+    \pgfmathsetmacro{\Ta}{0.7}
+    \pgfmathsetmacro{\Tv}{1.7}
+    \pgfmathsetmacro{\amax}{1.0}
+    \pgfmathsetmacro{\Tend}{4*\Tj+2*\Ta+\Tv}
+    \pgfmathsetmacro{\tA}{\Tj}
+    \pgfmathsetmacro{\tB}{\Tj+\Ta}
+    \pgfmathsetmacro{\tC}{2*\Tj+\Ta}
+    \pgfmathsetmacro{\tD}{2*\Tj+\Ta+\Tv}
+    \pgfmathsetmacro{\tE}{3*\Tj+\Ta+\Tv}
+    \pgfmathsetmacro{\tF}{3*\Tj+2*\Ta+\Tv}
+    \pgfmathsetmacro{\tG}{4*\Tj+2*\Ta+\Tv}
+    \draw[->] (0,-1.35) -- (0,1.5) node[above] {$a(t)$};
+    \draw[->] (-0.15,0) -- ({\Tend+0.45},0) node[right] {$t$};
+    \draw[dashed,gray!55] (0,\amax) -- (\Tend,\amax);
+    \draw[dashed,gray!55] (0,-\amax) -- (\Tend,-\amax);
+    \node[left] at (0,\amax) {$a_{\max}$};
+    \foreach \tt in {\tA,\tB,\tC,\tD}
+      \draw[dotted,gray!55] (\tt,-1.0) -- (\tt,1.15);
+    \draw[very thick,blue!70!black]
+      (0,0) -- (\tA,\amax) -- (\tB,\amax) -- (\tC,0)
+      -- (\tD,0) -- (\tE,-\amax) -- (\tF,-\amax) -- (\tG,0);
+    \draw[decorate,decoration={brace,amplitude=3pt,mirror},semithick,red!75!black]
+      (0,-1.0) -- (\tA,-1.0) node[midway,below=1pt,red!75!black] {$T_j$};
+    \draw[decorate,decoration={brace,amplitude=3pt,mirror},semithick,orange!85!black]
+      (\tA,-1.0) -- (\tB,-1.0) node[midway,below=1pt,orange!85!black] {$T_a$};
+    \draw[decorate,decoration={brace,amplitude=3pt,mirror},semithick,teal!70!black]
+      (\tC,-1.0) -- (\tD,-1.0) node[midway,below=1pt,teal!70!black] {$T_v$};
+    \draw[decorate,decoration={brace,amplitude=4pt,mirror},semithick,black!80]
+      (0,-1.95) -- (\tG,-1.95) node[midway,below=1pt,black] {$T_{\text{ride}}$};
+  \end{tikzpicture}}
+  \caption{The four ride-time constants on the acceleration
+    trace~$a(t)$ of a trapezoidal ride: jerk ramp~$T_j$, the
+    $a_{\max}$ plateau~$T_a$, the $v_{\max}$ cruise~$T_v$ (the
+    flat $a\!=\!0$ gap between lobes), and the total
+    ride~$T_{\text{ride}}$.}
+  \label{fig:ride-time-constants}
+  \vspace{-0.5em}
+\end{wrapfigure}
+Figure~\ref{fig:ride-time-constants} locates the four durations on
+a single ride.  The jerk ramp~$T_j$ and the acceleration
+plateau~$T_a$ are constants of the building.  $T_j$ depends only on
+the machine --- about $0.77$\,s for a typical lift
+($a_{\max}\!=\!1.0$\,m/s$^2$, $j_{\max}\!=\!1.3$\,m/s$^3$) --- and
+$T_a$ vanishes on rides too short to reach~$v_{\max}$.  Only the
+cruise~$T_v$ scales with ride length, growing as~$H/v_{\max}$.
+Equation~\eqref{eq:elevator-durations} is the inversion handle
+later sections use to recover~$H$ jointly with the machine
+parameters; Appendix~\ref{app:derivations} derives all four
+constants from the bounds in~\eqref{eq:elevator-bounds}.
+
+\subsection{The trapezoid basis function and the parametric family}
+\label{sec:bg-family}
+
+Combining \eqref{eq:elevator-bounds}--\eqref{eq:elevator-durations},
+every ride is fixed by four parameters,
+\begin{equation}
+  \boxed{\theta \;=\; (j_{\max},\, a_{\max},\, v_{\max},\, H)},
+  \label{eq:elevator-params}
+\end{equation}
+three constants of the building and the ride-specific height~$H$.
+
+\paragraph{The trapezoid basis function.}
+Each acceleration lobe of the S-curve is a trapezoid in time --- a
+ramp up, a flat top, and a ramp down.  We normalise it to the
+trapezoid basis function
+\begin{equation}
+  \tau_{W,f}(t)=
+  \begin{cases}
+    1 & |t|\le fW,\\
+    \dfrac{W-|t|}{(1-f)\,W} & fW < |t|\le W,\\
+    0 & |t|>W,
+  \end{cases}
+  \label{eq:trap-template}
+\end{equation}
+of \emph{half-width}~$W$ and \emph{flat fraction}~$f\in[0,1]$: a
+unit plateau over $[-fW,fW]$ joined to zero by two linear ramps
+(Figure~\ref{fig:trap-template}).
+
+\paragraph{Mapping to the machine parameters.}
+The first lobe spans $2T_j+T_a$, so the machine parameters fix
+$(W,f)$ exactly:
+\begin{align}
+  W &= T_j+\tfrac12 T_a
+     = \frac{a_{\max}}{2\,j_{\max}}
+       +\tfrac12\!\max\!\Big(0,\,\tfrac{v_{\max}}{a_{\max}}-T_j\Big),
+     \label{eq:W-from-kinematics}\\
+  f &= \frac{T_a}{T_a+2T_j}
+     = \frac{\max\!\big(0,\,v_{\max}/a_{\max}-T_j\big)}
+            {\max\!\big(0,\,v_{\max}/a_{\max}-T_j\big)+2T_j}.
+     \label{eq:f-from-kinematics}
+\end{align}
+A short hop that never reaches $v_{\max}$ has $T_a\!=\!0$ and
+$f\!=\!0$, a pure triangle; a long ride has $T_a\!\gg\!T_j$ and
+$f\!\to\!1$, a near-rectangular plateau.  The two lobes pull
+apart --- their centroid spacing $\Delta t_c$ exceeds $2W$ ---
+only once a $v_{\max}$ cruise opens between them, the 7-segment
+regime of~\S\ref{sec:bg-scurve}.
+
+\paragraph{The parametric family.}
+Every ride is therefore a pair of opposite-sign trapezoids of
+shared shape,
+\begin{equation}
+  a_\theta(t)
+  \;=\; s\,A\,\tau_{W,f}(t-t_{c,1})
+        \;-\; s\,A\,\tau_{W,f}(t-t_{c,2}),
+  \label{eq:ride-template}
+\end{equation}
+with amplitude $A\!=\!a_{\max}$, direction $s\!\in\!\{+1,-1\}$, and
+centroid spacing $\Delta t_c\!=\!t_{c,2}-t_{c,1}\!=\!H/v_{\max}$
+(Appendix~\ref{app:derivations}).
+
+\begin{wrapfigure}{r}{0.42\linewidth}
+  \vspace{-0.6em}
+  \centering
+  \begin{tikzpicture}[>=Stealth, font=\footnotesize, scale=0.62]
+    \pgfmathsetmacro{\W}{3.0}
+    \pgfmathsetmacro{\f}{0.45}
+    \pgfmathsetmacro{\fW}{\f*\W}
+    \pgfmathsetmacro{\hgt}{1.5}
+    \draw[->] ({-\W-0.55},0) -- ({\W+0.75},0) node[right] {$t$};
+    \draw[->] (0,-0.05) -- (0,{\hgt+1.0}) node[above] {$\tau_{W,f}(t)$};
+    \draw[very thick, blue!70!black]
+      ({-\W-0.5},0) -- (-\W,0) --
+      (-\fW,\hgt) -- (\fW,\hgt) --
+      (\W,0) -- ({\W+0.5},0);
+    \draw[dashed,gray!50] (0,\hgt) -- (-\fW,\hgt);
+    \node[left] at (0,\hgt) {\scriptsize $1$};
+    \draw[dotted,gray!55] (-\W,0) -- (-\W,0.15);
+    \draw[dotted,gray!55] (-\fW,0) -- (-\fW,\hgt);
+    \draw[dotted,gray!55] (\fW,0) -- (\fW,\hgt);
+    \draw[dotted,gray!55] (\W,0) -- (\W,0.15);
+    \node[below=2pt] at (-\W,0)  {\scriptsize $-W$};
+    \node[below=2pt] at (-\fW,0) {\scriptsize $-fW$};
+    \node[below=2pt] at (\fW,0)  {\scriptsize $fW$};
+    \node[below=2pt] at (\W,0)   {\scriptsize $W$};
+    \draw[decorate,decoration={brace,amplitude=3pt},thick,red!70!black]
+      (0,{\hgt+0.35}) -- (\W,{\hgt+0.35})
+      node[midway,above=2pt,red!70!black] {\scriptsize $W$};
+    \draw[decorate,decoration={brace,amplitude=3pt,mirror},thick,orange!80!black]
+      (-\fW,-0.6) -- (\fW,-0.6)
+      node[midway,below=2pt,orange!80!black] {\scriptsize $2fW$};
+  \end{tikzpicture}
+  \caption{The trapezoid basis function $\tau_{W,f}(t)$
+    of~\eqref{eq:trap-template}.}
+  \label{fig:trap-template}
+  \vspace{-0.5em}
+\end{wrapfigure}
+Three facts about this family~$\mathcal{F}_{\text{ride}}$ drive
+the rest of the paper.
+\emph{(i)}~Three of its parameters are constants of the building,
+so inverting enough rides identifies the building
+(\S\ref{sec:building-inventory}).  \emph{(ii)}~The two lobes carry
+equal and opposite area, so
+$\int_0^{T_{\text{ride}}}a_\theta(t)\,dt\!=\!0$ --- the zero-mean
+anchor for any ZUPT-style predictor.  \emph{(iii)}~The lobe
+spacing $\Delta t_c\!=\!H/v_{\max}$ is a scale-free estimator
+of~$H$, so the matched-filter detector needs no per-building
+amplitude calibration.
+
+\subsection{Smartphone sensors}
+\label{sec:bg-imu}
+
+The pipeline reads two phone sensors (Figure~\ref{fig:phone-sensors}):
+the accelerometer, which it always uses, and the orientation sensor,
+which feeds the optional addon of~\S\ref{sec:orientation-addon}.
+
+\begin{figure}[t]
+\centering
+\begin{subfigure}{0.46\linewidth}
+  \centering
+  \begin{tikzpicture}[>=Stealth, font=\scriptsize, scale=1.35]
+    \draw[rotate=30, rounded corners=1.6pt, line width=0.6pt,
+          draw=blue!55!black, fill=blue!10]
+          (-1.05,-0.23) rectangle (1.05,0.23);
+    \draw[->, dashed, gray!65, line width=0.6pt] (0,0) -- (90:1.6)
+          node[above, gray!55!black, inner sep=1pt] {$\hat z_w$};
+    \draw[->, red!75!black, line width=0.75pt] (0,0) -- (30:1.55)
+          node[right, inner sep=1.5pt] {$y$};
+    \draw[->, teal!60!black, line width=0.75pt] (0,0) -- (120:1.4)
+          node[left, inner sep=1.5pt] {$z$};
+    \draw[fill=white, line width=0.55pt] (0,0) circle (2.8pt);
+    \fill (0,0) circle (1pt);
+    \node[inner sep=1pt] at (-0.4,-0.36) {$x$};
+    \draw[->, gray!55, line width=0.5pt] (90:0.6) arc (90:120:0.6);
+    \node[gray!55!black, inner sep=1pt] at (105:0.86) {$R$};
+  \end{tikzpicture}
+  \caption{The accelerometer measures along the phone's body axes
+    $x,y,z$, tilted by an unknown rotation~$R$ from the world
+    vertical~$\hat z_w$.}
+  \label{fig:accel-frame}
+\end{subfigure}\hfill
+\begin{subfigure}{0.46\linewidth}
+  \centering
+  \begin{tikzpicture}[>=Stealth, font=\scriptsize,
+      blk/.style={draw, rounded corners=2pt, inner sep=3.5pt,
+                  align=center, font=\scriptsize, minimum width=2.5cm}]
+    \node[blk, draw=blue!55!black, fill=blue!8] (in) at (0,0)
+      {gyroscope\\accelerometer\\magnetometer};
+    \node[blk, draw=orange!75!black, fill=orange!16] (fu) at (0,-1.4)
+      {sensor fusion};
+    \node[blk, draw=teal!60!black, fill=teal!10] (out) at (0,-2.65)
+      {rotation $R$\\{\footnotesize body $\to$ world}};
+    \draw[->, line width=0.8pt] (in) -- (fu);
+    \draw[->, line width=0.8pt] (fu) -- (out);
+  \end{tikzpicture}
+  \caption{The orientation sensor fuses the gyroscope,
+    accelerometer, and magnetometer into the body-to-world
+    rotation~$R$.}
+  \label{fig:orient-fusion}
+\end{subfigure}
+\caption{The two smartphone sensors the pipeline reads: the
+  accelerometer's body-frame signal~(\subref{fig:accel-frame}) and
+  the orientation sensor's fused rotation~(\subref{fig:orient-fusion}).}
+\label{fig:phone-sensors}
+\end{figure}
+
+\paragraph{The accelerometer.}
+Every phone carries a six-axis MEMS IMU~\cite{beeby2004mems}.  Its
+\texttt{TYPE\_LINEAR\_ACCELERATION} stream reports the
+gravity-removed acceleration as a three-vector
+$\mathbf{a}=(a_x,a_y,a_z)$ along the phone's \emph{body axes} --- the
+$x,y,z$ fixed to the case (Figure~\ref{fig:accel-frame}).  The
+sensor-hub rate varies by device, so we resample every recording to
+a uniform $100$\,Hz grid ($\Delta t\!=\!10$\,ms).  The noise floor
+is white, but a hand-held phone adds coloured drift and
+$1\text{--}50$\,Hz vibration, so later sections fit the noise model
+on real ride residuals.
+
+\paragraph{The unknown vertical.}
+An elevator ride is purely vertical: the cabin accelerates along the
+world up-axis~$\hat z_w$, and that one scalar~$a(t)$ is all the
+pipeline wants.  The accelerometer, though, measures along the
+phone's body axes, and a hand-held phone tilts arbitrarily.  An
+unknown rotation~$R$ separates the two frames, so the vertical
+signal spreads across all three channels,
+$\mathbf{a}=R^{\!\top}\!a\,\hat z_w$ --- the body channel~$a_z$ is
+not the world vertical.  Recovering~$a(t)$ means recovering which
+body direction points up; the accelerometer-only pipeline reads it
+from gravity in the stationary windows around each ride.
+
+\paragraph{The orientation sensor.}
+The orientation sensor recovers that direction directly by fusing
+three sensors (Figure~\ref{fig:orient-fusion}).  The gyroscope
+reports angular rate, which integrates into smooth rotation but
+drifts over seconds.  The accelerometer's gravity reading pins the
+two tilt axes and the magnetometer pins heading, so the fusion
+cancels that drift.  Its output, at every sample, is a quaternion ---
+the rotation~$R$ from the body frame to the world frame.  With~$R$,
+the pipeline rotates each acceleration sample into the world frame
+and reads the vertical directly, $a=\hat z_w^{\!\top} R\,\mathbf{a}$.
+The addon of~\S\ref{sec:orientation-addon} builds on this rotation
+and quantifies the accuracy it adds.
+
+In short, the pipeline works from a $100$\,Hz body-frame
+acceleration stream, optionally paired with a per-sample
+body-to-world rotation.
+
+\section{Building-Level Inventory}
+\label{sec:building-inventory}
+
+% Stub: develop the per-building elevator-presence and elevator-type
+% classification capability that re-uses the family-fit machinery from
+% \S\ref{sec:method}.  Open questions: (i) what threshold of fits per
+% building is required for confident presence detection; (ii) what
+% taxonomy of elevator types we use; (iii) how we score type
+% confidence under sparse observation.
+
+\section{Orientation-Sensor Addon}
+\label{sec:orientation-addon}
+
+% Stub: describe the optional fusion of the phone's orientation
+% sensor (gyro + magnetometer + game-rotation) on top of the
+% accelerometer pipeline.  Quantify the accuracy gain on the same
+% held-out blind test.  Discuss when the addon helps and when it
+% does not (e.g., still-phone vs.\ rotated-phone recordings).
+
+\section{Evaluation}
+\label{sec:evaluation}
+
+We evaluate the pipeline on a controlled multi-building field
+campaign with barometer-derived ground truth.
+
+\subsection{Dataset and ground truth}
+\label{sec:eval-data}
+
+The dataset is a field campaign of \todo{$\approx$150} elevator
+rides recorded across \todo{7} elevators in \todo{6} buildings in
+central Israel (Table~\ref{tab:app-buildings}).  The buildings span
+residential, office, and hotel cabins, each with a different cabin
+geometry, motor, and floor-to-floor height, so no estimator can
+overfit a single machine.  Four phones, carried together, recorded
+every ride, so one physical event produced four heterogeneous
+accelerometer traces --- different MEMS parts, sampling jitter, and
+noise floors.  At least one of the four phones carries a barometric
+pressure sensor, which serves as the ground-truth device even when
+the phone under test has none.
+
+\begin{wrapfigure}{r}{0.42\linewidth}
+  \vspace{-0.7em}
+  \centering
+  \begin{tikzpicture}[>=Stealth, font=\scriptsize, scale=0.64]
+    \foreach \y/\name in {0/{$F_0$}, 1.5/{$F_1$}, 3.0/{$F_2$}}{
+      \draw[dashed, gray!55] (0,\y) -- (5.6,\y);
+      \node[gray!60!black, right, font=\tiny] at (5.6,\y) {\name};
+    }
+    \draw[->] (0,-0.7) -- (0,3.9) node[above, font=\tiny] {altitude};
+    \draw[->] (0,0) -- (6.2,0) node[right, font=\tiny] {$t$};
+    \draw[very thick, blue!70!black]
+      (0.2,0.12) -- (0.6,-0.12) -- (1.0,0.10) -- (1.4,-0.04) --
+      (1.8,0.55) -- (2.2,1.55) -- (2.6,2.40) -- (3.0,2.78) --
+      (3.5,2.60) -- (4.0,2.84) -- (4.5,2.64) -- (4.9,2.74);
+    \fill[red!75!black] (0.2,0) circle (1.5pt);
+    \node[red!75!black, below, font=\tiny] at (0.6,-0.18) {start floor};
+    \draw[->, red!75!black, thick] (4.9,2.74) -- (4.9,3.0);
+    \fill[red!75!black] (4.9,3.0) circle (1.5pt);
+    \node[red!75!black, right, font=\tiny] at (5.0,2.55) {snap};
+    \draw[decorate, decoration={brace, amplitude=4pt}, semithick]
+      (-0.22,0) -- (-0.22,3.0)
+      node[midway, left, font=\tiny] {$\Delta h_{\text{GT}}$};
+  \end{tikzpicture}
+  \caption{Snapping the drifting barometer altitude (blue) to the
+    nearest \emph{gramushka} floor line (dashed) yields a drift-free
+    ground-truth~$\Delta h$.}
+  \label{fig:gt-snap}
+  \vspace{-0.6em}
+\end{wrapfigure}
+
+Every ride's signed displacement~$\Delta h$ comes from the barometer
+rather than from hand-labelling.  We invert the pressure stream to
+altitude through the ISA barometric formula; a consumer barometer
+resolves altitude to roughly $10$\,cm, an order of magnitude finer
+than the $\sim\!3$\,m inter-floor pitch the pipeline must separate.
+Low-pass filtering and differencing the same altitude trace yields
+the \texttt{up}, \texttt{down}, and \texttt{outside} interval labels
+that cut each session into discrete rides.  A phone without a
+barometer borrows the pressure stream of a co-carried device,
+aligned to it by accelerometer cross-correlation
+(Appendix~\ref{app:dataset}).
+
+Raw barometric altitude drifts with weather and building airflow, so
+we snap it to the building itself.  Each building contributes a
+\emph{gramushka} table --- the floor elevations read from its
+accordion-folded architectural drawing (Figure~\ref{fig:gt-snap}).
+We anchor every session at its known start floor and integrate the
+barometer altitude across each detected ride.  Snapping the ride
+endpoint to the nearest table floor makes the ground-truth~$\Delta h$
+a true floor-to-floor displacement.  The pipeline flags any snap
+whose distance exceeds \todo{TBD}\,m for manual review rather than
+forcing it, and the one elevator without a drawing falls back to the
+drift-corrected barometer~$\Delta h$ (Appendix~\ref{app:dataset}).
+
+\section{Discussion}
+\label{sec:discussion}
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references}
+
+\appendix
+
+\section{Derivations referenced in
+         Section~\ref{sec:bg-time-constants}}
+\label{app:derivations}
+
+This appendix derives the closed forms for $T_j$, $T_a$, $T_v$, the
+acceleration-phase displacement $d_{\text{accel}}$, and the
+trapezoidal-regime ride duration~\eqref{eq:elevator-durations} from
+the bounds in~\eqref{eq:elevator-bounds}.  Throughout, we assume the
+trapezoidal regime $T_v\!>\!0$; the triangular and joined-pulse
+regimes ($T_v\!=\!0$, with $T_a$ also vanishing in the triangular
+limit) are the limits
+$H\!\downarrow\!a_{\max}T_j(T_j+T_a)$ of these formulas.
+
+\paragraph{Phase-1 velocity and displacement.}
+On phase~1, $j(t)\!=\!+j_{\max}$ with $a(0)\!=\!v(0)\!=\!0$.
+Integrating once,
+\(
+  a(t) = j_{\max}\,t,
+\)
+so $a(T_j)\!=\!a_{\max}$ forces
+\(
+  T_j = a_{\max}/j_{\max},
+\)
+which is~\eqref{eq:Tj}.  Integrating once more,
+\(
+  v(T_j) = \tfrac12 j_{\max} T_j^{2}
+         = \tfrac12 a_{\max} T_j,
+\)
+and integrating a third time,
+\(
+  h(T_j) = \tfrac16 j_{\max} T_j^{3}
+         = \tfrac16 a_{\max} T_j^{2}.
+\)
+
+\paragraph{Phase-2 velocity and displacement.}
+On phase~2, $a(t)\!=\!a_{\max}$ for $t\in[T_j,T_j+T_a]$.  Hence
+\(
+  v(T_j+T_a) = v(T_j) + a_{\max} T_a
+             = a_{\max}\!\left(\tfrac12 T_j + T_a\right).
+\)
+The displacement added in phase~2 is
+\(
+  \Delta h_{2} = v(T_j)\,T_a + \tfrac12 a_{\max} T_a^{2}.
+\)
+
+\paragraph{Phase-3 velocity and displacement.}
+On phase~3, $j(t)\!=\!-j_{\max}$ for $t\in[T_j+T_a, 2T_j+T_a]$, with
+$a(T_j+T_a)\!=\!a_{\max}$.  Integrating,
+\(
+  a(t) = a_{\max} - j_{\max}(t-T_j-T_a),
+\)
+so $a(2T_j+T_a)\!=\!0$ as required.  At the end of phase~3 the
+velocity is
+\(
+  v(2T_j+T_a) = v(T_j+T_a) + \tfrac12 a_{\max} T_j
+             = a_{\max}(T_j + T_a),
+\)
+which must equal $v_{\max}$ at the start of cruise.  Solving
+$a_{\max}(T_j+T_a)\!=\!v_{\max}$ for $T_a$ gives~\eqref{eq:Ta}.
+The displacement added in phase~3 is
+\(
+  \Delta h_{3} = v(T_j+T_a)\,T_j
+              + \tfrac12 a_{\max} T_j^{2}
+              - \tfrac16 j_{\max} T_j^{3}.
+\)
+
+\paragraph{Acceleration-phase displacement~$d_{\text{accel}}$.}
+Summing phases~1--3,
+\[
+  d_{\text{accel}}
+  \;=\; h(T_j) + \Delta h_{2} + \Delta h_{3}
+  \;=\; \tfrac12\,v_{\max}\,(2T_j + T_a),
+\]
+where the simplification uses $j_{\max}T_j\!=\!a_{\max}$ and
+$a_{\max}(T_j+T_a)\!=\!v_{\max}$.  By symmetry, phases~5--7 traverse
+the same displacement~$d_{\text{accel}}$.
+
+\paragraph{Cruise duration~$T_v$ and total ride
+            duration~$T_{\text{ride}}$.}
+The cruise phase~4 must cover the remaining
+$H-2d_{\text{accel}}\!=\!H-v_{\max}(2T_j+T_a)$ at velocity~$v_{\max}$:
+\[
+  T_v \;=\; \frac{H-v_{\max}(2T_j+T_a)}{v_{\max}}
+       \;=\; \frac{H}{v_{\max}} - 2T_j - T_a,
+\]
+which is~\eqref{eq:Tv}.  The total ride duration is
+$T_{\text{ride}}\!=\!4T_j+2T_a+T_v$; substituting~\eqref{eq:Ta}
+and~\eqref{eq:Tv} and simplifying yields the additive
+form~\eqref{eq:elevator-durations}.
+
+\paragraph{Centroid spacing of the two acceleration lobes.}
+The first lobe spans $[0, 2T_j+T_a]$ with centroid at $t_{c,1}\!=\!
+T_j+T_a/2$ (by symmetry of the trapezoid).  The second lobe spans
+$[2T_j+T_a+T_v,\, 4T_j+2T_a+T_v]$ with centroid at
+$t_{c,2}\!=\!3T_j+3T_a/2+T_v$.  The centroid spacing is therefore
+\[
+  \Delta t_{c}
+  \;=\; t_{c,2}-t_{c,1}
+  \;=\; 2T_j + T_a + T_v
+  \;=\; \frac{H}{v_{\max}} - T_a + T_a
+  \;=\; \frac{H}{v_{\max}},
+\]
+where the third equality uses~\eqref{eq:Tv}.  This proves the
+amplitude-free centroid identity used in the basis-function
+mapping of~\S\ref{sec:bg-family}: the temporal gap between the two
+acceleration lobes equals~$H/v_{\max}$ and is independent of
+$j_{\max}$ and~$a_{\max}$.
+
+\section{Time-optimal jerk is bang-bang}
+\label{app:bangbang}
+
+This appendix sketches why the optimal-time
+solution~\eqref{eq:elevator-opt} commands a jerk
+$j^{*}(t)\in\{-j_{\max},0,+j_{\max}\}$.  We follow the standard
+Pontryagin-maximum-principle argument for time-optimal control of
+a chain of integrators with bounded
+input~\cite{athans1966,kirk2004}; this paper does not depend on
+the algebra below, only on the result~\eqref{eq:bang-bang}.
+
+\paragraph{State and Hamiltonian.}
+Stack the cabin's state as $x=(h,v,a)^\top$ with dynamics
+\(
+  \dot x = (v,\,a,\,j)^\top,
+\)
+control $j(t)$, and free terminal time $T$.  The cost is
+$\int_0^T 1\,dt$.  Adjoining co-state multipliers
+$\lambda=(\lambda_h,\lambda_v,\lambda_a)^\top$ gives the
+Hamiltonian
+\[
+  \mathcal H(x,\lambda,j) \;=\; 1 \;+\; \lambda_h v \;+\; \lambda_v a
+                                \;+\; \lambda_a j.
+\]
+The PMP requires $j^{*}(t)$ to minimise $\mathcal H$ over the
+feasible set $|j|\le j_{\max}$ at every instant.  $\mathcal H$
+is linear in $j$, so the minimum is at the boundary:
+\begin{equation}
+  j^{*}(t) \;=\;
+  \begin{cases}
+    +j_{\max}, & \lambda_a(t) < 0,\\
+    -j_{\max}, & \lambda_a(t) > 0.
+  \end{cases}
+  \label{eq:bang-bang-derivation}
+\end{equation}
+The co-state equations $\dot\lambda = -\partial\mathcal H/\partial
+x$ give $\dot\lambda_h\!=\!0$, $\dot\lambda_v\!=\!-\lambda_h$,
+$\dot\lambda_a\!=\!-\lambda_v$, so
+$\lambda_a(t)\!=\!\tfrac12\lambda_h t^{2}-\lambda_v(0)t+\lambda_a(0)$
+is at most quadratic in~$t$ and crosses zero at most twice.
+Hence~$j^{*}$ has at most two switching times on any
+unconstrained arc.
+
+\paragraph{State-constraint arcs.}
+When the state-inequality $|a|\le a_{\max}$ becomes active, the
+solution slides along the boundary $a\equiv\pm a_{\max}$.  On such
+an arc, the controller must hold $\dot a\!=\!j\!=\!0$; otherwise
+the cabin would push past $a_{\max}$.  Identical reasoning applies
+to the velocity constraint $|v|\le v_{\max}$: when active,
+$\dot v\!=\!a\!=\!0$, which in turn forces $j\!=\!0$.  Stitching
+the unconstrained bang-bang arcs together with the
+constrained-zero arcs gives the three-valued
+result~\eqref{eq:bang-bang}.
+
+\paragraph{Singular-arc ruling.}
+A singular arc would require $\lambda_a(t)\equiv 0$ on a set of
+positive measure.  Differentiating $\lambda_a\equiv 0$ in time
+gives $\dot\lambda_a\!=\!-\lambda_v\equiv 0$ and a further
+differentiation gives $\lambda_h\equiv 0$.  But the PMP
+transversality condition for free terminal time is
+$\mathcal H(T)\!=\!0$, which on a singular arc reduces to
+$1\!=\!0$ --- a contradiction.  No singular arcs exist, so the
+bang-bang structure is exhaustive.
+
+\paragraph{Resulting profile.}
+With $j^{*}\in\{-j_{\max},0,+j_{\max}\}$ everywhere, the longest
+profile that includes both signs of the $|a|=a_{\max}$ plateau
+\emph{and} the $|v|=v_{\max}$ plateau is the seven-segment
+S-curve.  Suppressing one plateau yields the five-segment regime;
+suppressing both yields the three-segment regime.  Which regime
+applies depends on the boundary
+condition $h(T)\!=\!H$, as enumerated in~\S\ref{sec:bg-scurve}.
+
+\section{Dataset collection and ground-truth pipeline}
+\label{app:dataset}
+
+This appendix details the field campaign and the ground-truth
+construction summarised in~\S\ref{sec:eval-data}.
+
+\paragraph{Buildings and devices.}
+Table~\ref{tab:app-buildings} lists the \todo{7} elevators of the
+campaign, concentrated in Ra'anana with one building each in
+Herzeliya and Ramat Gan.  The Millenium hotel contributes two
+physically distinct elevators --- an internal cabin and an external
+one attached to the hotel body --- which we treat as separate
+elevators.  Four phones recorded every ride, spanning a mix of
+Galaxy~S23, Pixel, Redmi Note~12, Galaxy~A23, and Galaxy Z~Flip6
+hardware; the experimenters carried all four in one hand or bag, so
+every device saw near-identical motion, vibration, and acoustics.
+Figure~\ref{fig:app-buildings} shows the resulting spread: the
+elevators range from a 7-floor external hotel cabin to a 23-floor
+residential tower, with floor spacing that varies within and across
+buildings.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Elevator (internal name)} & \textbf{Type} & \textbf{Location} \\
+\midrule
+\texttt{milleniumHotel}        & Hotel       & Ra'anana \\
+\texttt{milleniumOutside}      & Hotel       & Ra'anana \\
+\texttt{acroBuilding}          & Office      & Ra'anana \\
+\texttt{beitMansour1}          & Residential & Ra'anana \\
+\texttt{beitYitzchakiRaanana}  & Residential & Ra'anana \\
+\texttt{BarIlan2Herzelia}      & Residential & Herzeliya \\
+\texttt{Haari3}                & Residential & Ramat Gan \\
+\bottomrule
+\end{tabular}
+\caption{The \todo{7} elevators across \todo{6} buildings of the
+  field campaign.  \texttt{milleniumHotel} and
+  \texttt{milleniumOutside} are two elevators in one hotel;
+  \texttt{milleniumOutside} has no architectural drawing and uses
+  drift-corrected barometer ground truth.
+  \texttt{beitYitzchakiRaanana} is the held-out blind-test building.}
+\label{tab:app-buildings}
+\end{table}
+
+\begin{figure}[t]
+  \centering
+  \begin{subfigure}{\linewidth}
+    \centering
+    \includegraphics[width=0.86\linewidth]{building_heights.png}
+    \caption{Total vertical range of each elevator.}
+    \label{fig:app-building-heights}
+  \end{subfigure}
+
+  \vspace{0.8em}
+  \begin{subfigure}{\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{building_heights_per_building.png}
+    \caption{Floor-by-floor elevations within each building.}
+    \label{fig:app-floor-profiles}
+  \end{subfigure}
+  \caption{The campaign's buildings, read from their \emph{gramushka}
+    floor-elevation tables.
+    (\subref{fig:app-building-heights})~Elevators range from a
+    7-floor external hotel cabin to a 23-floor residential tower.
+    (\subref{fig:app-floor-profiles})~Floor spacing varies within and
+    across buildings --- dense low-rise residential floors against a
+    sparse high-range office stack.}
+  \label{fig:app-buildings}
+\end{figure}
+
+\paragraph{Logging.}
+An Android logger subscribes to every inertial and environmental
+sensor the phone exposes and writes one tab-separated row per
+sample.  Table~\ref{tab:app-sensors} gives the channel schema.  The
+barometer channel~(\texttt{PRS}) is the ground-truth signal; we pair
+any phone without a barometer with a co-carried \texttt{forBarometer}
+device that has one.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Tag} & \textbf{Sensor} & \textbf{Columns} \\
+\midrule
+\texttt{ACC} & Linear accelerometer       & \texttt{x, y, z} \\
+\texttt{GYR} & Gyroscope                  & \texttt{x, y, z} \\
+\texttt{MAG} & Magnetometer               & \texttt{x, y, z} \\
+\texttt{ORI} & Rotation-vector quaternion & \texttt{w, x, y, z} \\
+\texttt{PRS} & Barometer                  & \texttt{pressure} \\
+\texttt{GPS} & GPS fix                    & \texttt{lat, lon, alt} \\
+\bottomrule
+\end{tabular}
+\caption{Sensor channels emitted by the logger.  The pipeline reads
+  \texttt{ACC} throughout and \texttt{ORI} for the orientation addon
+  of~\S\ref{sec:orientation-addon}; \texttt{PRS} supplies ground
+  truth only.}
+\label{tab:app-sensors}
+\end{table}
+
+\paragraph{Barometer interval detector.}
+The detector converts pressure to altitude through the ISA formula,
+low-pass filters it, and differences it into vertical velocity.  It
+marks samples above $0.15$\,m/s as moving, merges same-sign runs
+across short pauses, and drops runs too brief or too shallow to be a
+floor change.  It pads the survivors into \texttt{up} and
+\texttt{down} intervals and fills the gaps between them with
+\texttt{outside}.  The procedure is deterministic, so repeated runs
+label a recording identically.
+
+\paragraph{Cross-device time synchronisation.}
+Android timestamps a sensor event against device boot time, not
+wall-clock, so two phones disagree on when one physical event
+occurred by their boot-time difference --- often tens of thousands
+of seconds.  Aligning the first sample of each log fixes the offset
+to within the experimenter's tap latency; a normalised
+cross-correlation of the two accelerometer-magnitude traces over a
+$\pm 10$\,s window removes the residual.  The pipeline bakes the
+recovered offset into the secondary barometer stream before merging
+it, so every downstream stage sees one phone with a valid barometer.
+Figure~\ref{fig:app-alignment} overlays the two phones' accelerometer
+traces for one session after the correction.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{forbarometer_alignment.png}
+  \caption{One recording session after cross-device alignment.
+    \textbf{Top:} the primary phone's accelerometer
+    magnitude~$|a|$ (blue) and the time-shifted secondary phone's
+    $|a|$ (orange), with the secondary barometer altitude (green);
+    the two traces coincide once the boot-time offset is removed.
+    \textbf{Bottom:} the same overlay with the barometer-detected
+    ride intervals shaded (green~$=$~up, red~$=$~down).}
+  \label{fig:app-alignment}
+\end{figure}
+
+\paragraph{Gramushka floor-snapping.}
+Each building contributes a \emph{gramushka} table --- ``gramushka''
+names the accordion-folded architectural drawing
+(Figure~\ref{fig:app-gramushka}) --- listing every floor and its
+surveyed elevation.  The pipeline reads the session's
+start floor from the recording metadata, integrates the
+temperature-aware barometer altitude across each detected ride, and
+snaps the ride endpoint to the nearest floor in the table; the
+ground-truth~$\Delta h$ is the resulting floor-to-floor
+displacement.  The pipeline writes any snap whose distance exceeds
+\todo{TBD}\,m to a per-experiment flag file for manual review rather
+than applying it silently.  The external Millenium elevator has no
+drawing, so its rides keep the drift-corrected barometer~$\Delta h$.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.52\linewidth]{gramushka_drawing.png}
+  \caption{A \emph{gramushka}: the accordion-folded architectural
+    section drawing of a campaign building (Bar-Ilan~2, Herzeliya).
+    Every floor line carries a surveyed elevation; transcribing those
+    elevations yields the building's floor table.}
+  \label{fig:app-gramushka}
+\end{figure}
+
+\paragraph{Manual audit.}
+A barometer detector occasionally splits one ride in two, merges two
+into one, or mislabels an HVAC pressure ripple as motion.  Every
+ground-truth file therefore passes at least once through an editor
+(Figure~\ref{fig:app-gt-editor}) that overlays the interval labels on
+altitude, vertical velocity, and the three motion magnitudes, so a
+human checks each label against several modalities at once.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{gt_editor.png}
+  \caption{The ground-truth editor. Stacked panels show altitude,
+    vertical velocity, and the accelerometer, gyroscope, and
+    magnetometer magnitudes on a shared time axis; ground-truth
+    intervals are overlaid as coloured spans (green~$=$~up,
+    red~$=$~down, grey~$=$~outside). The side table lists every
+    interval for direct editing.}
+  \label{fig:app-gt-editor}
+\end{figure}
+
+\end{document}

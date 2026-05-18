@@ -68,11 +68,17 @@ def render_all(
     matched_pairs: list[dict],
     total: IntervalPredictionMetrics,
     out_dir: Path,
+    suffix: str = "",
 ) -> dict[str, Path]:
-    """Write the standard diagnostic set and return ``{name: path}``."""
+    """Write the standard diagnostic set and return ``{name: path}``.
+
+    ``suffix`` is inserted before the ``.png`` extension of every file
+    (e.g. ``"_noisy"`` → ``cdf_iou_noisy.png``) so several noise subsets
+    can share one flat output directory.
+    """
     paths: dict[str, Path] = {}
 
-    paths["iou"] = out_dir / "cdf_iou.png"
+    paths["iou"] = out_dir / f"cdf_iou{suffix}.png"
     _cdf_plot(
         [r["iou"] for r in matched_pairs],
         title="CDF of IoU over matched pairs",
@@ -80,7 +86,7 @@ def render_all(
         out_path=paths["iou"],
     )
 
-    paths["start_residual"] = out_dir / "cdf_start_residual.png"
+    paths["start_residual"] = out_dir / f"cdf_start_residual{suffix}.png"
     _cdf_plot(
         [r["start_residual_s"] for r in matched_pairs],
         title="CDF of start-edge residual  (pred - gt)",
@@ -88,7 +94,7 @@ def render_all(
         out_path=paths["start_residual"],
     )
 
-    paths["end_residual"] = out_dir / "cdf_end_residual.png"
+    paths["end_residual"] = out_dir / f"cdf_end_residual{suffix}.png"
     _cdf_plot(
         [r["end_residual_s"] for r in matched_pairs],
         title="CDF of end-edge residual  (pred - gt)",
@@ -96,7 +102,7 @@ def render_all(
         out_path=paths["end_residual"],
     )
 
-    paths["duration_error"] = out_dir / "cdf_duration_error.png"
+    paths["duration_error"] = out_dir / f"cdf_duration_error{suffix}.png"
     _cdf_plot(
         [r["duration_error_s"] for r in matched_pairs],
         title="CDF of duration error  (pred - gt)",
@@ -104,7 +110,7 @@ def render_all(
         out_path=paths["duration_error"],
     )
 
-    paths["failure_modes"] = out_dir / "failure_modes.png"
+    paths["failure_modes"] = out_dir / f"failure_modes{suffix}.png"
     _failure_mode_bar(total, paths["failure_modes"])
 
     return paths

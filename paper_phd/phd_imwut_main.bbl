@@ -1,0 +1,154 @@
+%%% -*-BibTeX-*-
+%%% Do NOT edit. File created by BibTeX with style
+%%% ACM-Reference-Format-Journals [18-Jan-2012].
+
+\begin{thebibliography}{10}
+
+%%% ====================================================================
+%%% NOTE TO THE USER: you can override these defaults by providing
+%%% customized versions of any of these macros before the \bibliography
+%%% command.  Each of them MUST provide its own final punctuation,
+%%% except for \shownote{} and \showURL{}.  The latter two
+%%% do not use final punctuation, in order to avoid confusing it with
+%%% the Web address.
+%%%
+%%% To suppress output of a particular field, define its macro to expand
+%%% to an empty string, or better, \unskip, like this:
+%%%
+%%% \newcommand{\showURL}[1]{\unskip}   % LaTeX syntax
+%%%
+%%% \def \showURL #1{\unskip}           % plain TeX syntax
+%%%
+%%% ====================================================================
+
+\ifx \showCODEN    \undefined \def \showCODEN     #1{\unskip}     \fi
+\ifx \showISBNx    \undefined \def \showISBNx     #1{\unskip}     \fi
+\ifx \showISBNxiii \undefined \def \showISBNxiii  #1{\unskip}     \fi
+\ifx \showISSN     \undefined \def \showISSN      #1{\unskip}     \fi
+\ifx \showLCCN     \undefined \def \showLCCN      #1{\unskip}     \fi
+\ifx \shownote     \undefined \def \shownote      #1{#1}          \fi
+\ifx \showarticletitle \undefined \def \showarticletitle #1{#1}   \fi
+\ifx \showURL      \undefined \def \showURL       {\relax}        \fi
+% The following commands are used for tagged output and should be
+% invisible to TeX
+\providecommand\bibfield[2]{#2}
+\providecommand\bibinfo[2]{#2}
+\providecommand\natexlab[1]{#1}
+\providecommand\showeprint[2][]{arXiv:#2}
+
+\bibitem[Athans and Falb(1966)]%
+        {athans1966}
+\bibfield{author}{\bibinfo{person}{Michael Athans} {and}
+  \bibinfo{person}{Peter~L. Falb}.} \bibinfo{year}{1966}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{Optimal Control: An Introduction to the
+  Theory and Its Applications}}.
+\newblock \bibinfo{publisher}{McGraw-Hill}.
+\newblock
+
+
+\bibitem[Bahl and Padmanabhan(2000)]%
+        {bahl2000radar}
+\bibfield{author}{\bibinfo{person}{Paramvir Bahl} {and}
+  \bibinfo{person}{Venkata~N. Padmanabhan}.} \bibinfo{year}{2000}\natexlab{}.
+\newblock \showarticletitle{{RADAR}: An In-Building {RF}-Based User Location
+  and Tracking System}. In \bibinfo{booktitle}{\emph{Proceedings of IEEE
+  INFOCOM}}. \bibinfo{pages}{775--784}.
+\newblock
+\href{https://doi.org/10.1109/INFCOM.2000.832252}{doi:\nolinkurl{10.1109/INFCOM.2000.832252}}
+
+
+\bibitem[Beeby et~al\mbox{.}(2004)]%
+        {beeby2004mems}
+\bibfield{author}{\bibinfo{person}{Stephen Beeby}, \bibinfo{person}{Graham
+  Ensell}, \bibinfo{person}{Michael Kraft}, {and} \bibinfo{person}{Neil
+  White}.} \bibinfo{year}{2004}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{{MEMS} Mechanical Sensors}}.
+\newblock \bibinfo{publisher}{Artech House}.
+\newblock
+
+
+\bibitem[{Chartered Institution of Building Services Engineers}(2020)]%
+        {cibseguidd2020}
+\bibfield{author}{\bibinfo{person}{{Chartered Institution of Building Services
+  Engineers}}.} \bibinfo{year}{2020}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{{CIBSE} Guide~D: Transportation Systems in
+  Buildings} (\bibinfo{edition}{fifth} ed.)}.
+\newblock CIBSE.
+\newblock
+
+
+\bibitem[Harle(2013)]%
+        {harle2013pdr}
+\bibfield{author}{\bibinfo{person}{Robert Harle}.}
+  \bibinfo{year}{2013}\natexlab{}.
+\newblock \showarticletitle{A Survey of Indoor Inertial Positioning Systems for
+  Pedestrians}.
+\newblock \bibinfo{journal}{\emph{IEEE Communications Surveys \& Tutorials}}
+  \bibinfo{volume}{15}, \bibinfo{number}{3} (\bibinfo{year}{2013}),
+  \bibinfo{pages}{1281--1293}.
+\newblock
+\href{https://doi.org/10.1109/SURV.2012.121912.00075}{doi:\nolinkurl{10.1109/SURV.2012.121912.00075}}
+
+
+\bibitem[{International Organization for Standardization}(2012)]%
+        {iso18738}
+\bibfield{author}{\bibinfo{person}{{International Organization for
+  Standardization}}.} \bibinfo{year}{2012}\natexlab{}.
+\newblock \bibinfo{title}{{ISO 18738-1:2012} --- Measurement of Ride Quality,
+  Part~1: Lifts (Elevators)}.
+\newblock \bibinfo{howpublished}{Standard, ISO}.
+\newblock
+
+
+\bibitem[Kirk(2004)]%
+        {kirk2004}
+\bibfield{author}{\bibinfo{person}{Donald~E. Kirk}.}
+  \bibinfo{year}{2004}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{Optimal Control Theory: An Introduction}
+  (\bibinfo{edition}{reprint} ed.)}.
+\newblock \bibinfo{publisher}{Dover Publications}.
+\newblock
+
+
+\bibitem[Liu et~al\mbox{.}(2007)]%
+        {liu2007indoor}
+\bibfield{author}{\bibinfo{person}{Hui Liu}, \bibinfo{person}{Houshang Darabi},
+  \bibinfo{person}{Pat Banerjee}, {and} \bibinfo{person}{Jing Liu}.}
+  \bibinfo{year}{2007}\natexlab{}.
+\newblock \showarticletitle{Survey of Wireless Indoor Positioning Techniques
+  and Systems}.
+\newblock \bibinfo{journal}{\emph{IEEE Transactions on Systems, Man, and
+  Cybernetics, Part C}} \bibinfo{volume}{37}, \bibinfo{number}{6}
+  (\bibinfo{year}{2007}), \bibinfo{pages}{1067--1080}.
+\newblock
+\href{https://doi.org/10.1109/TSMCC.2007.905750}{doi:\nolinkurl{10.1109/TSMCC.2007.905750}}
+
+
+\bibitem[Macfarlane and Croft(2003)]%
+        {macfarlane2003jerk}
+\bibfield{author}{\bibinfo{person}{Sonja Macfarlane} {and}
+  \bibinfo{person}{Elizabeth~A. Croft}.} \bibinfo{year}{2003}\natexlab{}.
+\newblock \showarticletitle{Jerk-Bounded Manipulator Trajectory Planning:
+  Design for Real-Time Applications}.
+\newblock \bibinfo{journal}{\emph{IEEE Transactions on Robotics and
+  Automation}} \bibinfo{volume}{19}, \bibinfo{number}{1}
+  (\bibinfo{year}{2003}), \bibinfo{pages}{42--52}.
+\newblock
+\href{https://doi.org/10.1109/TRA.2002.807548}{doi:\nolinkurl{10.1109/TRA.2002.807548}}
+
+
+\bibitem[Muralidharan et~al\mbox{.}(2014)]%
+        {muralidharan2014barometer}
+\bibfield{author}{\bibinfo{person}{Kartik Muralidharan},
+  \bibinfo{person}{Azeem~Javed Khan}, \bibinfo{person}{Archan Misra},
+  \bibinfo{person}{Rajesh~Krishna Balan}, {and} \bibinfo{person}{Sharad
+  Agarwal}.} \bibinfo{year}{2014}\natexlab{}.
+\newblock \showarticletitle{Barometric Phone Sensors: More Hype Than Hope!}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 15th Workshop on Mobile
+  Computing Systems and Applications (HotMobile)}}.
+  \bibinfo{pages}{12:1--12:6}.
+\newblock
+\href{https://doi.org/10.1145/2565585.2565596}{doi:\nolinkurl{10.1145/2565585.2565596}}
+
+
+\end{thebibliography}
