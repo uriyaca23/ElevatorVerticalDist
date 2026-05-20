@@ -2,7 +2,7 @@
 %%% Do NOT edit. File created by BibTeX with style
 %%% ACM-Reference-Format-Journals [18-Jan-2012].
 
-\begin{thebibliography}{10}
+\begin{thebibliography}{12}
 
 %%% ====================================================================
 %%% NOTE TO THE USER: you can override these defaults by providing
@@ -110,6 +110,19 @@
 \newblock
 
 
+\bibitem[Lei and Wasserman(2014)]%
+        {lei2014split}
+\bibfield{author}{\bibinfo{person}{Jing Lei} {and} \bibinfo{person}{Larry
+  Wasserman}.} \bibinfo{year}{2014}\natexlab{}.
+\newblock \showarticletitle{Distribution-Free Prediction Bands for
+  Non-Parametric Regression}.
+\newblock \bibinfo{journal}{\emph{Journal of the Royal Statistical Society:
+  Series B (Statistical Methodology)}} \bibinfo{volume}{76},
+  \bibinfo{number}{1} (\bibinfo{year}{2014}), \bibinfo{pages}{71--96}.
+\newblock
+\href{https://doi.org/10.1111/rssb.12021}{doi:\nolinkurl{10.1111/rssb.12021}}
+
+
 \bibitem[Liu et~al\mbox{.}(2007)]%
         {liu2007indoor}
 \bibfield{author}{\bibinfo{person}{Hui Liu}, \bibinfo{person}{Houshang Darabi},
@@ -149,6 +162,16 @@
   \bibinfo{pages}{12:1--12:6}.
 \newblock
 \href{https://doi.org/10.1145/2565585.2565596}{doi:\nolinkurl{10.1145/2565585.2565596}}
+
+
+\bibitem[Strakosch and Caporale(2010)]%
+        {strakosch2010}
+\bibfield{author}{\bibinfo{person}{George~R. Strakosch} {and}
+  \bibinfo{person}{Robert~S. Caporale}.} \bibinfo{year}{2010}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{The Vertical Transportation Handbook}
+  (\bibinfo{edition}{fourth} ed.)}.
+\newblock \bibinfo{publisher}{Wiley}.
+\newblock
 
 
 \end{thebibliography}

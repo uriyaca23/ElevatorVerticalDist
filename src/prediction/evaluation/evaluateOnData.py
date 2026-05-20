@@ -86,11 +86,8 @@ from pathlib import Path
 import pandas as pd
 
 from src.data.loader import (
-    EXPERIMENT_TYPES,
-    VALID_SOURCES,
-    classify_experiment_type,
-    getExperimentData,
-    list_experiments,
+    add_selection_args,
+    resolve_experiments,
 )
 from src.prediction.algorithms import (
     PREDICT_ALGORITHM_CONFIG,
@@ -124,41 +121,6 @@ NOISE_SUBSETS: dict[str, Callable[[pd.DataFrame], pd.DataFrame]] = {
     "clean": lambda df: df[df["signal_clear"] == True],   # noqa: E712
     "noisy": lambda df: df[df["signal_clear"] == False],  # noqa: E712
 }
-
-
-# --------------------------------------------------------------------------
-# Filter helpers
-# --------------------------------------------------------------------------
-def _experiment_metadata(name: str) -> dict | None:
-    try:
-        _, _, meta = getExperimentData(name)
-    except Exception:
-        return None
-    return meta
-
-
-def _resolve_experiments(
-    kind: str,
-    sources: list[str] | None,
-    include: list[str] | None,
-    exclude: list[str] | None,
-) -> list[str]:
-    """Return experiment names surviving every filter (and existing on disk)."""
-    candidates = list(include) if include else list_experiments(kind="all")
-    excluded = set(exclude or [])
-    out: list[str] = []
-    for name in candidates:
-        if name in excluded:
-            continue
-        if kind != "all" and classify_experiment_type(name) != kind:
-            continue
-        if sources:
-            meta = _experiment_metadata(name)
-            src = (meta or {}).get("source", "")
-            if src not in sources:
-                continue
-        out.append(name)
-    return sorted(out)
 
 
 def _load_records(experiments: list[str], verbose: bool):
@@ -272,26 +234,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                     "load conformal calibration, and render every "
                     "evaluation figure into the run directory.",
     )
-    p.add_argument(
-        "--kind", default="all",
-        choices=("all", *EXPERIMENT_TYPES),
-        help="Which experiments to run on — train, test, or all "
-             "(default). The run works on exactly that data.",
-    )
-    p.add_argument(
-        "--source", action="append", default=None,
-        choices=[*VALID_SOURCES, "all"],
-        help="Filter by metadata.source — repeatable. Pass 'all' (or "
-             "omit the flag) to keep every source.",
-    )
-    p.add_argument(
-        "--include", nargs="*", default=None,
-        help="Whitelist of experiment names (still subject to other filters).",
-    )
-    p.add_argument(
-        "--exclude", nargs="*", default=None,
-        help="Drop these experiment names from the run.",
-    )
+    add_selection_args(p)
     p.add_argument(
         "--calibration-dir", type=Path, default=None,
         help="Directory holding calibration_<algo>.json checkpoints. When "
@@ -307,11 +250,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Override the timestamp folder name.",
     )
     p.add_argument("--verbose", action="store_true")
-    args = p.parse_args(argv)
-    # 'all' is a convenience alias for "no source filter".
-    if args.source and "all" in args.source:
-        args.source = None
-    return args
+    return p.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -322,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
     print(f"writing run artefacts under {run_dir}")
 
-    experiments = _resolve_experiments(
+    experiments = resolve_experiments(
         kind=args.kind, sources=args.source,
         include=args.include, exclude=args.exclude,
     )

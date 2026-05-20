@@ -76,8 +76,13 @@ from .pipeline import (
     getExperimentRawParsed,
     list_experiments,
     list_structured_experiments,
+    load_experiment_index,
     rebuild_metadata_index,
     saveExperimentData,
+)
+from .selection import (
+    add_selection_args,
+    resolve_experiments,
 )
 
 __all__ = [
@@ -119,7 +124,11 @@ __all__ = [
     "saveExperimentData",
     "list_experiments",
     "list_structured_experiments",
+    "load_experiment_index",
     "rebuild_metadata_index",
+    # Selection
+    "add_selection_args",
+    "resolve_experiments",
     # Legacy
     "loadBasicData",
     "loadDataWithGT",

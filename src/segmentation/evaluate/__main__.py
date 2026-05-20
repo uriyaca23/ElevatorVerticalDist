@@ -18,7 +18,7 @@ import json
 import sys
 from pathlib import Path
 
-from src.data.loader import list_experiments
+from src.data.loader import resolve_experiments
 from src.segmentation.algorithms.configTypes import (
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,
@@ -53,7 +53,7 @@ def main() -> int:
     args = parser.parse_args()
 
     cfg = SEGMENT_ALGORITHM_CONFIG(algorithm=SegmentAlgorithm(args.algorithm))
-    experiments = [args.only] if args.only else list_experiments(kind=args.kind)
+    experiments = [args.only] if args.only else resolve_experiments(kind=args.kind)
     if not experiments:
         print("no experiments found", file=sys.stderr)
         return 1

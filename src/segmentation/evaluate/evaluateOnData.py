@@ -78,11 +78,10 @@ from pathlib import Path
 import pandas as pd
 
 from src.data.loader import (
-    EXPERIMENT_TYPES,
-    VALID_SOURCES,
-    classify_experiment_type,
+    add_selection_args,
     getExperimentData,
-    list_experiments,
+    load_experiment_index,
+    resolve_experiments,
 )
 from src.segmentation.algorithms.configTypes import (
     SEGMENT_ALGORITHM_CONFIG,
@@ -143,47 +142,6 @@ def _phone_canonical(metadata: dict | None) -> str:
     if "SM-A235F" in s:              return "Galaxy A23"
     if "Xiaomi" in s:                return "Xiaomi 22101320I"
     return s
-
-
-# --------------------------------------------------------------------------
-# Experiment filtering
-# --------------------------------------------------------------------------
-def _experiment_metadata(name: str) -> dict | None:
-    """Return the metadata row for ``name`` or ``None`` if unavailable.
-
-    Used to apply ``--source`` filters before running detection.
-    """
-    try:
-        _, _, meta = getExperimentData(name)
-    except Exception:
-        return None
-    return meta
-
-
-def _resolve_experiments(
-    kind: str,
-    sources: list[str] | None,
-    include: list[str] | None,
-    exclude: list[str] | None,
-) -> list[str]:
-    if include:
-        candidates = list(include)
-    else:
-        candidates = list_experiments(kind="all")
-    excluded = set(exclude or [])
-    out: list[str] = []
-    for name in candidates:
-        if name in excluded:
-            continue
-        if kind != "all" and classify_experiment_type(name) != kind:
-            continue
-        if sources:
-            meta = _experiment_metadata(name)
-            src = (meta or {}).get("source", "")
-            if src not in sources:
-                continue
-        out.append(name)
-    return sorted(out)
 
 
 # --------------------------------------------------------------------------
@@ -260,11 +218,12 @@ def _pick_timeline_examples(per_exp_pool, raw_pool):
 # CSV / metric dumps
 # --------------------------------------------------------------------------
 def _per_exp_csv(per_exp, out_path: Path) -> None:
+    index = load_experiment_index()
     rows = []
     for name, m in per_exp:
         rows.append({
             "exp": name, "label": _short_label(name),
-            "kind": classify_experiment_type(name),
+            "kind": index.get(name, {}).get("experiment_type", ""),
             **m.as_dict(),
         })
     pd.DataFrame(rows).to_csv(out_path, index=False)
@@ -447,27 +406,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=[a.value for a in SegmentAlgorithm],
         help="Detector to run (defaults to acc_template_match).",
     )
-    p.add_argument(
-        "--kind", default="all",
-        choices=("all", *EXPERIMENT_TYPES),
-        help="Restrict to train, test, or all experiments.",
-    )
-    p.add_argument(
-        "--source", action="append", default=None,
-        choices=[*VALID_SOURCES, "all"],
-        help="Filter by metadata.source — repeat to allow multiple "
-             "(e.g. --source experiment --source ido). Pass 'all' (or "
-             "omit the flag) to keep every source.",
-    )
-    p.add_argument(
-        "--include", nargs="*", default=None,
-        help="Whitelist of experiment names. When provided, only these "
-             "names are considered (still subject to other filters).",
-    )
-    p.add_argument(
-        "--exclude", nargs="*", default=None,
-        help="Drop these experiment names from the run.",
-    )
+    add_selection_args(p)
     p.add_argument(
         "--cleaned-exclude", nargs="*", default=(
             "UriyaCohenEliya_BarIlan2Herzelia_Pixel10_24-3-2026",
@@ -487,11 +426,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--run-name", default=None,
         help="Override the timestamp folder name (used as-is).",
     )
-    args = p.parse_args(argv)
-    # 'all' is a convenience alias for "no source filter".
-    if args.source and "all" in args.source:
-        args.source = None
-    return args
+    return p.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -506,7 +441,7 @@ def main(argv: list[str] | None = None) -> int:
 
     cleaned_exclude = set(args.cleaned_exclude or [])
 
-    experiments = _resolve_experiments(
+    experiments = resolve_experiments(
         kind=args.kind, sources=args.source,
         include=args.include, exclude=args.exclude,
     )
@@ -542,10 +477,10 @@ def main(argv: list[str] | None = None) -> int:
     raw = evaluator._run_on_experiments(cfg, experiments, verbose=True)
     print(f"\ndetection finished in {time.time() - t0:.1f}s")
 
-    phone_for_exp: dict[str, str] = {}
-    for e in raw:
-        meta = _experiment_metadata(e.name)
-        phone_for_exp[e.name] = _phone_canonical(meta)
+    index = load_experiment_index()
+    phone_for_exp = {
+        e.name: _phone_canonical(index.get(e.name)) for e in raw
+    }
 
     # --- render flat into run_dir; metrics.json carries the noise split ---
     metrics = _render_run(

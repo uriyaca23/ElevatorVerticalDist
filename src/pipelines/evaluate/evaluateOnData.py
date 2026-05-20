@@ -80,11 +80,9 @@ import numpy as np
 import pandas as pd
 
 from src.data.loader import (
-    EXPERIMENT_TYPES,
-    VALID_SOURCES,
-    classify_experiment_type,
-    getExperimentData,
-    list_experiments,
+    add_selection_args,
+    load_experiment_index,
+    resolve_experiments,
 )
 from src.prediction.algorithms.configTypes import (
     PREDICT_ALGORITHM_CONFIG,
@@ -109,37 +107,6 @@ DEFAULT_CALIBRATION = (
     REPO_ROOT / "src" / "data" / "structuredData" / "test_results"
     / "prediction" / "train" / "calibration_trapezoid.json"
 )
-
-
-def _experiment_metadata(name: str) -> dict | None:
-    try:
-        _, _, meta = getExperimentData(name)
-    except Exception:
-        return None
-    return meta
-
-
-def _resolve_experiments(
-    kind: str,
-    sources: list[str] | None,
-    include: list[str] | None,
-    exclude: list[str] | None,
-) -> list[str]:
-    candidates = list(include) if include else list_experiments(kind="all")
-    excluded = set(exclude or [])
-    out: list[str] = []
-    for name in candidates:
-        if name in excluded:
-            continue
-        if kind != "all" and classify_experiment_type(name) != kind:
-            continue
-        if sources:
-            meta = _experiment_metadata(name)
-            src = (meta or {}).get("source", "")
-            if src not in sources:
-                continue
-        out.append(name)
-    return out
 
 
 def _summary_block(gt_df: pd.DataFrame, seg_df: pd.DataFrame,
@@ -221,25 +188,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=[a.value for a in PredictAlgorithm],
         help="Prediction algorithm (default trapezoid_accel).",
     )
-    p.add_argument(
-        "--kind", default="all",
-        choices=("all", *EXPERIMENT_TYPES),
-        help="Restrict to train, test, or all experiments.",
-    )
-    p.add_argument(
-        "--source", action="append", default=None,
-        choices=[*VALID_SOURCES, "all"],
-        help="Filter by metadata.source — repeatable. Pass 'all' (or "
-             "omit the flag) to keep every source.",
-    )
-    p.add_argument(
-        "--include", nargs="*", default=None,
-        help="Whitelist of experiment names.",
-    )
-    p.add_argument(
-        "--exclude", nargs="*", default=None,
-        help="Drop these experiment names from the run.",
-    )
+    add_selection_args(p)
     p.add_argument(
         "--calibration-path", type=Path, default=DEFAULT_CALIBRATION,
         help="Conformal-calibration JSON to load onto the predictor "
@@ -254,11 +203,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--run-name", default=None,
         help="Override the timestamp folder name.",
     )
-    args = p.parse_args(argv)
-    # 'all' is a convenience alias for "no source filter".
-    if args.source and "all" in args.source:
-        args.source = None
-    return args
+    return p.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -283,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
         calibration_path=calibration_path,
     )
 
-    experiments = _resolve_experiments(
+    experiments = resolve_experiments(
         kind=args.kind, sources=args.source,
         include=args.include, exclude=args.exclude,
     )
@@ -292,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 1
 
+    index = load_experiment_index()
     settings = {
         "timestamp": timestamp,
         "argv": sys.argv,
@@ -317,9 +263,9 @@ def main(argv: list[str] | None = None) -> int:
             "n": len(experiments),
             "names": experiments,
             "n_train": sum(1 for e in experiments
-                            if classify_experiment_type(e) == "train"),
+                            if index.get(e, {}).get("experiment_type") == "train"),
             "n_test":  sum(1 for e in experiments
-                            if classify_experiment_type(e) == "test"),
+                            if index.get(e, {}).get("experiment_type") == "test"),
         },
     }
     (run_dir / "run_settings.json").write_text(

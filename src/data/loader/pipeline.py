@@ -24,6 +24,7 @@ derived from the barometer, and the CSVs are written. Pickle is no longer used.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterator
 
@@ -124,6 +125,26 @@ def list_structured_experiments(
             continue
         out.append(p.name)
     return out
+
+
+@lru_cache(maxsize=1)
+def load_experiment_index() -> dict[str, dict[str, str]]:
+    """Load the top-level experiment index ``structuredData/metadata.csv``
+    as a mapping ``exp_name -> {column: value}``.
+
+    This is the authoritative source for an experiment's ``experiment_type``
+    (``train`` / ``test``) and ``source`` — the metadata each experiment was
+    ingested with, rather than a guess from its folder name the way
+    :func:`classify_experiment_type` works. Cached for the process; returns
+    an empty dict when the index file is absent.
+    """
+    if not STRUCTURED_INDEX_CSV.is_file():
+        return {}
+    df = pd.read_csv(STRUCTURED_INDEX_CSV, dtype=str).fillna("")
+    return {
+        str(row["exp_name"]): {str(k): str(v) for k, v in row.items()}
+        for row in df.to_dict("records")
+    }
 
 
 def list_experiments(

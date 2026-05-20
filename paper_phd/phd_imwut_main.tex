@@ -33,6 +33,9 @@
 %% rather than centred at full width.
 \usepackage{wrapfig}
 
+%% Exact figure placement ([H]) for the in-flow pipeline overview in §3.
+\usepackage{float}
+
 %% Rights / publication metadata — placeholders, filled in at acceptance.
 \setcopyright{acmlicensed}
 \copyrightyear{2026}
@@ -90,9 +93,7 @@
   guarantees, adapts to ride duration, gravity-vector stability, and
   fit quality, and remains valid under both white sensor noise and
   the coloured (drift- and vibration-driven) noise that dominates
-  real hand-held recordings.  An optional addon fuses the phone's
-  orientation sensor on top of the accelerometer pipeline for
-  further accuracy gains.
+  real hand-held recordings.
 
   We evaluate on \todo{150} experiments spanning \todo{TBD} elevators
   in \todo{TBD} buildings (residential, office, hotel), with a strict
@@ -124,7 +125,7 @@
 \keywords{smartphone sensing, inertial measurement, elevator,
           vertical localization, conformal prediction,
           uncertainty quantification, indoor positioning,
-          building inventory}
+          matched filter}
 
 \maketitle
 
@@ -165,28 +166,20 @@ family precisely; what matters in the introduction is that the family
 is small enough to enumerate and structured enough to fit a candidate
 ride against.  Every claim in this paper rests on it.
 
-% Two capabilities: per-ride and building-level.
-Two capabilities follow from the family.  The first --- the focus of
-this paper --- is per-ride.  Given an inertial recording of a single
-elevator ride, return its signed vertical displacement~$\Delta h$
-together with a calibrated $90\,\%$ confidence interval.  The second
-is building-level.  From inertial recordings collected by passersby,
-classify whether a building has an elevator at all, and, when it
-does, identify the elevator type by the family parameters its rides
-span.  The combination converts a smartphone into both a per-ride
-displacement sensor and a passively built building inventory tool;
-Section~\ref{sec:building-inventory} develops the building-level
-capability.
+% The goal: per-ride displacement with a calibrated interval.
+The family turns a hard goal into a tractable one.  Given an inertial
+recording of a single elevator ride, we recover the ride's signed
+vertical displacement~$\Delta h$ together with a calibrated $90\,\%$
+confidence interval.  Recovery reduces to fitting a candidate ride
+against the family, which converts a smartphone into a per-ride
+vertical-displacement sensor that needs no barometer at inference
+time, no Wi-Fi survey, and no per-building calibration.
 
 % Design intuition (Move 4): pipeline shape, no algorithmic detail.
 Our pipeline has two stages.  Segmentation extracts ride intervals
 from a continuous, possibly hours-long, inertial stream.  Prediction
 returns~$\Delta h$ for each interval together with a per-ride
-uncertainty.  The pipeline uses the phone's accelerometer
-alone --- no barometer at inference time, no Wi-Fi, no per-building
-calibration --- and an optional addon
-(\S\ref{sec:orientation-addon}) fuses the phone's orientation sensor
-on top of the accelerometer pipeline for further accuracy.  The
+uncertainty.  Both stages read the phone's accelerometer alone.  The
 per-ride confidence interval is distribution-free, carries
 finite-sample coverage guarantees, and remains valid under both
 white sensor noise and the coloured (drift- and vibration-driven)
@@ -214,14 +207,6 @@ statistics.
     traces for an elevator ride from the cabin's mechanical limits,
     and use the same family as the substrate for both segmentation
     and per-ride prediction.
-  \item \textbf{Passively built building inventory.} We extend the
-    family-fitting machinery to a building-level capability that
-    determines whether a building has an elevator and classifies its
-    type from the family parameters of its rides.
-  \item \textbf{Orientation-sensor addon.} We describe an optional
-    addon that fuses the phone's orientation sensor on top of the
-    accelerometer pipeline, with quantified accuracy gain
-    (\S\ref{sec:orientation-addon}).
   \item \textbf{Dataset and harness.} We release the multi-building
     dataset (\todo{150} experiments, multiple phones per ride,
     barometer ground-truth pipeline), the full evaluation harness,
@@ -232,10 +217,11 @@ statistics.
 Section~\ref{sec:background} characterises the elevator's mechanical
 structure, the physical limits it imposes on a ride, and the family
 of expected acceleration functions those limits force.
-Section~\ref{sec:building-inventory} presents the building-level
-inventory capability.  Section~\ref{sec:orientation-addon} presents
-the orientation-sensor addon.  Section~\ref{sec:evaluation}
-describes the data collection, the train/test split, and the
+Section~\ref{sec:algorithm} presents the two-stage algorithm: it
+segments an inertial stream into rides and predicts each ride's
+$\Delta h$ with a calibrated interval.  Section~\ref{sec:dataset}
+describes the dataset and its ground truth, and
+Section~\ref{sec:evaluation} reports the train/test split and the
 results.  Sections~\ref{sec:discussion} and~\ref{sec:conclusion}
 discuss limitations and conclude.
 
@@ -651,9 +637,10 @@ centroid spacing $\Delta t_c\!=\!t_{c,2}-t_{c,1}\!=\!H/v_{\max}$
 \end{wrapfigure}
 Three facts about this family~$\mathcal{F}_{\text{ride}}$ drive
 the rest of the paper.
-\emph{(i)}~Three of its parameters are constants of the building,
-so inverting enough rides identifies the building
-(\S\ref{sec:building-inventory}).  \emph{(ii)}~The two lobes carry
+\emph{(i)}~Three of its parameters are constants of the building, so
+a ride differs from the building's other rides only in the
+height~$H$ --- the single quantity the predictor of
+\S\ref{sec:algorithm} recovers.  \emph{(ii)}~The two lobes carry
 equal and opposite area, so
 $\int_0^{T_{\text{ride}}}a_\theta(t)\,dt\!=\!0$ --- the zero-mean
 anchor for any ZUPT-style predictor.  \emph{(iii)}~The lobe
@@ -661,18 +648,13 @@ spacing $\Delta t_c\!=\!H/v_{\max}$ is a scale-free estimator
 of~$H$, so the matched-filter detector needs no per-building
 amplitude calibration.
 
-\subsection{Smartphone sensors}
+\subsection{The smartphone accelerometer}
 \label{sec:bg-imu}
 
-The pipeline reads two phone sensors (Figure~\ref{fig:phone-sensors}):
-the accelerometer, which it always uses, and the orientation sensor,
-which feeds the optional addon of~\S\ref{sec:orientation-addon}.
-
-\begin{figure}[t]
-\centering
-\begin{subfigure}{0.46\linewidth}
+\begin{wrapfigure}{r}{0.31\linewidth}
+  \vspace{-0.6em}
   \centering
-  \begin{tikzpicture}[>=Stealth, font=\scriptsize, scale=1.35]
+  \begin{tikzpicture}[>=Stealth, font=\scriptsize, scale=1.25]
     \draw[rotate=30, rounded corners=1.6pt, line width=0.6pt,
           draw=blue!55!black, fill=blue!10]
           (-1.05,-0.23) rectangle (1.05,0.23);
@@ -688,35 +670,15 @@ which feeds the optional addon of~\S\ref{sec:orientation-addon}.
     \draw[->, gray!55, line width=0.5pt] (90:0.6) arc (90:120:0.6);
     \node[gray!55!black, inner sep=1pt] at (105:0.86) {$R$};
   \end{tikzpicture}
-  \caption{The accelerometer measures along the phone's body axes
-    $x,y,z$, tilted by an unknown rotation~$R$ from the world
-    vertical~$\hat z_w$.}
+  \caption{Body axes $x,y,z$ tilt from the world
+    vertical~$\hat z_w$ by an unknown rotation~$R$.}
   \label{fig:accel-frame}
-\end{subfigure}\hfill
-\begin{subfigure}{0.46\linewidth}
-  \centering
-  \begin{tikzpicture}[>=Stealth, font=\scriptsize,
-      blk/.style={draw, rounded corners=2pt, inner sep=3.5pt,
-                  align=center, font=\scriptsize, minimum width=2.5cm}]
-    \node[blk, draw=blue!55!black, fill=blue!8] (in) at (0,0)
-      {gyroscope\\accelerometer\\magnetometer};
-    \node[blk, draw=orange!75!black, fill=orange!16] (fu) at (0,-1.4)
-      {sensor fusion};
-    \node[blk, draw=teal!60!black, fill=teal!10] (out) at (0,-2.65)
-      {rotation $R$\\{\footnotesize body $\to$ world}};
-    \draw[->, line width=0.8pt] (in) -- (fu);
-    \draw[->, line width=0.8pt] (fu) -- (out);
-  \end{tikzpicture}
-  \caption{The orientation sensor fuses the gyroscope,
-    accelerometer, and magnetometer into the body-to-world
-    rotation~$R$.}
-  \label{fig:orient-fusion}
-\end{subfigure}
-\caption{The two smartphone sensors the pipeline reads: the
-  accelerometer's body-frame signal~(\subref{fig:accel-frame}) and
-  the orientation sensor's fused rotation~(\subref{fig:orient-fusion}).}
-\label{fig:phone-sensors}
-\end{figure}
+  \vspace{-0.6em}
+\end{wrapfigure}
+
+The pipeline reads a single phone sensor --- the accelerometer ---
+and one obstacle separates its raw signal from the vertical
+acceleration a ride produces: the phone's unknown orientation.
 
 \paragraph{The accelerometer.}
 Every phone carries a six-axis MEMS IMU~\cite{beeby2004mems}.  Its
@@ -742,54 +704,15 @@ not the world vertical.  Recovering~$a(t)$ means recovering which
 body direction points up; the accelerometer-only pipeline reads it
 from gravity in the stationary windows around each ride.
 
-\paragraph{The orientation sensor.}
-The orientation sensor recovers that direction directly by fusing
-three sensors (Figure~\ref{fig:orient-fusion}).  The gyroscope
-reports angular rate, which integrates into smooth rotation but
-drifts over seconds.  The accelerometer's gravity reading pins the
-two tilt axes and the magnetometer pins heading, so the fusion
-cancels that drift.  Its output, at every sample, is a quaternion ---
-the rotation~$R$ from the body frame to the world frame.  With~$R$,
-the pipeline rotates each acceleration sample into the world frame
-and reads the vertical directly, $a=\hat z_w^{\!\top} R\,\mathbf{a}$.
-The addon of~\S\ref{sec:orientation-addon} builds on this rotation
-and quantifies the accuracy it adds.
+In short, the pipeline works from a single $100$\,Hz body-frame
+acceleration stream.
 
-In short, the pipeline works from a $100$\,Hz body-frame
-acceleration stream, optionally paired with a per-sample
-body-to-world rotation.
-
-\section{Building-Level Inventory}
-\label{sec:building-inventory}
-
-% Stub: develop the per-building elevator-presence and elevator-type
-% classification capability that re-uses the family-fit machinery from
-% \S\ref{sec:method}.  Open questions: (i) what threshold of fits per
-% building is required for confident presence detection; (ii) what
-% taxonomy of elevator types we use; (iii) how we score type
-% confidence under sparse observation.
-
-\section{Orientation-Sensor Addon}
-\label{sec:orientation-addon}
-
-% Stub: describe the optional fusion of the phone's orientation
-% sensor (gyro + magnetometer + game-rotation) on top of the
-% accelerometer pipeline.  Quantify the accuracy gain on the same
-% held-out blind test.  Discuss when the addon helps and when it
-% does not (e.g., still-phone vs.\ rotated-phone recordings).
-
-\section{Evaluation}
-\label{sec:evaluation}
-
-We evaluate the pipeline on a controlled multi-building field
-campaign with barometer-derived ground truth.
-
-\subsection{Dataset and ground truth}
-\label{sec:eval-data}
+\section{Dataset and Ground Truth}
+\label{sec:dataset}
 
 The dataset is a field campaign of \todo{$\approx$150} elevator
 rides recorded across \todo{7} elevators in \todo{6} buildings in
-central Israel (Table~\ref{tab:app-buildings}).  The buildings span
+central Israel (Table~\ref{tab:app-sessions}).  The buildings span
 residential, office, and hotel cabins, each with a different cabin
 geometry, motor, and floor-to-floor height, so no estimator can
 overfit a single machine.  Four phones, carried together, recorded
@@ -853,6 +776,406 @@ whose distance exceeds \todo{TBD}\,m for manual review rather than
 forcing it, and the one elevator without a drawing falls back to the
 drift-corrected barometer~$\Delta h$ (Appendix~\ref{app:dataset}).
 
+\section{Algorithm}
+\label{sec:algorithm}
+
+The pipeline converts a continuous, hours-long accelerometer stream
+into one signed displacement~$\Delta h$ per elevator ride, each
+carrying a calibrated $90\,\%$ confidence interval, in two stages
+(Figure~\ref{fig:pipeline}).  Segmentation slices the stream into
+discrete ride intervals~(\S\ref{sec:algo-seg}); prediction fits each
+interval for its~$\Delta h$ and uncertainty~(\S\ref{sec:algo-pred}).
+Both stages reuse the trapezoid family of~\S\ref{sec:bg-family}
+directly: a ride is an opposite-sign pair of trapezoid
+lobes~\eqref{eq:ride-template}, so the matched filter that finds a
+ride is the matched filter that measures it.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[>=Stealth, font=\footnotesize,
+    stage/.style={draw, rounded corners=2pt, align=center,
+                  inner sep=4pt, minimum width=2.3cm,
+                  minimum height=0.95cm, draw=blue!55!black,
+                  fill=blue!8},
+    data/.style={align=center, font=\scriptsize}]
+  \node[data]  (in)    at (0,0)    {accelerometer\\stream};
+  \node[stage] (seg)   at (2.75,0) {Segmentation\\(\S\ref{sec:algo-seg})};
+  \node[data]  (rides) at (5.5,0)  {ride\\intervals};
+  \node[stage] (pred)  at (8.25,0) {Prediction\\(\S\ref{sec:algo-pred})};
+  \node[data]  (out)   at (10.9,0) {$\Delta h\,\pm\,$CI};
+  \draw[->,line width=0.8pt] (in)    -- (seg);
+  \draw[->,line width=0.8pt] (seg)   -- (rides);
+  \draw[->,line width=0.8pt] (rides) -- (pred);
+  \draw[->,line width=0.8pt] (pred)  -- (out);
+\end{tikzpicture}
+\caption{The two-stage pipeline.  Segmentation turns a continuous
+  accelerometer stream into discrete ride intervals; prediction turns
+  each interval into a signed displacement~$\Delta h$ with a
+  calibrated confidence interval.  Both stages fit the trapezoid ride
+  family of~\S\ref{sec:bg-family}.}
+\label{fig:pipeline}
+\end{figure}
+
+\subsection{Segmentation}
+\label{sec:algo-seg}
+
+Segmentation cuts an hours-long accelerometer stream into discrete
+ride intervals, each tagged \texttt{up} or \texttt{down}.  A ride is
+an opposite-sign pair of trapezoid lobes~\eqref{eq:ride-template}, so
+segmentation detects candidate lobes~(\S\ref{sec:algo-detect}) and
+then pairs them into rides~(\S\ref{sec:algo-pair}).
+
+\subsubsection{Detecting candidate lobes}
+\label{sec:algo-detect}
+
+The pipeline projects the three-axis accelerometer onto the session's
+gravity direction (\S\ref{sec:bg-imu}) and smooths it into a signed
+vertical trace~$a(t)$.  A least-squares matched filter scores~$a(t)$
+against every lobe template~$\tau_{W,f}$ of the
+family~$\mathcal{F}_{\text{ride}}$ (\S\ref{sec:bg-family}): at each
+sample~$i$, fitting one amplitude to the length-$2W$
+window~$a_{[i]}$ centred on~$i$ gives
+\begin{equation}
+  \hat A_{W,f}(i)=
+    \frac{\langle a_{[i]},\,\tau_{W,f}\rangle}{\|\tau_{W,f}\|^{2}},
+  \qquad
+  R^{2}_{W,f}(i)=
+    1-\frac{\|a_{[i]}-\hat A_{W,f}(i)\,\tau_{W,f}\|^{2}}
+           {\|a_{[i]}\|^{2}}.
+  \label{eq:matched-filter}
+\end{equation}
+Collapsing the $(W,f)$ grid by amplitude sign yields, per sample,
+\begin{equation}
+  R^{2}(i)=\max_{W,f}R^{2}_{W,f}(i),
+  \qquad
+  R^{2}_{\pm}(i)=\max_{\,\pm\hat A_{W,f}(i)>0}R^{2}_{W,f}(i),
+  \label{eq:signed-r2}
+\end{equation}
+where a high $R^{2}_{+}(i)$ marks a take-off lobe and a high
+$R^{2}_{-}(i)$ a landing lobe.  A candidate lobe is a strict local
+maximum of $R^{2}_{+}$ or~$R^{2}_{-}$ that clears an amplitude and a
+shape floor,
+\begin{equation}
+  |\hat A(i)|\ge a_{\min},
+  \qquad
+  R^{2}(i)\ge r_{\min},
+  \label{eq:detect-gate}
+\end{equation}
+with $\hat A(i)$ the amplitude at the best grid cell; non-maximum
+suppression then drops near-duplicates within~$\delta_{\mathrm{nms}}$
+and keeps same-sign lobes at least~$\Delta_{\mathrm{ss}}$ apart
+(Figure~\ref{fig:signed-r2}).  The grid bounds
+\eqref{eq:W-from-kinematics}--\eqref{eq:f-from-kinematics} and the
+thresholds are calibrated on the training set
+(Appendix~\ref{app:segmentation}).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\linewidth]{trapezoid_signed_r2_example.png}
+\caption{Signed score traces $R^{2}_{+}(t)$ (take-off, blue) and
+  $R^{2}_{-}(t)$ (landing, red) around one ride.  Local maxima are
+  candidate lobes; dot colour marks the first stage to reject each
+  peak, leaving the committed take-off/landing pair (green).}
+\label{fig:signed-r2}
+\end{figure}
+
+\subsubsection{Pairing candidate lobes into rides}
+\label{sec:algo-pair}
+
+Each candidate lobe~$i$ admits an opposite-sign partner set inside
+the ride-duration window,
+\begin{equation}
+  \mathcal{P}(i)=\bigl\{\,j:\;
+    \operatorname{sign}\hat A(j)=-\operatorname{sign}\hat A(i),\;\;
+    t_{\min}\le |t_j-t_i|\le t_{\max}\,\bigr\}.
+  \label{eq:partner-set}
+\end{equation}
+A genuine ride's two lobes are cut from one cabin profile, so each
+pair $(i,j)$ is fitted with a single template and a single shared
+amplitude.  With $a_k$ the $k$th lobe window, $P_k=\|a_k\|^{2}$,
+$u_k=s_k\langle a_k,\tau_{W,f}\rangle$ its sign-corrected
+correlation, and $N=\|\tau_{W,f}\|^{2}$,
+\begin{equation}
+  A^{\star}(W,f)=\frac{u_1+u_2}{2N},
+  \qquad
+  R^{2}_k(W,f)=1-\frac{P_k-2A^{\star}u_k+(A^{\star})^{2}N}{P_k},
+  \label{eq:joint-fit}
+\end{equation}
+and the pair score is
+$S(i,j)=\max_{W,f}\tfrac12\bigl(R^{2}_1+R^{2}_2\bigr)$, attained at
+$(W^{\star},f^{\star},A^{\star})$.  These starred values describe one
+\emph{average} lobe: the fit assumes take-off and landing share a
+shape, so $A^{\star}$ averages the two single-lobe amplitudes.  A
+high $S$ means both lobes trace out that same trapezoid.  The pair is admissible when
+\begin{equation}
+  S(i,j)\ge r_{\mathrm{pair}},
+  \quad
+  A^{\star}\ge a_{\mathrm{pair}},
+  \quad
+  E(i,j)\ge e_{\min},
+  \quad
+  \mathrm{RMS}_{\mathrm{mid}}\le \rho\,A^{\star}.
+  \label{eq:pair-gate}
+\end{equation}
+The grid energy~$E$ averages the clamped joint~$R^{2}$ over every
+cell of the $(W,f)$ template grid~$G$,
+\begin{equation}
+  E(i,j)=\frac{1}{|G|}\sum_{(W,f)\in G}
+    \max\!\bigl(0,\;\tfrac12(R^{2}_1(W,f)+R^{2}_2(W,f))\bigr),
+  \label{eq:grid-energy}
+\end{equation}
+so a real ride --- which lights a broad band of cells, not one ---
+clears the floor~$e_{\min}$.  The cruise term
+$\mathrm{RMS}_{\mathrm{mid}}$ is the trace RMS on the inter-lobe
+stretch, near zero while the cabin holds constant velocity.  A greedy
+resolver ranks admissible pairs by
+\begin{equation}
+  \operatorname{rank}(i,j)=S(i,j)-\lambda\,|t_j-t_i|
+  \label{eq:pair-rank}
+\end{equation}
+and commits them highest-first, skipping any that reuse a lobe or
+overlap a committed interval.  The penalty~$\lambda$ defeats the
+\emph{super pair} --- a take-off matched to a far-later landing,
+which scores like a true ride but spans far longer.  The committed
+pairs are the ride intervals passed to prediction.
+
+\begin{center}
+\textcolor{blue}{\bfseries Appendix~\ref{app:thresholds} explains and
+illustrates every detection and pair-filter threshold.}
+\end{center}
+
+\subsection{Prediction}
+\label{sec:algo-pred}
+
+Prediction takes one ride interval and returns the signed
+displacement~$\Delta h$, a per-ride standard deviation~$\sigma$, a
+calibrated $90\,\%$ confidence interval, and an \texttt{accepted}
+flag.  Displacement follows from one fact: an accelerometer measures
+acceleration, and displacement is its double integral --- integrate
+the vertical trace~$a(t)$ once for velocity, twice for~$\Delta h$.
+The front end recovers that signed vertical trace from the three-axis
+accelerometer by the gravity projection of~\S\ref{sec:bg-imu}.
+
+Two accelerometer-only algorithms run that double integral by
+different routes.  ZUPT double integration~(\S\ref{sec:algo-zupt})
+integrates the measured~$a(t)$ directly, anchored by the cabin
+resting at both ends of the ride.  The trapezoid pulse-pair
+fit~(\S\ref{sec:algo-trapezoid}) integrates a model instead: it
+constructs the ride's theoretical acceleration signal --- the
+trapezoid pulse pair of~\S\ref{sec:bg-family} --- and integrates it
+in closed form, reading~$\Delta h$ off a formula in the fitted shape.
+Section~\ref{sec:evaluation} compares them head to head.
+
+Both feed three shared stages: a per-ride error
+model~(\S\ref{sec:algo-error}), a conformal layer that
+calibrates~$\sigma$ into the interval~(\S\ref{sec:algo-ci}), and a
+quality filter that sets the \texttt{accepted}
+flag~(\S\ref{sec:algo-quality}).  The trapezoid fit borrows only
+ZUPT's cruise-velocity scale as an amplitude anchor, never its
+displacement, so the two stay independent estimators and the
+comparison of~\S\ref{sec:evaluation} stays meaningful.
+
+\subsubsection{ZUPT double integration}
+\label{sec:algo-zupt}
+
+ZUPT recovers~$\Delta h$ by double-integrating the measured vertical
+acceleration under a zero-velocity boundary at both ends of the ride,
+\begin{equation}
+  v(t)=\int_{0}^{t}\!a(\tau)\,d\tau
+        \;-\;\frac{t}{T}\int_{0}^{T}\!a(\tau)\,d\tau,
+  \qquad
+  \Delta h=\int_{0}^{T}\!v(t)\,dt,
+  \label{eq:zupt-integral}
+\end{equation}
+over a ride of duration~$T$.
+
+The boundary assumption anchors the integral.  A ride begins and ends
+with the cabin at rest, so $v(0)=v(T)=0$.  The first integral
+of~\eqref{eq:zupt-integral} enforces $v(0)=0$ by construction; the
+linear ramp term subtracts the integrated-noise drift that would
+otherwise leave $v(T)\neq0$ --- the zero-velocity update that names
+the method.
+
+ZUPT integrates only the moving span: the pipeline thresholds the
+vertical trace at $|a(t)|=0.10\,\mathrm{m/s^2}$ and zeroes the quiet
+pre- and post-roll, so noise outside the ride never enters the
+integral.  The count~$N$ of active samples sets the scale of the
+error model~(\S\ref{sec:algo-error}).
+
+\subsubsection{Trapezoid pulse-pair fit}
+\label{sec:algo-trapezoid}
+
+\begin{wrapfigure}{r}{0.40\linewidth}
+  \vspace{-0.7em}
+  \centering
+  \includegraphics[width=\linewidth]{trapezoid_pulse_pair.png}
+  \caption{The reconstructed signal~$a_\theta(t)$ (red) overlaid on
+    the smoothed vertical trace (black) for one ride: two
+    opposite-sign trapezoid lobes centred at~$t_{c,1}$
+    and~$t_{c,2}$.}
+  \label{fig:trap-pulse-pair}
+  \vspace{-0.6em}
+\end{wrapfigure}
+
+The trapezoid fit recovers~$\Delta h$ from the \emph{shape} of the
+acceleration trace.  The ride's theoretical signal is the S-curve
+of~\S\ref{sec:bg-scurve}, set by three machine
+parameters~$(j_{\max},a_{\max},v_{\max})$ besides the height.  Fitting
+all three to a hand-held recording is ill-conditioned: the jerk ramps
+occupy too small a fraction of the ride to constrain them.  The fit
+instead collapses each acceleration lobe to the trapezoid~$\tau_{W,f}$
+the detector already uses, a two-parameter shape the bang-bang jerk
+command makes exact~(\S\ref{sec:bg-family}).
+
+The segmenter (\S\ref{sec:algo-pair}) already returns the fitted
+parameters~$(W,f,A,s,t_{c,1},t_{c,2})$ that reconstruct the ride's
+acceleration as the opposite-sign trapezoid pair
+\begin{equation}
+  a_\theta(t) \;=\; sA\,\tau_{W,f}(t-t_{c,1})
+                 \;-\; sA\,\tau_{W,f}(t-t_{c,2}),
+  \label{eq:trap-signal}
+\end{equation}
+the estimated ride signal (Figure~\ref{fig:trap-pulse-pair}).
+Double-integrating~$a_\theta(t)$ gives~$\Delta h$ in closed form,
+\begin{equation}
+  \Delta h \;=\; s\,A\,W\,(1+f)\,\Delta t_c,
+  \qquad \Delta t_c=t_{c,2}-t_{c,1};
+  \label{eq:dh-closed}
+\end{equation}
+Appendix~\ref{app:prediction} works through the integral and the
+joined-pulse limit.
+
+\subsubsection{Theoretical error analysis}
+\label{sec:algo-error}
+
+Every prediction carries a per-ride standard deviation~$\sigma$
+derived from its own fit, not a constant.  The two algorithms reach
+that~$\sigma$ from different error sources.
+
+\paragraph{ZUPT.}
+Double integration accumulates sensor noise.  Integrating white noise
+of standard deviation~$\sigma_a$ twice over~$N$ active samples of
+spacing~$\Delta t$ gives an end-point displacement variance whose
+root is
+\begin{equation}
+  \sigma_{\mathrm{white}}
+   \;=\; \sigma_a\,\Delta t^{2}\,\sqrt{N^{3}/12},
+  \label{eq:sigma-zupt}
+\end{equation}
+the classic ZUPT result, with the factor~$1/12$ crediting the linear
+drift correction of~\eqref{eq:zupt-integral} for removing one degree
+of freedom.  A hand-held phone carries three further error sources,
+which the total budget adds to the white-noise term in quadrature,
+\begin{equation}
+  \sigma_{\mathrm{ZUPT}}^{2}
+   \;=\;\sigma_{\mathrm{white}}^{2}
+        +\sigma_{\mathrm{mech}}^{2}
+        +\sigma_{\mathrm{rel}}^{2}
+        +\sigma_{\mathrm{proj}}^{2}\,:
+  \label{eq:sigma-zupt-total}
+\end{equation}
+a mechanical-jitter term~$\sigma_{\mathrm{mech}}$ for hand and pocket
+movement, a relative-scale term~$\sigma_{\mathrm{rel}}$ that grows
+with~$|\Delta h|$, and a projection penalty~$\sigma_{\mathrm{proj}}$
+for rides that lack a clean gravity reference.
+Appendix~\ref{app:prediction} derives all four.
+
+\paragraph{Trapezoid.}
+The trapezoid budget propagates the matched-filter fit uncertainty
+through the closed-form height~\eqref{eq:dh-closed} by the delta
+method,
+\begin{equation}
+  \sigma_{\Delta h}^{2}
+  \;=\;[W(1{+}f)\,\Delta t_c]^{2}\,\sigma_A^{2}
+       +[A(1{+}f)\,\Delta t_c]^{2}\,\sigma_W^{2}
+       +[AW\,\Delta t_c]^{2}\,\sigma_f^{2}
+       +[AW(1{+}f)]^{2}\,\sigma_{\Delta t_c}^{2},
+  \label{eq:sigma-dh}
+\end{equation}
+with the per-parameter variances supplied by the matched-filter
+Cram\'er--Rao bound (template energy and noise level).  Two
+data-adaptive corrections fit the budget to hand-held data: the
+effective noise level uses the fit residual rather than the datasheet
+figure, and the whole budget is divided by the joint~$R^{2}$.
+Appendix~\ref{app:prediction} derives every term.
+
+\subsubsection{Confidence interval}
+\label{sec:algo-ci}
+
+The per-ride~$\sigma$ sets the \emph{shape} of the uncertainty but
+not its \emph{scale}: nothing so far guarantees that~$\pm\sigma$
+brackets the true height with any stated probability.  Split-conformal
+calibration~\cite{lei2014split} supplies the guarantee.  On a held-out
+calibration set the pipeline computes, for every ride~$i$, the
+nonconformity score
+\begin{equation}
+  r_i \;=\; \frac{|\widehat{\Delta h}_i - \Delta h_i|}{\sigma_i},
+  \label{eq:nonconformity}
+\end{equation}
+the prediction error in units of its own~$\sigma$, and takes the
+empirical $(1-\alpha)$ quantile of~$\{r_i\}$ as a single
+multiplier~$k$.  The reported interval is~$\widehat{\Delta h}\pm
+k\sigma$.  By the standard split-conformal argument the interval has
+distribution-free, finite-sample coverage,
+\begin{equation}
+  \mathbb{P}\!\left(\,|\widehat{\Delta h}-\Delta h|\le k\sigma\,\right)
+  \;\ge\; 1-\alpha,
+  \label{eq:conformal-coverage}
+\end{equation}
+for exchangeable rides, with no assumption on the error
+distribution.  We set $\alpha=0.1$ for a $90\,\%$ interval.
+
+The same machinery wraps both algorithms, but each calibrates its
+multiplier separately.  ZUPT calibrates~$k$ on the clean
+calibration rides; the trapezoid fit calibrates on the rides that are
+both clean and quality-accepted, its exchangeable population.  The
+multiplier is the $\lceil(1-\alpha)(n+1)\rceil/n$ empirical quantile
+of the~$n$ scores, floored at~$1.645$ so a small calibration sample
+cannot return an interval narrower than the Gaussian $90\,\%$
+half-width.
+
+The interval is \emph{adaptive} because the multiplier is shared
+while~$\sigma$ is not.  A long, cleanly fitted ride and a short,
+poorly fitted one take the same~$k$ but very different~$\sigma$, so
+the interval widens exactly where the error model says the fit is
+weak --- short rides, unstable gravity, low joint~$R^{2}$.
+Appendix~\ref{app:prediction} states the exchangeability assumption
+and the per-algorithm calibration protocol.
+
+\subsubsection{Quality filter}
+\label{sec:algo-quality}
+
+The last step attaches the \texttt{accepted} flag.  Each algorithm
+runs its own quality filter, but the two share a shape: a handful of
+interpretable features, a set of hard gates, and an additive penalty
+score over the graded features.  The first breach rejects the ride
+with a human-readable reason, and the filter rejects whenever any
+hard gate trips or the penalty score exceeds~$6$.
+
+The two filters differ in what they inspect.  Both check the
+bracketing-window gravity, the phone's orientation, and the
+active-motion fraction --- any accelerometer estimate is only as good
+as its vertical axis.  ZUPT adds an impact gate and an end-velocity
+check~(Table~\ref{tab:quality-checks-zupt}).  The trapezoid filter
+adds fit-quality and geometry checks: the joint~$R^{2}$, the residual
+autocorrelation, the agreement between the velocity-anchored and
+matched-filter amplitudes, the residual energy outside the two lobes,
+and the steadiness of the integrated cruise
+velocity~(Table~\ref{tab:quality-checks}).
+Appendix~\ref{app:prediction} explains and illustrates every check.
+
+The quality filter is a \emph{filter, not a predictor}.  It targets
+the rides where the~$\sigma$ model must under-predict the error --- a
+phone rotated mid-ride, an impact that swamps the lobes, a fit with
+no pulse structure.  On those rides no interval width is trustworthy,
+so the pipeline declines to report rather than report a confident
+wrong answer.  Everywhere else the conformal interval
+of~\S\ref{sec:algo-ci} carries the coverage guarantee, so the filter
+passes almost every clean ride and rejects only the pathological.
+
+\section{Evaluation}
+\label{sec:evaluation}
+
 \section{Discussion}
 \label{sec:discussion}
 
@@ -864,268 +1187,285 @@ drift-corrected barometer~$\Delta h$ (Appendix~\ref{app:dataset}).
 
 \appendix
 
-\section{Derivations referenced in
-         Section~\ref{sec:bg-time-constants}}
+\section{Theoretical Elevator Pulse Analysis}
 \label{app:derivations}
 
-This appendix derives the closed forms for $T_j$, $T_a$, $T_v$, the
-acceleration-phase displacement $d_{\text{accel}}$, and the
-trapezoidal-regime ride duration~\eqref{eq:elevator-durations} from
-the bounds in~\eqref{eq:elevator-bounds}.  Throughout, we assume the
-trapezoidal regime $T_v\!>\!0$; the triangular and joined-pulse
-regimes ($T_v\!=\!0$, with $T_a$ also vanishing in the triangular
-limit) are the limits
-$H\!\downarrow\!a_{\max}T_j(T_j+T_a)$ of these formulas.
+This appendix derives the constants of~\S\ref{sec:bg-time-constants}
+from the bounds in~\eqref{eq:elevator-bounds}.
+\S\ref{app:bangbang} shows the optimal jerk is bang-bang;
+\S\ref{app:time-params} integrates the resulting seven-segment
+profile to obtain $T_j$, $T_a$, $T_v$, $T_{\text{ride}}$, and the
+centroid-spacing identity used in~\S\ref{sec:bg-family}.
 
-\paragraph{Phase-1 velocity and displacement.}
-On phase~1, $j(t)\!=\!+j_{\max}$ with $a(0)\!=\!v(0)\!=\!0$.
-Integrating once,
-\(
+\subsection{The optimal elevator pulse}
+\label{app:bangbang}
+
+The time-optimal control problem~\eqref{eq:elevator-opt} forces the
+optimal jerk to take only three values,
+$j^{*}(t)\!\in\!\{-j_{\max},0,+j_{\max}\}$~\eqref{eq:bang-bang}.  We
+sketch the three moves Pontryagin's maximum principle turns on; the
+full machinery is standard for time-optimal control of a chain of
+integrators with bounded input~\cite{athans1966,kirk2004}.
+
+\paragraph{Hamiltonian.}
+Stack the state $x=(h,v,a)^{\top}$ with dynamics
+$\dot x=(v,\,a,\,j)^{\top}$, control~$j$, free terminal time~$T$,
+and unit running cost.  Adjoining co-states
+$\lambda=(\lambda_h,\lambda_v,\lambda_a)^{\top}$ gives
+\[
+  \mathcal H(x,\lambda,j)
+  \;=\; 1 + \lambda_h v + \lambda_v a + \lambda_a j,
+\]
+which is linear in~$j$.
+
+\paragraph{Switching law.}
+Linearity in~$j$ pins the PMP-minimising control to the boundary
+$|j|=j_{\max}$ whenever $\lambda_a\!\neq\!0$:
+\[
+  j^{*}(t)\;=\;-j_{\max}\,\operatorname{sign}\lambda_a(t).
+\]
+The co-state equations $\dot\lambda=-\partial\mathcal H/\partial x$
+yield
+$\lambda_a(t)=\tfrac12\lambda_h t^{2}-\lambda_v(0)\,t+\lambda_a(0)$,
+a quadratic that crosses zero at most twice; the unconstrained
+$j^{*}$ therefore switches sign at most twice.
+
+\paragraph{Constrained arcs.}
+When $|a|\!=\!a_{\max}$ activates, the cabin rides the boundary and
+the controller must hold $\dot a\!=\!j\!=\!0$; the velocity
+constraint $|v|\!=\!v_{\max}$ similarly forces $a\!=\!0$ and hence
+$j\!=\!0$.  Stitching the unconstrained $\pm j_{\max}$ arcs with
+these constrained zero-jerk arcs yields~\eqref{eq:bang-bang} and
+the three regimes selected by the floor-to-floor height~$H$
+(Figure~\ref{fig:scurve-durations}).
+
+\subsection{Time parameters formula development}
+\label{app:time-params}
+
+\begin{wrapfigure}{r}{0.34\linewidth}
+  \vspace{-0.8em}
+  \centering
+  \resizebox{\linewidth}{!}{%
+  \begin{tikzpicture}[>=Stealth, font=\footnotesize]
+    \pgfmathsetmacro{\Tj}{1.0}
+    \pgfmathsetmacro{\Ta}{1.4}
+    \pgfmathsetmacro{\amax}{1.5}
+    \pgfmathsetmacro{\tA}{\Tj}
+    \pgfmathsetmacro{\tB}{\Tj+\Ta}
+    \pgfmathsetmacro{\tC}{2*\Tj+\Ta}
+    \fill[red!22]    (0,0)   -- (\tA,0) -- (\tA,\amax) -- cycle;
+    \fill[orange!22] (\tA,0) -- (\tB,0) -- (\tB,\amax) -- (\tA,\amax) -- cycle;
+    \fill[red!22]    (\tB,0) -- (\tC,0) -- (\tB,\amax) -- cycle;
+    \draw[->] (-0.15,0) -- ({\tC+0.45},0) node[right] {$t$};
+    \draw[->] (0,-0.22) -- (0,{\amax+0.4}) node[above] {$a(t)$};
+    \draw[dashed,gray!55] (0,\amax) -- (\tC,\amax);
+    \node[left,font=\scriptsize] at (0,\amax) {$a_{\max}$};
+    \draw[very thick, blue!70!black]
+      (0,0) -- (\tA,\amax) -- (\tB,\amax) -- (\tC,0);
+    \draw[dotted,gray!55] (\tA,0) -- (\tA,\amax);
+    \draw[dotted,gray!55] (\tB,0) -- (\tB,\amax);
+    \node[red!75!black,font=\scriptsize]
+          at ({0.55*\Tj},{0.32*\amax}) {$\tfrac12 a_{\max}T_j$};
+    \node[orange!85!black,font=\scriptsize]
+          at ({\tA+0.5*\Ta},{0.50*\amax}) {$a_{\max}T_a$};
+    \node[red!75!black,font=\scriptsize]
+          at ({\tB+0.45*\Tj},{0.32*\amax}) {$\tfrac12 a_{\max}T_j$};
+    \draw[decorate,decoration={brace,amplitude=2.5pt,mirror},semithick,red!75!black]
+      (0,-0.07) -- (\tA,-0.07)
+      node[midway,below=-1pt,red!75!black,font=\scriptsize] {$T_j$};
+    \draw[decorate,decoration={brace,amplitude=2.5pt,mirror},semithick,orange!85!black]
+      (\tA,-0.07) -- (\tB,-0.07)
+      node[midway,below=-1pt,orange!85!black,font=\scriptsize] {$T_a$};
+    \draw[decorate,decoration={brace,amplitude=2.5pt,mirror},semithick,red!75!black]
+      (\tB,-0.07) -- (\tC,-0.07)
+      node[midway,below=-1pt,red!75!black,font=\scriptsize] {$T_j$};
+  \end{tikzpicture}}
+  \vspace{-0.4em}
+\end{wrapfigure}
+We integrate the bang-bang jerk over the take-off lobe
+(phases~1--3), recover the three durations, and sum to the total
+ride time.  We assume the trapezoidal regime $T_v\!>\!0$; the
+medium and short regimes are limits
+$H\!\downarrow\!a_{\max}T_j(T_j+T_a)$ of the same formulas.  Each
+phase paints one slab of the lobe beside: the two red wedges of
+phases~1 and~3, the orange plateau of phase~2.  Their areas are
+the velocity gained on that phase, and the colours below match
+the equations.
+
+\paragraph{Phase~1 --- jerk ramp ($j=+j_{\max}$).}
+With $a(0)\!=\!v(0)\!=\!0$, one integration gives
+\[
   a(t) = j_{\max}\,t,
-\)
-so $a(T_j)\!=\!a_{\max}$ forces
+  \qquad
+  a(T_j)=a_{\max}\;\Longrightarrow\;
+  T_j=\tfrac{a_{\max}}{j_{\max}}\quad\eqref{eq:Tj}.
+\]
+Integrating twice more,
+\[
+  \textcolor{red!75!black}{v(T_j)=\tfrac12\,a_{\max}T_j},
+  \qquad
+  h(T_j)=\tfrac16\,a_{\max}T_j^{2}.
+\]
+The velocity $v(T_j)$ is the area of the phase-1 red wedge.
+
+\paragraph{Phase~2 --- acceleration plateau ($a=a_{\max}$).}
+On $t\in[T_j,T_j+T_a]$ the cabin holds at $a_{\max}$, so the
+velocity gains the area of the orange rectangle,
+\[
+  v(T_j+T_a) \;=\; v(T_j)+\textcolor{orange!85!black}{a_{\max}T_a}
+             \;=\; a_{\max}\!\left(\tfrac12 T_j+T_a\right),
+\]
+and the displacement added is
+$\Delta h_{2} = v(T_j)\,T_a+\tfrac12 a_{\max}T_a^{2}$.
+
+\paragraph{Phase~3 --- jerk ramp-down ($j=-j_{\max}$).}
+On $t\in[T_j+T_a,2T_j+T_a]$, $a(t)=a_{\max}-j_{\max}(t-T_j-T_a)$ so
+$a(2T_j+T_a)\!=\!0$ as required.  Phase~3 contributes a second
+$\tfrac12 a_{\max}T_j$ of velocity --- the mirror red wedge --- so
+the lobe-end velocity is the sum of three slab areas,
+\[
+  v(2T_j+T_a)
+  \;=\; \textcolor{red!75!black}{\tfrac12 a_{\max}T_j}
+       +\textcolor{orange!85!black}{a_{\max}T_a}
+       +\textcolor{red!75!black}{\tfrac12 a_{\max}T_j}
+  \;=\; a_{\max}(T_j+T_a).
+\]
+Demanding the cruise enter at the velocity ceiling,
+$a_{\max}(T_j+T_a)\!=\!v_{\max}$, gives
+$T_a=\tfrac{v_{\max}}{a_{\max}}-T_j$~\eqref{eq:Ta}.  The
+displacement added in phase~3 is
 \(
-  T_j = a_{\max}/j_{\max},
-\)
-which is~\eqref{eq:Tj}.  Integrating once more,
-\(
-  v(T_j) = \tfrac12 j_{\max} T_j^{2}
-         = \tfrac12 a_{\max} T_j,
-\)
-and integrating a third time,
-\(
-  h(T_j) = \tfrac16 j_{\max} T_j^{3}
-         = \tfrac16 a_{\max} T_j^{2}.
+  \Delta h_{3} = v(T_j+T_a)\,T_j+\tfrac12 a_{\max}T_j^{2}
+                -\tfrac16 j_{\max}T_j^{3}.
 \)
 
-\paragraph{Phase-2 velocity and displacement.}
-On phase~2, $a(t)\!=\!a_{\max}$ for $t\in[T_j,T_j+T_a]$.  Hence
-\(
-  v(T_j+T_a) = v(T_j) + a_{\max} T_a
-             = a_{\max}\!\left(\tfrac12 T_j + T_a\right).
-\)
-The displacement added in phase~2 is
-\(
-  \Delta h_{2} = v(T_j)\,T_a + \tfrac12 a_{\max} T_a^{2}.
-\)
-
-\paragraph{Phase-3 velocity and displacement.}
-On phase~3, $j(t)\!=\!-j_{\max}$ for $t\in[T_j+T_a, 2T_j+T_a]$, with
-$a(T_j+T_a)\!=\!a_{\max}$.  Integrating,
-\(
-  a(t) = a_{\max} - j_{\max}(t-T_j-T_a),
-\)
-so $a(2T_j+T_a)\!=\!0$ as required.  At the end of phase~3 the
-velocity is
-\(
-  v(2T_j+T_a) = v(T_j+T_a) + \tfrac12 a_{\max} T_j
-             = a_{\max}(T_j + T_a),
-\)
-which must equal $v_{\max}$ at the start of cruise.  Solving
-$a_{\max}(T_j+T_a)\!=\!v_{\max}$ for $T_a$ gives~\eqref{eq:Ta}.
-The displacement added in phase~3 is
-\(
-  \Delta h_{3} = v(T_j+T_a)\,T_j
-              + \tfrac12 a_{\max} T_j^{2}
-              - \tfrac16 j_{\max} T_j^{3}.
-\)
-
-\paragraph{Acceleration-phase displacement~$d_{\text{accel}}$.}
-Summing phases~1--3,
+\paragraph{Synthesis.}
+Summing phases~1--3 with $j_{\max}T_j\!=\!a_{\max}$ and
+$a_{\max}(T_j+T_a)\!=\!v_{\max}$ collapses to
 \[
   d_{\text{accel}}
-  \;=\; h(T_j) + \Delta h_{2} + \Delta h_{3}
-  \;=\; \tfrac12\,v_{\max}\,(2T_j + T_a),
+  \;=\; h(T_j)+\Delta h_{2}+\Delta h_{3}
+  \;=\; \tfrac12\,v_{\max}\,(2T_j+T_a).
 \]
-where the simplification uses $j_{\max}T_j\!=\!a_{\max}$ and
-$a_{\max}(T_j+T_a)\!=\!v_{\max}$.  By symmetry, phases~5--7 traverse
-the same displacement~$d_{\text{accel}}$.
-
-\paragraph{Cruise duration~$T_v$ and total ride
-            duration~$T_{\text{ride}}$.}
-The cruise phase~4 must cover the remaining
-$H-2d_{\text{accel}}\!=\!H-v_{\max}(2T_j+T_a)$ at velocity~$v_{\max}$:
+By symmetry phases~5--7 contribute the same $d_{\text{accel}}$.
+The cruise covers the remainder $H-2d_{\text{accel}}$ at $v_{\max}$,
 \[
-  T_v \;=\; \frac{H-v_{\max}(2T_j+T_a)}{v_{\max}}
-       \;=\; \frac{H}{v_{\max}} - 2T_j - T_a,
+  \textcolor{teal!70!black}{T_v
+    \;=\; \frac{H-v_{\max}(2T_j+T_a)}{v_{\max}}
+    \;=\; \frac{H}{v_{\max}}-2T_j-T_a}
+  \quad\eqref{eq:Tv},
 \]
-which is~\eqref{eq:Tv}.  The total ride duration is
-$T_{\text{ride}}\!=\!4T_j+2T_a+T_v$; substituting~\eqref{eq:Ta}
-and~\eqref{eq:Tv} and simplifying yields the additive
+and $T_{\text{ride}}\!=\!4T_j+2T_a+T_v$ collapses to the additive
 form~\eqref{eq:elevator-durations}.
 
 \paragraph{Centroid spacing of the two acceleration lobes.}
-The first lobe spans $[0, 2T_j+T_a]$ with centroid at $t_{c,1}\!=\!
-T_j+T_a/2$ (by symmetry of the trapezoid).  The second lobe spans
-$[2T_j+T_a+T_v,\, 4T_j+2T_a+T_v]$ with centroid at
-$t_{c,2}\!=\!3T_j+3T_a/2+T_v$.  The centroid spacing is therefore
+The first lobe spans $[0,\,2T_j+T_a]$ with centroid at
+$t_{c,1}\!=\!T_j+T_a/2$ (trapezoid symmetry); the second spans
+$[2T_j+T_a+T_v,\,4T_j+2T_a+T_v]$ with centroid at
+$t_{c,2}\!=\!3T_j+3T_a/2+T_v$.  Subtracting and using~\eqref{eq:Tv},
 \[
   \Delta t_{c}
   \;=\; t_{c,2}-t_{c,1}
   \;=\; 2T_j + T_a + T_v
-  \;=\; \frac{H}{v_{\max}} - T_a + T_a
-  \;=\; \frac{H}{v_{\max}},
+  \;=\; \frac{H}{v_{\max}}.
 \]
-where the third equality uses~\eqref{eq:Tv}.  This proves the
-amplitude-free centroid identity used in the basis-function
-mapping of~\S\ref{sec:bg-family}: the temporal gap between the two
-acceleration lobes equals~$H/v_{\max}$ and is independent of
-$j_{\max}$ and~$a_{\max}$.
-
-\section{Time-optimal jerk is bang-bang}
-\label{app:bangbang}
-
-This appendix sketches why the optimal-time
-solution~\eqref{eq:elevator-opt} commands a jerk
-$j^{*}(t)\in\{-j_{\max},0,+j_{\max}\}$.  We follow the standard
-Pontryagin-maximum-principle argument for time-optimal control of
-a chain of integrators with bounded
-input~\cite{athans1966,kirk2004}; this paper does not depend on
-the algebra below, only on the result~\eqref{eq:bang-bang}.
-
-\paragraph{State and Hamiltonian.}
-Stack the cabin's state as $x=(h,v,a)^\top$ with dynamics
-\(
-  \dot x = (v,\,a,\,j)^\top,
-\)
-control $j(t)$, and free terminal time $T$.  The cost is
-$\int_0^T 1\,dt$.  Adjoining co-state multipliers
-$\lambda=(\lambda_h,\lambda_v,\lambda_a)^\top$ gives the
-Hamiltonian
-\[
-  \mathcal H(x,\lambda,j) \;=\; 1 \;+\; \lambda_h v \;+\; \lambda_v a
-                                \;+\; \lambda_a j.
-\]
-The PMP requires $j^{*}(t)$ to minimise $\mathcal H$ over the
-feasible set $|j|\le j_{\max}$ at every instant.  $\mathcal H$
-is linear in $j$, so the minimum is at the boundary:
-\begin{equation}
-  j^{*}(t) \;=\;
-  \begin{cases}
-    +j_{\max}, & \lambda_a(t) < 0,\\
-    -j_{\max}, & \lambda_a(t) > 0.
-  \end{cases}
-  \label{eq:bang-bang-derivation}
-\end{equation}
-The co-state equations $\dot\lambda = -\partial\mathcal H/\partial
-x$ give $\dot\lambda_h\!=\!0$, $\dot\lambda_v\!=\!-\lambda_h$,
-$\dot\lambda_a\!=\!-\lambda_v$, so
-$\lambda_a(t)\!=\!\tfrac12\lambda_h t^{2}-\lambda_v(0)t+\lambda_a(0)$
-is at most quadratic in~$t$ and crosses zero at most twice.
-Hence~$j^{*}$ has at most two switching times on any
-unconstrained arc.
-
-\paragraph{State-constraint arcs.}
-When the state-inequality $|a|\le a_{\max}$ becomes active, the
-solution slides along the boundary $a\equiv\pm a_{\max}$.  On such
-an arc, the controller must hold $\dot a\!=\!j\!=\!0$; otherwise
-the cabin would push past $a_{\max}$.  Identical reasoning applies
-to the velocity constraint $|v|\le v_{\max}$: when active,
-$\dot v\!=\!a\!=\!0$, which in turn forces $j\!=\!0$.  Stitching
-the unconstrained bang-bang arcs together with the
-constrained-zero arcs gives the three-valued
-result~\eqref{eq:bang-bang}.
-
-\paragraph{Singular-arc ruling.}
-A singular arc would require $\lambda_a(t)\equiv 0$ on a set of
-positive measure.  Differentiating $\lambda_a\equiv 0$ in time
-gives $\dot\lambda_a\!=\!-\lambda_v\equiv 0$ and a further
-differentiation gives $\lambda_h\equiv 0$.  But the PMP
-transversality condition for free terminal time is
-$\mathcal H(T)\!=\!0$, which on a singular arc reduces to
-$1\!=\!0$ --- a contradiction.  No singular arcs exist, so the
-bang-bang structure is exhaustive.
-
-\paragraph{Resulting profile.}
-With $j^{*}\in\{-j_{\max},0,+j_{\max}\}$ everywhere, the longest
-profile that includes both signs of the $|a|=a_{\max}$ plateau
-\emph{and} the $|v|=v_{\max}$ plateau is the seven-segment
-S-curve.  Suppressing one plateau yields the five-segment regime;
-suppressing both yields the three-segment regime.  Which regime
-applies depends on the boundary
-condition $h(T)\!=\!H$, as enumerated in~\S\ref{sec:bg-scurve}.
+The temporal gap between the two acceleration lobes
+equals~$H/v_{\max}$ and is independent of $j_{\max}$
+and~$a_{\max}$ --- the amplitude-free centroid identity used in
+the basis-function mapping of~\S\ref{sec:bg-family}.
 
 \section{Dataset collection and ground-truth pipeline}
 \label{app:dataset}
 
-This appendix details the field campaign and the ground-truth
-construction summarised in~\S\ref{sec:eval-data}.
+The dataset is 195 labelled elevator rides drawn from eight recording
+sessions across seven elevators in six buildings, all collected in
+March--April 2026. This appendix walks the construction pipeline
+end-to-end: how each session was recorded and how every ride got its
+label and floor-to-floor~$\Delta h$~(\S\ref{app:dataset-method}), the
+human-in-the-loop edit pass that corrects detector
+mistakes~(\S\ref{app:dataset-editing}), and the per-session statistics
+of the campaign~(\S\ref{app:dataset-buildings}).
 
-\paragraph{Buildings and devices.}
-Table~\ref{tab:app-buildings} lists the \todo{7} elevators of the
-campaign, concentrated in Ra'anana with one building each in
-Herzeliya and Ramat Gan.  The Millenium hotel contributes two
-physically distinct elevators --- an internal cabin and an external
-one attached to the hotel body --- which we treat as separate
-elevators.  Four phones recorded every ride, spanning a mix of
-Galaxy~S23, Pixel, Redmi Note~12, Galaxy~A23, and Galaxy Z~Flip6
-hardware; the experimenters carried all four in one hand or bag, so
-every device saw near-identical motion, vibration, and acoustics.
-Figure~\ref{fig:app-buildings} shows the resulting spread: the
-elevators range from a 7-floor external hotel cabin to a 23-floor
-residential tower, with floor spacing that varies within and across
-buildings.
+\subsection{Method}
+\label{app:dataset-method}
 
-\begin{table}[t]
-\centering
-\small
-\begin{tabular}{lll}
-\toprule
-\textbf{Elevator (internal name)} & \textbf{Type} & \textbf{Location} \\
-\midrule
-\texttt{milleniumHotel}        & Hotel       & Ra'anana \\
-\texttt{milleniumOutside}      & Hotel       & Ra'anana \\
-\texttt{acroBuilding}          & Office      & Ra'anana \\
-\texttt{beitMansour1}          & Residential & Ra'anana \\
-\texttt{beitYitzchakiRaanana}  & Residential & Ra'anana \\
-\texttt{BarIlan2Herzelia}      & Residential & Herzeliya \\
-\texttt{Haari3}                & Residential & Ramat Gan \\
-\bottomrule
-\end{tabular}
-\caption{The \todo{7} elevators across \todo{6} buildings of the
-  field campaign.  \texttt{milleniumHotel} and
-  \texttt{milleniumOutside} are two elevators in one hotel;
-  \texttt{milleniumOutside} has no architectural drawing and uses
-  drift-corrected barometer ground truth.
-  \texttt{beitYitzchakiRaanana} is the held-out blind-test building.}
-\label{tab:app-buildings}
-\end{table}
+\paragraph{Recording setup.}
+Each session ran four phones simultaneously, carried together in one bag
+or hand so every device saw the same motion, vibration, and acoustics.
+Two experimenters carried two phones each, and the fleet always included
+at least one barometer-equipped device whose pressure trace became the
+ground truth for the three accelerometer-only phones. Two of the eight
+sessions --- Haari~3 and Bar-Ilan~2 --- relied on a single
+experimenter holding one barometer-equipped phone.
+Table~\ref{tab:app-sensors} lists the channels each phone logged at its
+native rate; the loader resamples every channel to 50~Hz before
+downstream stages see it.
 
-\begin{figure}[t]
+\paragraph{Barometric pressure to altitude.}
+The recording phone's pressure channel converts to a metric altitude
+trace through the International Standard Atmosphere troposphere
+inversion, $h = (T_0/L)\,[\,1 - (P/P_0)^{1/5.255}\,]$, with the
+surface temperature $T_0$ read from the session log.
+Figure~\ref{fig:app-barometer-extraction} plots both sides on a
+Millennium-Hotel session. Pressure climbs by ${\sim}6$\,hPa as the
+experimenter descends from floor~12 to the ground lobby, and the
+inverted altitude resolves the matching ${\sim}50$\,m descent on the
+same time axis. At standard $T_0$ the resolution sits near $10$\,cm
+per sample, an order of magnitude below the ${\sim}3$\,m typical
+inter-floor pitch, so floor-to-floor steps stand clear of sensor noise.
+
+\begin{figure}[!htbp]
   \centering
-  \begin{subfigure}{\linewidth}
-    \centering
-    \includegraphics[width=0.86\linewidth]{building_heights.png}
-    \caption{Total vertical range of each elevator.}
-    \label{fig:app-building-heights}
-  \end{subfigure}
-
-  \vspace{0.8em}
-  \begin{subfigure}{\linewidth}
-    \centering
-    \includegraphics[width=\linewidth]{building_heights_per_building.png}
-    \caption{Floor-by-floor elevations within each building.}
-    \label{fig:app-floor-profiles}
-  \end{subfigure}
-  \caption{The campaign's buildings, read from their \emph{gramushka}
-    floor-elevation tables.
-    (\subref{fig:app-building-heights})~Elevators range from a
-    7-floor external hotel cabin to a 23-floor residential tower.
-    (\subref{fig:app-floor-profiles})~Floor spacing varies within and
-    across buildings --- dense low-rise residential floors against a
-    sparse high-range office stack.}
-  \label{fig:app-buildings}
+  \includegraphics[width=0.68\linewidth]{barometer_extraction.png}
+  \caption{Pressure (\textbf{top}) and the ISA-inverted altitude
+    (\textbf{bottom}) on a Millennium-Hotel session. The pressure
+    rise around $t \approx 1000$\,s is the experimenter taking the
+    elevator down from floor~12; the inverted altitude shows the
+    matching ${\sim}50$\,m descent.}
+  \label{fig:app-barometer-extraction}
 \end{figure}
 
-\paragraph{Logging.}
-An Android logger subscribes to every inertial and environmental
-sensor the phone exposes and writes one tab-separated row per
-sample.  Table~\ref{tab:app-sensors} gives the channel schema.  The
-barometer channel~(\texttt{PRS}) is the ground-truth signal; we pair
-any phone without a barometer with a co-carried \texttt{forBarometer}
-device that has one.
+\paragraph{Edge-point ride extraction.}
+\texttt{HeightSegmenter} turns the altitude trace into ride intervals
+through a deterministic state machine over vertical velocity. The
+procedure low-pass filters altitude across an 8\,s rolling window,
+differences the result into velocity, smooths velocity with a 3\,s
+box kernel, and marks samples above $|v_z| > 0.15$\,m/s as moving.
+Same-sign moving runs within 6\,s of each other merge into one
+interval. The detector then drops any survivor shorter than 3\,s or
+with $|\Delta z| < 2$\,m. The pipeline pads each remaining survivor
+by 1\,s on either side and labels it \texttt{up} when the mean
+velocity is positive, \texttt{down} otherwise; gaps carry the
+\texttt{outside} label, so every sample wears one of the three tags.
+Figure~\ref{fig:app-edge-detection} runs the procedure on a 170\,s
+window of Millennium-Hotel session~exp2. Four step-shaped descents
+in the altitude panel become four negative-velocity dips that breach
+the threshold, and the bottom panel emits the matching \texttt{down}
+intervals interleaved with \texttt{outside} gaps. Every operation is
+deterministic, so repeated runs label a recording identically.
 
-\begin{table}[t]
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=0.68\linewidth]{edge_detection.png}
+  \caption{Barometer interval detector on a 170\,s window of
+    Millennium-Hotel session~exp2. \textbf{Top:} low-pass altitude.
+    \textbf{Middle:} smoothed vertical velocity with the
+    $\pm 0.15$\,m/s threshold (dashed) and the ``moving'' regions
+    shaded. \textbf{Bottom:} the surviving \texttt{up}/\texttt{down}
+    intervals after merging, with \texttt{outside} between them.}
+  \label{fig:app-edge-detection}
+\end{figure}
+
+\paragraph{Sensor channels.}
+An Android logger subscribes to every inertial and environmental
+channel the phone exposes and writes one tab-separated row per
+sample (Table~\ref{tab:app-sensors}). The pipeline reads accelerometer
+(\texttt{ACC}) on every phone, barometer (\texttt{PRS}) on the
+equipped phone for ground truth, and gyroscope, magnetometer, and
+orientation for the editor's secondary plots and the cross-device
+alignment step.
+
+\begin{table}[!htbp]
 \centering
 \small
 \begin{tabular}{lll}
@@ -1140,84 +1480,104 @@ device that has one.
 \texttt{GPS} & GPS fix                    & \texttt{lat, lon, alt} \\
 \bottomrule
 \end{tabular}
-\caption{Sensor channels emitted by the logger.  The pipeline reads
-  \texttt{ACC} throughout and \texttt{ORI} for the orientation addon
-  of~\S\ref{sec:orientation-addon}; \texttt{PRS} supplies ground
-  truth only.}
+\caption{Sensor channels emitted by the logger. The pipeline reads
+  \texttt{ACC} throughout; \texttt{PRS} supplies ground truth only.}
 \label{tab:app-sensors}
 \end{table}
 
-\paragraph{Barometer interval detector.}
-The detector converts pressure to altitude through the ISA formula,
-low-pass filters it, and differences it into vertical velocity.  It
-marks samples above $0.15$\,m/s as moving, merges same-sign runs
-across short pauses, and drops runs too brief or too shallow to be a
-floor change.  It pads the survivors into \texttt{up} and
-\texttt{down} intervals and fills the gaps between them with
-\texttt{outside}.  The procedure is deterministic, so repeated runs
-label a recording identically.
-
 \paragraph{Cross-device time synchronisation.}
-Android timestamps a sensor event against device boot time, not
-wall-clock, so two phones disagree on when one physical event
-occurred by their boot-time difference --- often tens of thousands
-of seconds.  Aligning the first sample of each log fixes the offset
-to within the experimenter's tap latency; a normalised
-cross-correlation of the two accelerometer-magnitude traces over a
-$\pm 10$\,s window removes the residual.  The pipeline bakes the
-recovered offset into the secondary barometer stream before merging
-it, so every downstream stage sees one phone with a valid barometer.
-Figure~\ref{fig:app-alignment} overlays the two phones' accelerometer
-traces for one session after the correction.
+Android stamps each sample against device boot time, not wall-clock,
+so two phones in the same session disagree on event time by their
+boot-difference --- often tens of thousands of seconds. The loader
+anchors each log on its first-sample timestamp to remove the gross
+offset, then sharpens the alignment with a normalised
+cross-correlation of the two accelerometer magnitudes across a
+$\pm 10$\,s window. After correction the residual lag sits below one
+50\,Hz sample, and the pipeline bakes the recovered offset into the
+secondary barometer stream before merging.
 
-\begin{figure}[ht]
+\paragraph{Gramushka tables and floor snapping.}
+Raw barometer altitude drifts with weather and building airflow, so
+the pipeline snaps every ride endpoint to a building-specific floor
+table.  Figure~\ref{fig:app-gramushka-flow} threads the three steps.
+Each building contributes a \emph{gramushka} --- the team's nickname
+for the accordion-folded architectural section drawing
+(Figure~\ref{fig:app-gramushka}). Transcribing the drawing's labelled
+floor lines yields a lookup from floor name to surveyed elevation
+(Figure~\ref{fig:app-gramushka-example}). For each detected ride the
+pipeline integrates the temperature-aware altitude across the
+interval, snaps the endpoint to the nearest floor in the lookup, and
+treats the resulting floor-to-floor displacement as the
+ground-truth~$\Delta h$ (Figure~\ref{fig:app-gramushka-snap}; the
+worked example reads raw $+29.29$\,m and snaps $+1.49$\,m down to
+Floor~5 at $+27.80$\,m). The external Millennium elevator has no
+drawing; its rides keep the drift-corrected
+barometer~$\Delta h$ directly.
+
+\begin{figure}[!htbp]
   \centering
-  \includegraphics[width=\linewidth]{forbarometer_alignment.png}
-  \caption{One recording session after cross-device alignment.
-    \textbf{Top:} the primary phone's accelerometer
-    magnitude~$|a|$ (blue) and the time-shifted secondary phone's
-    $|a|$ (orange), with the secondary barometer altitude (green);
-    the two traces coincide once the boot-time offset is removed.
-    \textbf{Bottom:} the same overlay with the barometer-detected
-    ride intervals shaded (green~$=$~up, red~$=$~down).}
-  \label{fig:app-alignment}
+  \begin{subfigure}[c]{0.27\linewidth}
+    \centering
+    \includegraphics[height=5.0cm,keepaspectratio]{gramushka_drawing.png}
+    \caption{Architectural drawing}
+    \label{fig:app-gramushka}
+  \end{subfigure}%
+  \hspace*{0.1em}%
+  \raisebox{2.2cm}{\tikz \draw[-Stealth, ultra thick, color=blue!55!black] (0,0) -- (0.7,0);}%
+  \hspace*{0.1em}%
+  \begin{subfigure}[c]{0.27\linewidth}
+    \centering
+    \includegraphics[height=5.0cm,keepaspectratio]{gramushka_example.png}
+    \caption{Floor-height lookup}
+    \label{fig:app-gramushka-example}
+  \end{subfigure}%
+  \hspace*{0.1em}%
+  \raisebox{2.2cm}{\tikz \draw[-Stealth, ultra thick, color=blue!55!black] (0,0) -- (0.7,0);}%
+  \hspace*{0.1em}%
+  \begin{subfigure}[c]{0.27\linewidth}
+    \centering
+    \includegraphics[height=5.0cm,keepaspectratio]{gramushka_snap_panel.png}
+    \caption{Snap to nearest floor}
+    \label{fig:app-gramushka-snap}
+  \end{subfigure}
+  \caption{From drawing to floor-height lookup to snapped ride
+    endpoint. (\subref{fig:app-gramushka})~The accordion-folded
+    architectural section drawing for one campaign building
+    (Bar-Ilan~2, Herzeliya). (\subref{fig:app-gramushka-example})~The
+    transcribed lookup, mapping each floor name to one surveyed
+    elevation (annotated arrow: Floor~10 at $+42.80$\,m).
+    (\subref{fig:app-gramushka-snap})~A worked snap from a real
+    Bar-Ilan~2 ride: the raw barometer altitude $+29.29$\,m snaps
+    $+1.49$\,m down to Floor~5 at $+27.80$\,m.}
+  \label{fig:app-gramushka-flow}
 \end{figure}
 
-\paragraph{Gramushka floor-snapping.}
-Each building contributes a \emph{gramushka} table --- ``gramushka''
-names the accordion-folded architectural drawing
-(Figure~\ref{fig:app-gramushka}) --- listing every floor and its
-surveyed elevation.  The pipeline reads the session's
-start floor from the recording metadata, integrates the
-temperature-aware barometer altitude across each detected ride, and
-snaps the ride endpoint to the nearest floor in the table; the
-ground-truth~$\Delta h$ is the resulting floor-to-floor
-displacement.  The pipeline writes any snap whose distance exceeds
-\todo{TBD}\,m to a per-experiment flag file for manual review rather
-than applying it silently.  The external Millenium elevator has no
-drawing, so its rides keep the drift-corrected barometer~$\Delta h$.
+\subsection{Hand editing}
+\label{app:dataset-editing}
 
-\begin{figure}[ht]
+\paragraph{Why hand editing.}
+The barometer detector cannot tell elevator motion from any other
+vertical motion of the same magnitude. Stair climbs, driving up or
+down a hill, and HVAC pressure ripples each pass the velocity
+threshold and slip into the label stream; conversely, an over-tight
+merge fuses two close rides into one. Experimenters carry side
+information --- which button they pressed, which lobby they entered,
+which staircase they took --- that no sensor sees, and the hand-edit
+pass injects that knowledge into the labels.
+
+\paragraph{The editor.}
+Every recording passes through the ground-truth editor of
+Figure~\ref{fig:app-gt-editor} at least once. Stacked panels show
+altitude, vertical velocity, and the accelerometer, gyroscope, and
+magnetometer magnitudes on a shared time axis; ride intervals overlay
+as coloured spans (green~$=$~up, red~$=$~down, grey~$=$~outside). A
+side table lists every interval for direct editing, and the
+detector's current proposals appear as toggleable hatched bands the
+editor can promote, redraw, or reject.
+
+\begin{figure}[!htbp]
   \centering
-  \includegraphics[width=0.52\linewidth]{gramushka_drawing.png}
-  \caption{A \emph{gramushka}: the accordion-folded architectural
-    section drawing of a campaign building (Bar-Ilan~2, Herzeliya).
-    Every floor line carries a surveyed elevation; transcribing those
-    elevations yields the building's floor table.}
-  \label{fig:app-gramushka}
-\end{figure}
-
-\paragraph{Manual audit.}
-A barometer detector occasionally splits one ride in two, merges two
-into one, or mislabels an HVAC pressure ripple as motion.  Every
-ground-truth file therefore passes at least once through an editor
-(Figure~\ref{fig:app-gt-editor}) that overlays the interval labels on
-altitude, vertical velocity, and the three motion magnitudes, so a
-human checks each label against several modalities at once.
-
-\begin{figure}[ht]
-  \centering
-  \includegraphics[width=\linewidth]{gt_editor.png}
+  \includegraphics[width=0.70\linewidth]{gt_editor.png}
   \caption{The ground-truth editor. Stacked panels show altitude,
     vertical velocity, and the accelerometer, gyroscope, and
     magnetometer magnitudes on a shared time axis; ground-truth
@@ -1225,6 +1585,778 @@ human checks each label against several modalities at once.
     red~$=$~down, grey~$=$~outside). The side table lists every
     interval for direct editing.}
   \label{fig:app-gt-editor}
+\end{figure}
+
+\paragraph{What the editor fixes.}
+The pass deletes stair-climb and driving-induced intervals the
+detector mistook for rides, splits intervals where two consecutive
+rides merged across a short pause, and retags any direction the
+velocity-sign rule flipped from a low-amplitude pre-ride drift.
+Dragging a mis-aligned endpoint on the plot snaps it onto the
+altitude step; the editor commits the GT~CSV on save. Every
+ground-truth file in the dataset has at least one human-confirmed
+pass.
+
+\subsection{Buildings and phones}
+\label{app:dataset-buildings}
+
+The campaign covers seven elevators across six buildings in three
+Israeli cities --- Ra'anana, Herzeliya, and Ramat Gan --- yielding 195
+labelled rides across eight sessions. Six of the eight sessions ran the
+standard four-phone fleet (two experimenters $\times$ two phones each):
+Google Pixel~10, Samsung Galaxy~A23, Samsung Galaxy~S23, and Xiaomi
+Redmi Note~12. The Haari~3 and Bar-Ilan~2 sessions deviated to a
+single barometer-equipped phone (Samsung Galaxy Z~Flip6 and Google
+Pixel~10 respectively). Ride counts per session range from 10
+(Millennium~Hotel exp1) to 44 (Bar-Ilan~2);
+Table~\ref{tab:app-sessions} lists every session with its phones,
+latitude and longitude where surveyed, building type, and ride count.
+\texttt{Beit~Yitzchaki~B} is the held-out blind-test building; the
+other seven sessions feed training.
+
+\begin{table}[!htbp]
+\centering
+\small
+\begin{tabular}{lllcc}
+\toprule
+\textbf{Session} & \textbf{Type} & \textbf{Lat, Long} & \textbf{Phones} & \textbf{Rides} \\
+\midrule
+Haari~3, Ramat Gan, 2026-04-10            & Residential        & 32.0658, 34.8233      & Z~Flip6                       & 39 \\
+Bar-Ilan~2, Herzeliya, 2026-03-24         & Residential        & 32.166394, 34.842190  & Pixel~10                      & 44 \\
+Millennium Hotel, exp1, 2026-04-15        & Hotel              & ---                   & Pixel~10, Note~12, A23, S23   & 10 \\
+Millennium Hotel, exp2, 2026-04-15        & Hotel              & ---                   & Pixel~10, A23, S23, Note~12   & 31 \\
+Millennium Outside, exp3, 2026-04-15      & Hotel (external)   & ---                   & Pixel~10, A23, S23, Note~12   & 12 \\
+Acro Building, exp4, 2026-04-15           & Office             & ---                   & Pixel~10, A23, S23, Note~12   & 12 \\
+Beit Mansour 1, exp5, 2026-04-15          & Residential        & ---                   & Pixel~10, A23, S23, Note~12   & 18 \\
+Beit Yitzchaki~B, exp6, 2026-04-15        & Residential (test) & ---                   & Pixel~10, A23, S23, Note~12   & 29 \\
+\bottomrule
+\end{tabular}
+\caption{The eight recording sessions of the field campaign. Phone
+  short names: Pixel~10~$=$~Google Pixel~10,
+  A23~$=$~Samsung Galaxy~A23 (SM-A235F),
+  S23~$=$~Samsung Galaxy~S23 (SM-S911B),
+  Note~12~$=$~Xiaomi Redmi Note~12 (22101320I),
+  Z~Flip6~$=$~Samsung Galaxy Z~Flip6. Latitude and longitude are
+  recorded for two buildings; the remaining four are kept anonymised
+  pending publication.}
+\label{tab:app-sessions}
+\end{table}
+
+A companion data drop at \todo{<DRIVE-URL>} mirrors the complete
+raw sensor logs, gramushka tables, per-session ground-truth CSVs,
+and editor screenshots for reproducibility.
+
+\clearpage
+\section{Segmentation: matched-filter and pair-filter details}
+\label{app:segmentation}
+
+This appendix derives the matched-filter solution and the
+shared-shape joint score of~\S\ref{sec:algo-seg}, and explains every
+calibrated threshold of Table~\ref{tab:seg-thresholds}.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Stage / gate} & \textbf{Condition} & \textbf{Threshold} \\
+\midrule
+Detect: shape floor      & $R^{2}(i)\ge$                  & $0.40$ \\
+Detect: amplitude floor  & $|\hat A(i)|\ge$               & $0.20$\,m/s$^{2}$ \\
+Detect: peak dedup       & non-max suppression radius     & $1.0$\,s \\
+Detect: same-sign gap    & min.\ gap, equal signs         & $5.0$\,s \\
+\midrule
+Gate 1: temporal gap     & $t(i_2)-t(i_1)\in$             & $[0,30]$\,s \\
+Gate 2: joint score      & $\tfrac12(R^{2}_1{+}R^{2}_2)\ge$ & $0.90$ \\
+Gate 3: shared amplitude & $A^{\star}\ge$                 & $0.30$\,m/s$^{2}$ \\
+Gate 4: grid energy      & $E(i,j)\ge$                    & $0.40$ \\
+Gate 5: quiet middle     & $\mathrm{RMS}_{\mathrm{mid}}/A^{\star}\le$ & $0.5$ \\
+Gate 6: duration penalty & rank $=S-\lambda\,\Delta t$ & $\lambda=0.01$\,s$^{-1}$ \\
+\bottomrule
+\end{tabular}
+\caption{Calibrated detection and pair-filter thresholds.  The
+  kinematics fix the template-grid bounds; a grid search on the
+  training experiments chose the acceptance thresholds against a
+  composite segmentation metric.  The values shown are the detector's
+  deployed defaults.}
+\label{tab:seg-thresholds}
+\end{table}
+
+\paragraph{Matched-filter least-squares solution.}
+The detector fits each window~$a_{[i]}$ with a single scaled template,
+minimising $\|a_{[i]}-A\,\tau_{W,f}\|^{2}$ over~$A$.  The normal
+equation $A\,\|\tau_{W,f}\|^{2}=\langle a_{[i]},\tau_{W,f}\rangle$
+gives the fitted amplitude and the coefficient of determination
+of~\eqref{eq:matched-filter}.  The score~$R^{2}_{W,f}(i)$ is the
+window-energy fraction the template explains: $R^{2}\!=\!1$ an exact
+fit, $R^{2}\!\le\!0$ no better than the zero signal.
+
+\paragraph{Template grid.}
+The kinematics of~\S\ref{sec:bg-family} fix the grid.  The commercial
+parameter ranges of~\S\ref{sec:bg-bounds} map
+through~\eqref{eq:W-from-kinematics}--\eqref{eq:f-from-kinematics} to
+a half-width $W\!\in\![0.8,2.5]$\,s and a flat fraction
+$f\!\in\![0,0.7]$; the grid pads these to $30$ log-spaced~$W$ in
+$[0.3,3.0]$\,s and $15$ linear~$f$ in $[0.05,0.80]$, with an
+$f\!=\!0$ triangle row for short rides that never reach the
+$a_{\max}$ plateau.
+
+\paragraph{Shared-shape joint score.}
+The pair score~\eqref{eq:joint-fit} fits \emph{one} amplitude to
+\emph{both} lobes of a candidate pair.  With~$a_k$ the $k$th lobe
+window, $P_k=\|a_k\|^{2}$, $u_k=s_k\langle a_k,\tau_{W,f}\rangle$ the
+sign-corrected correlation, and $N=\|\tau_{W,f}\|^{2}$, minimising
+$\sum_k\|a_k-s_k A\,\tau_{W,f}\|^{2}$ over the shared~$A$ gives
+$A^{\star}=(u_1+u_2)/(2N)$ and the per-lobe~$R^{2}_k$
+of~\eqref{eq:joint-fit}.  Unrelated bursts peak at a different cell
+for each lobe, so forcing one~$(W,f)$ on both is what makes the score
+discriminating.
+
+\paragraph{Per-threshold explanations.}
+\label{app:thresholds}
+The gate equations fix the \emph{form} of each test; the rest of this
+appendix walks Table~\ref{tab:seg-thresholds} row by row and explains
+what each calibrated \emph{value} rejects.
+
+\paragraph{Detection shape and amplitude floors.}
+The first two rows reject samples that cannot be a take-off or
+landing lobe at all~\eqref{eq:detect-gate}.  The shape
+floor~$r_{\min}\!=\!0.40$ is deliberately permissive: hand-held
+jitter and clipped windows pull a real lobe's~$R^{2}$ below a
+textbook trapezoid's, so the detector leaves the strict shape test to
+the pair stage.  The amplitude floor~$a_{\min}\!=\!0.20$\,m/s$^{2}$
+drops lobes buried in sensor and walking noise, and rises per phone
+when a device's measured noise runs higher.  Both favour recall ---
+a missed lobe is lost for good, while a spurious one still faces the
+pairing gates.
+
+\paragraph{Peak de-duplication and the same-sign gap.}
+The next two rows stop one physical lobe from entering the pair stage
+as several peaks.  A lobe's matched-filter score forms a ridge
+several samples wide, so non-maximum suppression over a~$1.0$\,s
+radius keeps only its crest, and the same-sign gap collapses any two
+\emph{equal}-sign peaks closer than~$5.0$\,s --- a lobe re-detected
+at a neighbouring~$W$.  Opposite-sign peaks pass untouched:
+separating a take-off from its landing is the pairing stage's task.
+
+\paragraph{Gate 1 --- the pairing window $[t_{\min},t_{\max}]$.}
+Gate~1 bounds how far a take-off and a landing may sit apart before
+the pair is scored~\eqref{eq:partner-set} --- a search window, not a
+model of ride duration.  The lower bound~$t_{\min}\!=\!0$\,s admits
+the shortest single-floor hops, whose lobes almost touch; the upper
+bound~$t_{\max}\!=\!30$\,s brackets one uninterrupted ride at the car
+speeds and inter-floor heights of vertical-transportation
+practice~\cite{strakosch2010,cibseguidd2020}.  A high-rise express
+run would need a wider window; the~$30$\,s cap trades that reach
+against joining lobes drawn from \emph{different} rides.
+
+\paragraph{Gate 2 --- the shared-shape joint score $r_{\mathrm{pair}}$.}
+Gate~2 demands a joint score of at least~$r_{\mathrm{pair}}\!=\!0.90$,
+far above the~$0.40$ detector floor.  A genuine ride offers a
+constraint a single lobe never does: both lobes are cut from
+\emph{one} cabin profile, so one~$(W,f)$ template must fit them
+together~\eqref{eq:joint-fit}.  Unrelated bursts each fit some
+template alone but peak at different cells, and no shared cell scores
+both above~$0.90$.  The strict floor is cheap --- it costs almost no
+true rides while removing the bulk of accidental pairings.
+
+\paragraph{Gate 3 --- the shared amplitude $a_{\mathrm{pair}}$.}
+Gate~3 requires the shared amplitude~$A^{\star}$ to clear
+$a_{\mathrm{pair}}\!=\!0.30$\,m/s$^{2}$, above the~$0.20$ detector
+floor.  Since~$A^{\star}$ is the mean of the two lobe
+amplitudes~\eqref{eq:joint-fit}, a pair survives only when
+\emph{both} lobes are firm: a strong take-off matched to a weak noise
+lobe averages below~$0.30$.  The gate thus rejects the asymmetric
+pairings the per-lobe floor lets through.
+
+\paragraph{Gate 4 --- grid energy $e_{\min}$.}
+Gate~4 measures \emph{how broadly} the grid supports the match.  A
+genuine ride near-fits a whole neighbourhood of~$(W,f)$ templates ---
+a wide bright band in the joint-$R^{2}$ heatmap --- while a
+coincidental pairing fits one lucky cell and leaves the grid dark.
+Grid energy~$E$ averages the clamped joint~$R^{2}$ over every
+cell~\eqref{eq:grid-energy}; the floor~$e_{\min}\!=\!0.40$ sits above
+a single-cell match and below any broad band, catching false pairs
+that clear the best-cell score of Gate~2
+(Figure~\ref{fig:thresh-energy}).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{threshold_grid_energy.png}
+\caption{The grid-energy gate~$e_{\min}$.  Each panel is the
+  joint-$R^{2}$ heatmap over the~$(W,f)$ template grid for one
+  candidate pair.  A genuine ride (left) is a near-fit across a broad
+  band of templates, so its grid energy~$E$ sits well above
+  the~$0.40$ floor; a coincidental pairing (right) fits one narrow
+  sliver and leaves the grid dark, so its energy falls far below the
+  floor and Gate~4 rejects it.}
+\label{fig:thresh-energy}
+\end{figure}
+
+\paragraph{Gate 5 --- the quiet-middle cruise gate $\rho$.}
+Between its two lobes a real ride holds constant velocity, so the
+vertical acceleration there is near zero.  Gate~5
+takes~$\mathrm{RMS}_{\mathrm{mid}}$, the root-mean-square of the
+smoothed acceleration on the inter-lobe
+window~$(t_{c_1}\!+\!W,\;t_{c_2}\!-\!W)$, and rejects the pair when
+it exceeds~$\rho A^{\star}$ with~$\rho\!=\!0.5$ --- when the cruise
+wobble passes half the lobe amplitude.  The test catches pairs whose
+middle never settles, most often a walking false positive where
+continuous motion keeps the inter-lobe stretch as loud as the lobes
+(Figure~\ref{fig:thresh-cruise}).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{threshold_quiet_middle.png}
+\caption{The quiet-middle gate~$\rho$.  \textbf{Left:} a genuine ride
+  --- the smoothed acceleration returns to zero on the inter-lobe
+  cruise (shaded), so~$\mathrm{RMS}_{\mathrm{mid}}/A^{\star}$ stays
+  well under~$\rho\!=\!0.5$ and the pair is accepted.  \textbf{Right:}
+  a pair whose inter-lobe stretch never goes quiet ---
+  $\mathrm{RMS}_{\mathrm{mid}}/A^{\star}$ exceeds~$0.5$ and Gate~5
+  rejects it.}
+\label{fig:thresh-cruise}
+\end{figure}
+
+\paragraph{Gate 6 --- the duration penalty $\lambda$ and greedy resolution.}
+A passenger often rides in stages --- floor~$1$ to~$4$, a stop,
+then~$4$ to~$8$ --- recorded as two back-to-back rides and
+\emph{four} lobes (Figure~\ref{fig:thresh-rank}).  The take-off of
+the first ride and the landing of the last form a \emph{super pair}:
+it shares the same cabin shape, so its joint score~$S$ matches either
+true ride and Gate~2 cannot tell them apart.  Gate~6 breaks the tie
+by ranking every admissible pair by~$S-\lambda\,\Delta t$
+with~$\lambda\!=\!0.01$\,s$^{-1}$~\eqref{eq:pair-rank}: the penalty
+docks the long span far more than the short ones, so the two short
+rides out-rank the super pair.  A greedy resolver commits pairs
+highest-first, skipping any that reuse a committed lobe, and the
+super pair never commits.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{threshold_duration_penalty.png}
+\caption{The duration penalty~$\lambda$ on an up-going multi-stop
+  trip.  \textbf{Top:} the acceleration trace --- four lobes, two
+  back-to-back rides (shaded).  \textbf{Bottom:} the matched-filter
+  signed-$R^{2}$ score, peaking at all four lobes.  The take-off of
+  the first ride and the landing of the last form a \emph{super pair}
+  whose joint score~$S$ matches either short ride; only the
+  rank~$S-\lambda\,\Delta t$ separates them, docking the long span
+  hardest so the two short rides commit first.}
+\label{fig:thresh-rank}
+\end{figure}
+
+\section{Prediction: error budget and conformal calibration}
+\label{app:prediction}
+
+This appendix derives the closed-form height~\eqref{eq:dh-closed},
+the per-algorithm error budgets of~\S\ref{sec:algo-error}, and the
+conformal coverage guarantee of~\eqref{eq:conformal-coverage}, and it
+explains and illustrates every quality-filter check
+of~\S\ref{sec:algo-quality}.
+
+\subsection{The trapezoid pulse-pair integral}
+\label{app:pred-integral}
+
+The closed-form height~\eqref{eq:dh-closed} follows from one
+elementary integral, the area of the unit trapezoid.  The
+trapezoid~$\tau_{W,f}$ of~\eqref{eq:trap-template} is a plateau of
+width~$2fW$ joined to zero by two ramps of base~$(1-f)W$, so it
+integrates to
+\begin{equation}
+  \int_{-\infty}^{\infty}\!\tau_{W,f}(t)\,dt
+   \;=\;\underbrace{2fW}_{\text{plateau}}
+        \;+\;\underbrace{2\cdot\tfrac12(1-f)W}_{\text{two ramps}}
+   \;=\;W(1+f).
+  \label{eq:trap-area}
+\end{equation}
+
+A single acceleration lobe~$sA\,\tau_{W,f}$ integrates once to a
+velocity that ramps the cabin from rest to the cruise speed
+$v_{\mathrm{peak}}=A\,W(1+f)$, the lobe area of~\eqref{eq:trap-area}.
+The take-off lobe ramps the cabin up to~$v_{\mathrm{peak}}$; the
+opposite-sign landing lobe brings it back to rest; between them the
+cabin holds~$v_{\mathrm{peak}}$.  Because~$\tau_{W,f}$ is symmetric
+about its centre, the velocity rises point-symmetrically about each
+lobe centroid, so each $2W$-wide ramp window contributes the same
+area as a width-$W$ stretch at full~$v_{\mathrm{peak}}$.  Integrating
+the velocity over the ride therefore gives
+\[
+  \Delta h=\int_{0}^{T}\!v(t)\,dt
+          =s\,v_{\mathrm{peak}}\,\Delta t_c
+          =s\,A\,W(1+f)\,\Delta t_c,
+\]
+which is~\eqref{eq:dh-closed}: the cruise velocity times the centroid
+spacing, signed by the ride direction.
+
+\paragraph{Joined-pulse short-ride variant.}
+A short hop has no cruise: the two lobes touch at $\Delta t_c=2W$.
+Setting $\Delta t_c=2W$ in~\eqref{eq:dh-closed} gives
+\begin{equation}
+  \Delta h = 2\,s\,A\,W^{2}(1+f),
+  \label{eq:dh-joined}
+\end{equation}
+the joined-pulse height.  The arrival time drops out, so~$\Delta h$
+depends on three parameters, with gradients
+$\partial\Delta h/\partial A=2sW^{2}(1+f)$,
+$\partial\Delta h/\partial W=4sAW(1+f)$, and
+$\partial\Delta h/\partial f=2sAW^{2}$.  The joined template packs
+twice the energy of a single lobe,
+$\langle\tau_{\mathrm{joined}},\tau_{\mathrm{joined}}\rangle
+=2\langle\tau,\tau\rangle$, so its amplitude bound is correspondingly
+tighter.  Prediction runs the pair fit and the joined fit on every
+segment and keeps the higher joint~$R^{2}$, the joined fit's one
+fewer free parameter breaking near-ties in its favour.
+
+\paragraph{Agreement with the S-curve.}
+The trapezoid is not an approximation of the S-curve
+of~\S\ref{sec:bg-scurve} --- it is its acceleration lobe.  Under the
+bang-bang jerk command~\eqref{eq:bang-bang} the jerk is piecewise
+constant, so each acceleration lobe is piecewise linear: exactly the
+trapezoid~$\tau_{W,f}$, with~$(W,f)$ fixed by the machine parameters
+through~\eqref{eq:W-from-kinematics}--\eqref{eq:f-from-kinematics}.  A
+controller that caps the jerk derivative rounds the four corners of
+that lobe into short curved transitions.  The trapezoid is then the
+area- and centroid-matched linearisation of the rounded lobe --- the
+unique trapezoid with the same integral and the same first moment ---
+so the lobe area
+\begin{equation}
+  \int a_{\mathrm{lobe}}(t)\,dt \;=\; A\,W(1+f)
+  \label{eq:scurve-trap-area}
+\end{equation}
+and the centroid spacing~$\Delta t_c$, hence the
+height~\eqref{eq:dh-closed}, are preserved under jerk rounding
+(Figure~\ref{fig:trap-scurve}).  The fit recovers~$\Delta h$ without
+resolving the corner shape it cannot constrain.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[>=Stealth, font=\small, scale=0.95]
+  \pgfmathsetmacro{\W}{3.4}
+  \pgfmathsetmacro{\f}{0.42}
+  \pgfmathsetmacro{\fW}{\f*\W}
+  \pgfmathsetmacro{\A}{2.2}
+  \fill[blue!11] (-\W,0) -- (-\fW,\A) -- (\fW,\A) -- (\W,0) -- cycle;
+  \draw[->] ({-\W-0.8},0) -- ({\W+1.0},0) node[right] {$t$};
+  \draw[->] (0,-0.3) -- (0,{\A+0.9}) node[above] {$a(t)$};
+  \draw[very thick, blue!70!black]
+    ({-\W-0.7},0) -- (-\W,0) -- (-\fW,\A) -- (\fW,\A) -- (\W,0)
+    -- ({\W+0.7},0);
+  \draw[thick, red!75!black, dashed, rounded corners=8pt]
+    ({-\W-0.7},0) -- (-\W,0) -- (-\fW,\A) -- (\fW,\A) -- (\W,0)
+    -- ({\W+0.7},0);
+  \draw[dashed,gray!55] (0,\A) -- (-\fW,\A);
+  \draw[dotted,gray!55] (-\W,0) -- (-\W,0.16);
+  \draw[dotted,gray!55] (\W,0) -- (\W,0.16);
+  \draw[dotted,gray!55] (\fW,0) -- (\fW,\A);
+  \draw[dotted,gray!55] (-\fW,0) -- (-\fW,\A);
+  \node[left] at (0,\A) {$A$};
+  \node[below=2pt] at (-\W,0)  {$-W$};
+  \node[below=2pt] at (\W,0)   {$W$};
+  \node[below=2pt] at (\fW,0)  {$fW$};
+  \node[below=2pt] at (-\fW,0) {$-fW$};
+  \node[blue!45!black] at (0,{0.40*\A}) {$\int a = A\,W(1{+}f)$};
+\end{tikzpicture}
+\caption{One acceleration lobe of the S-curve.  Under the bang-bang
+  jerk command~\eqref{eq:bang-bang} the lobe is exactly the
+  trapezoid~$\tau_{W,f}$ (solid), with~$(W,f)$ fixed by the machine
+  parameters through~\eqref{eq:W-from-kinematics}--\eqref{eq:f-from-kinematics}.
+  A controller that caps the jerk derivative rounds the four corners
+  (dashed); the trapezoid is the area- and centroid-matched
+  linearisation of that rounded lobe, so the shaded
+  area~$A\,W(1+f)$ --- the cruise velocity --- and the centroid are
+  preserved, and with them the closed-form height~\eqref{eq:dh-closed}.}
+\label{fig:trap-scurve}
+\end{figure}
+
+\subsection{ZUPT error budget}
+\label{app:pred-zupt-error}
+
+The ZUPT standard deviation~\eqref{eq:sigma-zupt-total} sums four
+independent variances.
+
+\paragraph{White-noise double integration.}
+Integrating a white-noise acceleration sequence of per-sample
+standard deviation~$\sigma_a$ once produces a velocity random walk;
+integrating again produces a position.  After the linear drift term
+of~\eqref{eq:zupt-integral} removes the unconstrained ramp mode, the
+end-point position variance is $\sigma_a^{2}\,\Delta t^{4}\,N^{3}/12$
+over~$N$ active samples, whose root is~\eqref{eq:sigma-zupt}.  The
+cube in~$N$ is the double-integration random-walk scaling; the
+factor~$1/12$ is the residual after the drift correction, against
+the~$1/3$ of an uncorrected double integral.
+
+\paragraph{Mechanical jitter.}
+A hand-held phone is not a rigid inertial platform: hand tremor,
+pocket friction, and skin-coupled breathing add a coloured-noise
+acceleration band the datasheet omits.  The budget models it as an
+extra acceleration~$\sigma_{\mathrm{mech}}^{a}
+=j_0\,(1+\min(\rho/10^{\circ},2))$, a baseline
+$j_0=0.03\,\mathrm{m/s^2}$ scaled up to threefold by the ride drift
+angle~$\rho$, then integrated under ZUPT exactly as the white-noise
+term: $\sigma_{\mathrm{mech}}
+=\sigma_{\mathrm{mech}}^{a}\,\Delta t^{2}\sqrt{N^{3}/12}$.
+
+\paragraph{Relative scale.}
+The longer the ride, the larger the absolute error, because the
+unmodelled coloured drift is roughly linear in the path integral of
+acceleration.  A relative floor $\sigma_{\mathrm{rel}}
+=k_{\mathrm{rel}}\,|\Delta h|$ with $k_{\mathrm{rel}}=0.05$ captures
+it.
+
+\paragraph{Projection penalty.}
+A ride that lacks a clean stationary window projects its vertical
+axis from a one-sided or in-ride gravity estimate, losing one or two
+degrees of freedom on the vertical direction.  The penalty
+$\sigma_{\mathrm{proj}}=(\pi-1)\cdot 0.25\,|\Delta h|$ scales with a
+method factor $\pi\in\{1.0,1.2,1.3,3.0\}$ for the pre-and-post,
+pre-only, post-only, and magnitude-only projections, further
+multiplied by $1+\min(\rho_{\mathrm{pp}}/12.5^{\circ},2)$ for the
+pre/post rotation angle~$\rho_{\mathrm{pp}}$.  The four terms combine
+in quadrature~\eqref{eq:sigma-zupt-total}, floored at
+$\sigma_{\mathrm{ZUPT}}=\max(\sqrt{\textstyle\sum},\,0.15\,\mathrm{m})$
+so the conformal multiplier cannot blow up on a degenerate fit.
+
+\subsection{Trapezoid error budget}
+\label{app:pred-trap-error}
+
+\paragraph{Matched-filter Cram\'er--Rao bound.}
+Model the vertical trace as the fitted template pair plus Gaussian
+noise of standard deviation~$\sigma_a^{\mathrm{eff}}$.  The Fisher
+information of this likelihood bounds the variance of each fitted
+parameter.  For the amplitude and the lobe centre,
+\begin{equation}
+  \sigma_A^{2}=\frac{(\sigma_a^{\mathrm{eff}})^{2}}{\langle\tau,\tau\rangle},
+  \qquad
+  \sigma_{t_c}^{2}
+   =\frac{(\sigma_a^{\mathrm{eff}})^{2}}{A^{2}\,\langle\dot\tau,\dot\tau\rangle},
+  \qquad
+  \sigma_{\Delta t_c}^{2}=2\,\sigma_{t_c}^{2},
+  \label{eq:crb}
+\end{equation}
+where $\langle\tau,\tau\rangle$ is the template energy
+of~\eqref{eq:matched-filter} and
+$\langle\dot\tau,\dot\tau\rangle=2/[(1-f)W]$ is the slope energy of
+the two ramps.  A wider, sharper-edged lobe carries more energy and
+more slope, so it pins both amplitude and timing more tightly.  The
+grid quantises the shape parameters, so their variance is that of a
+uniform prior over one grid cell, $\sigma_W^{2}=\Delta_W^{2}/12$ and
+$\sigma_f^{2}=\Delta_f^{2}/12$.
+
+\paragraph{Delta-method propagation.}
+Differentiating the closed-form height~\eqref{eq:dh-closed} gives the
+four gradients
+\begin{equation}
+  \frac{\partial\Delta h}{\partial A}=sW(1{+}f)\Delta t_c,\;\;
+  \frac{\partial\Delta h}{\partial W}=sA(1{+}f)\Delta t_c,\;\;
+  \frac{\partial\Delta h}{\partial f}=sAW\Delta t_c,\;\;
+  \frac{\partial\Delta h}{\partial\Delta t_c}=sAW(1{+}f),
+  \label{eq:dh-grad}
+\end{equation}
+and substituting~\eqref{eq:crb} and~\eqref{eq:dh-grad}
+into~\eqref{eq:sigma-dh} yields the per-segment
+variance~$\sigma_{\Delta h}^{2}$.
+
+\paragraph{Data-adaptive effective noise.}
+The white-noise figure from the sensor datasheet understates the
+error on a hand-held phone by an order of magnitude.  The pipeline
+replaces it with the residual root-mean-square of the fitted
+template,
+\[
+  \sigma_a^{\mathrm{eff}}
+  =\max\!\left(
+    \sqrt{\tfrac1N\,\|a-\hat a_{\theta^{\star}}\|^{2}},\;
+    \sigma_a^{\mathrm{ds}}\right),
+\]
+floored at the datasheet value~$\sigma_a^{\mathrm{ds}}$.  Whatever
+the template fails to explain --- tremor, projection wobble, coloured
+drift --- enters the residual, so the budget counts it automatically.
+A second correction divides the effective variance by the fit
+quality, $\tilde\sigma_a^{2}=(\sigma_a^{\mathrm{eff}})^{2}/
+\max(R^{2}_{\mathrm{joint}},\varepsilon)$ with
+$\varepsilon=10^{-3}$ --- the Wald post-regression form, in which a
+poorly fitting template widens the posterior on every parameter in
+proportion.
+
+\paragraph{Velocity-anchored amplitude variance.}
+When the fit of~\S\ref{sec:algo-trapezoid} replaces the
+matched-filter amplitude with the measured cruise velocity, the
+CRB~\eqref{eq:crb} no longer describes~$\sigma_A$.  The cruise
+velocity is a mean of white-noise velocity samples, so
+$\sigma_{\bar v}^{2}=\tilde\sigma_a^{2}\,\Delta t/T_{\mathrm{cruise}}$
+and
+$\sigma_{\widetilde A}^{2}=\sigma_{\bar v}^{2}/[W(1+f)]^{2}$, which
+the pipeline substitutes for~$\sigma_A^{2}$ whenever the cruise
+window is long enough to anchor ($T_{\mathrm{cruise}}>0.5$\,s).
+
+\paragraph{Overlap inflation of the centroid spacing.}
+The CRB~\eqref{eq:crb} treats the two lobe centres as independent.
+At $\Delta t_c=2W$ the lobes touch but their supports stay disjoint,
+the off-diagonal Fisher block is zero, and the diagonal CRB is exact.
+For $\Delta t_c<2W$ --- unphysical for the shared-shape pair model ---
+the two centre estimates correlate, and the budget inflates the
+spacing variance by
+\begin{equation}
+  \sigma_{\Delta t_c}^{2}
+   =2\,\sigma_{t_c}^{2}\left[\,1+
+     \left(\frac{2W-\Delta t_c}{2W\,\delta}\right)^{2}\right],
+   \qquad \delta=0.05,
+  \label{eq:overlap-inflation}
+\end{equation}
+and the factor is~$1$ in the physical regime $\Delta t_c\ge2W$.  The
+inflation keeps the budget well-conditioned without penalising a
+genuine touching-lobe ride, which the joined-pulse
+fit~\eqref{eq:dh-joined} handles directly.
+
+\subsection{Split-conformal coverage and calibration}
+\label{app:pred-conformal}
+
+The multiplier~$k$ of~\S\ref{sec:algo-ci} is the
+$\lceil(1-\alpha)(n+1)\rceil/n$ empirical quantile of the~$n$
+calibration nonconformity scores~\eqref{eq:nonconformity}.  For
+exchangeable rides the rank of a test score among the calibration
+scores is uniform, so the test score falls at or below that quantile
+with probability at least~$1-\alpha$ --- which
+is~\eqref{eq:conformal-coverage}, with no assumption on the shape of
+the error distribution.
+
+The two algorithms calibrate~$k$ on different pools.  ZUPT calibrates
+on every clean ride: the reported metrics are computed on clean data
+regardless of the quality verdict, so a consumer who overrides the
+filter still receives the promised coverage.  The trapezoid fit
+calibrates on the rides that are both clean and quality-accepted ---
+its exchangeable population, since a rejected trapezoid fit carries a
+$\sigma$ the budget knowingly under-predicts.  Exchangeability fails
+across the clean/corrupted split, so neither pool draws on corrupted
+recordings.  The pipeline floors the multiplier at the Gaussian
+$90\,\%$ half-width~$1.645$, and keeps an absolute floor and cap on
+the reported~$k\sigma$ as a guard against a pathologically small or
+large fitted~$\sigma$.
+
+\subsection{Quality-filter checks}
+\label{app:pred-quality}
+
+Each algorithm runs its own quality
+filter~(\S\ref{sec:algo-quality}).  Both share the same machinery:
+hard gates that reject outright at the first breach, and graded score
+terms that sum into a penalty rejecting the ride above~$6$.
+Table~\ref{tab:quality-checks-zupt} lists the ZUPT checks and
+Table~\ref{tab:quality-checks} the trapezoid checks.  The remaining
+paragraphs give the intuition behind each feature and a real-recording
+good-versus-bad example.
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Check} & \textbf{Condition} & \textbf{Threshold} \\
+\midrule
+\multicolumn{3}{l}{\emph{Hard gates}}\\
+Gravity calibration  & signed vertical projection available & reject if magnitude-only \\
+Phone tilt           & $\angle(g_{\mathrm{pre}},g_{\mathrm{post}})\le$ & $25^{\circ}$ \\
+Ride drift           & max gravity drift $\le$ & $15^{\circ}$ \\
+Impact peak          & $\max|a-\bar a|\le$ & $8$\,m/s$^{2}$ \\
+Active motion        & fraction $|a|>0.10\,\mathrm{m/s^2}\ge$ & $0.04$ \\
+Displacement         & $|\widehat{\Delta h}|\in$ & $[0.4,100]$\,m \\
+Segment length       & active samples $N\ge$ & $30$ \\
+\midrule
+\multicolumn{3}{l}{\emph{Score terms} (penalty sum rejects above $6$)}\\
+Pre-window stability & $s_{\mathrm{pre}}$ & graded \\
+Pre/post tilt        & $\angle(g_{\mathrm{pre}},g_{\mathrm{post}})$ & graded from $10^{\circ}$ \\
+Ride drift           & max gravity drift & graded \\
+Impact peak          & $\max|a-\bar a|$ & graded at $4,6$\,m/s$^{2}$ \\
+End-velocity ratio   & $|v(T)|/\max|v|$ & graded \\
+\bottomrule
+\end{tabular}
+\caption{ZUPT quality-filter checks and calibrated thresholds.}
+\label{tab:quality-checks-zupt}
+\end{table}
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Check} & \textbf{Condition} & \textbf{Threshold} \\
+\midrule
+\multicolumn{3}{l}{\emph{Hard gates}}\\
+Gravity calibration  & signed vertical projection available & reject if magnitude-only \\
+Phone tilt           & $\angle(g_{\mathrm{pre}},g_{\mathrm{post}})\le$ & $25^{\circ}$ \\
+Joint $R^{2}$ floor  & $R^{2}_{\mathrm{joint}}\ge$ (short/mid/long) & $0.35/0.50/0.60$ \\
+Displacement         & $|\widehat{\Delta h}|\in$ & $[0.4,120]$\,m \\
+Lobe spacing         & $\Delta t_c\ge$ & $0.2$\,s \\
+Active motion        & $(2W{+}\Delta t_c)/T_{\text{ride}}\ge$ & $0.05$ \\
+Amplitude anchor     & $A_{\mathrm{used}}/A_{\mathrm{fit}}\in$ & $[0.5,2.0]$ \\
+Out-of-lobe residual & residual density, outside/inside $\le$ & $4$ \\
+Cruise steadiness    & $\mathrm{CV}(v_{\mathrm{cruise}})\le$ & $0.6$ \\
+Segment length       & samples $N\ge$ & $30$ \\
+\midrule
+\multicolumn{3}{l}{\emph{Score terms} (penalty sum rejects above $6$)}\\
+Pre-window stability & $s_{\mathrm{pre}}$ & graded \\
+Pre/post tilt        & $\angle(g_{\mathrm{pre}},g_{\mathrm{post}})$ & graded from $10^{\circ}$ \\
+Ride drift           & max gravity drift & graded \\
+Joint $R^{2}$        & $R^{2}_{\mathrm{joint}}$ & graded below $0.8$ \\
+Residual structure   & lag-1 residual ACF & graded at $0.25,0.4,0.6$ \\
+\bottomrule
+\end{tabular}
+\caption{Trapezoid quality-filter checks and calibrated thresholds.
+  The filter accepts a ride only when every hard gate passes and the
+  penalty score stays below its cap.}
+\label{tab:quality-checks}
+\end{table}
+
+\paragraph{Gravity and orientation.}
+Any accelerometer estimate is only as good as its vertical axis, so
+both filters open with three orientation checks.  Pre-window
+stationarity~$s_{\mathrm{pre}}$ is the spread of the gravity vector
+over the bracketing rest window: a still phone holds three flat axis
+traces, and a window the filter cannot certify forces the magnitude
+fallback and a rejection (Figure~\ref{fig:qf-gravity-stability}).  The
+pre/post tilt is the angle between the gravity vectors of the two
+rest windows; past~$25^{\circ}$ the phone was reoriented mid-ride and
+the single projection no longer holds for both ends
+(Figure~\ref{fig:qf-pre-post-angle}).  Ride drift is the largest
+angle the gravity direction sweeps across one-second chunks of the
+ride itself; a held phone stays within a few degrees, while active
+handling climbs past the~$15^{\circ}$ gate
+(Figure~\ref{fig:qf-ride-drift}).
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\linewidth]{qf_gravity_stability.png}
+\caption{Pre-window stationarity~$s_{\mathrm{pre}}$.  \textbf{Left:} a
+  still bracketing window --- three flat axis traces --- certifies
+  the gravity calibration.  \textbf{Right:} a window the filter
+  cannot certify; the projection falls back to the unsigned
+  magnitude and the ride is rejected.}
+\label{fig:qf-gravity-stability}
+\end{figure}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\linewidth]{qf_pre_post_angle.png}
+\caption{Pre/post gravity-vector angle.  \textbf{Left:} the gravity
+  components hold level across the two rest windows, so one
+  projection serves both ride ends.  \textbf{Right:} the components
+  jump between windows --- the phone was reoriented mid-ride --- and
+  the tilt clears the~$25^{\circ}$ gate.}
+\label{fig:qf-pre-post-angle}
+\end{figure}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\linewidth]{qf_ride_drift.png}
+\caption{In-ride gravity drift.  \textbf{Left:} the gravity direction
+  holds within a few degrees through the ride.  \textbf{Right:} the
+  direction sweeps past the~$15^{\circ}$ gate, so no single vertical
+  axis describes the whole segment.}
+\label{fig:qf-ride-drift}
+\end{figure}
+
+\paragraph{Impact (ZUPT).}
+ZUPT adds an impact gate: the largest deviation of the acceleration
+magnitude from its mean.  A tap, a pocket drop, or a phone hand-off
+spikes the trace far past the elevator's own
+sub-metre-per-second-squared lobes, and double integration would
+fold that spike straight into~$\Delta h$.  The gate rejects past
+$8\,\mathrm{m/s^2}$ and the score term grades the approach to it
+(Figure~\ref{fig:qf-impact}).  Two further ZUPT checks keep only
+soft score terms.  No labelled ride trips their hard gates: every
+recorded ride carries ample motion, so the active-motion gate never
+fires, and the magnitude-detrended trace drives the end-velocity
+ratio close to zero by construction.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\linewidth]{qf_impact.png}
+\caption{Impact-peak magnitude.  \textbf{Left:} the
+  magnitude-detrended trace stays within the elevator's own
+  acceleration band.  \textbf{Right:} a hand-off spike clears the
+  $8\,\mathrm{m/s^2}$ gate; double integration would fold it into the
+  height.}
+\label{fig:qf-impact}
+\end{figure}
+
+\paragraph{Fit quality (trapezoid).}
+The trapezoid filter adds two checks that the fitted template
+actually explains the trace.  The joint~$R^{2}$ is the matched-filter
+fit quality across both lobes; its floor is graded by predicted
+displacement --- $0.35/0.50/0.60$ for short, mid, and long rides ---
+because a short ride's signal-to-noise ratio is intrinsically worse
+(Figure~\ref{fig:qf-joint-r2}).  The residual autocorrelation scores
+what the~$R^{2}$ misses: a template that captures the lobe energy but
+leaves a slow, structured residual signals an unmodelled disturbance.
+On the smoothed trace adjacent residuals are correlated by
+construction, so the score knees sit high, at~$0.25$, $0.4$,
+and~$0.6$ (Figure~\ref{fig:qf-residual-acf}).
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\linewidth]{qf_joint_r2.png}
+\caption{Matched-filter joint~$R^{2}$.  \textbf{Left:} the fitted
+  trapezoid pair hugs the smoothed trace.  \textbf{Right:} a trace
+  with no clean pulse structure leaves the template far short of the
+  graded~$R^{2}$ floor.}
+\label{fig:qf-joint-r2}
+\end{figure}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\linewidth]{qf_residual_acf.png}
+\caption{Lag-1 residual autocorrelation.  \textbf{Left:} the fit
+  residual scatters tightly around zero.  \textbf{Right:} the
+  residual carries a slow, coherent excursion --- structure the
+  trapezoid template never modelled.}
+\label{fig:qf-residual-acf}
+\end{figure}
+
+\paragraph{Fitted geometry (trapezoid).}
+Three checks bound the fitted geometry against matched-filter
+misfires.  The amplitude anchor ratio~$A_{\mathrm{used}}/A_{\mathrm{fit}}$
+compares the velocity-anchored amplitude with the raw matched-filter
+amplitude; a trustworthy fit needs little rescaling, and a ratio
+outside~$[0.5,2.0]$ flags a template that locked onto the wrong
+scale (Figure~\ref{fig:qf-anchor-ratio}).  The out-of-lobe residual
+ratio compares the residual energy density outside the two lobe
+windows with the density inside; a healthy fit keeps the outside
+density no higher than the inside, and a ratio past fourfold signals
+a mid-ride disturbance the matched filter could not explain
+(Figure~\ref{fig:qf-out-of-lobe}).
+The cruise coefficient of variation is the spread of the
+ZUPT-integrated velocity across the inter-lobe window; a genuine
+cruise is a flat velocity plateau, and a coefficient past~$0.6$ means
+the cabin never reached steady cruise (Figure~\ref{fig:qf-cruise-cv}).
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\linewidth]{qf_anchor_ratio.png}
+\caption{Velocity-anchor amplitude ratio.  \textbf{Left:} the
+  velocity-anchored amplitude matches the matched-filter amplitude,
+  so the two templates coincide.  \textbf{Right:} the anchor rescales
+  the amplitude far past the~$[0.5,2.0]$ band --- a matched-filter
+  misfit.}
+\label{fig:qf-anchor-ratio}
+\end{figure}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\linewidth]{qf_out_of_lobe.png}
+\caption{Out-of-lobe residual concentration.  \textbf{Left:} the
+  residual energy stays within the two lobe windows.
+  \textbf{Right:} residual energy concentrates outside the two lobe
+  windows --- a mid-ride disturbance the template never modelled.}
+\label{fig:qf-out-of-lobe}
+\end{figure}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\linewidth]{qf_cruise_cv.png}
+\caption{Cruise-velocity coefficient of variation.  \textbf{Left:}
+  the ZUPT-integrated velocity holds a flat plateau between the
+  lobes.  \textbf{Right:} the plateau wobbles past the~$0.6$ gate ---
+  the cabin never settled into steady cruise.}
+\label{fig:qf-cruise-cv}
 \end{figure}
 
 \end{document}

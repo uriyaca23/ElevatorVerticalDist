@@ -29,7 +29,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.data.loader import getExperimentData, list_experiments
+from src.data.loader import getExperimentData, resolve_experiments
 from src.segmentation.algorithms.configTypes import (
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,
@@ -231,7 +231,7 @@ def sweep_hyperparameters(
     ``iou_f1@0.5``. Sorted by ``f1_like`` descending.
     """
     if experiments is None:
-        experiments = list_experiments(kind="train")
+        experiments = resolve_experiments(kind="train")
     keys = list(param_grid.keys())
     combos = list(itertools.product(*(param_grid[k] for k in keys)))
     rows: list[dict] = []
@@ -366,7 +366,7 @@ def evaluate_algorithm(
     * ``failure_modes.png``        — bar chart of clean / miss / merge / split / fp.
     """
     if experiments is None:
-        experiments = list_experiments(kind=kind)
+        experiments = resolve_experiments(kind=kind)
     exps = _run_on_experiments(
         config, experiments, verbose=True, phone_model=phone_model,
     )

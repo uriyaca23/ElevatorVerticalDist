@@ -20,9 +20,9 @@ import numpy as np
 import pandas as pd
 
 from src.data.loader import (
-    classify_experiment_type,
     getExperimentData,
-    list_experiments,
+    list_structured_experiments,
+    load_experiment_index,
 )
 
 
@@ -80,7 +80,7 @@ def build_segment_records(
         return []
 
     acc = sensors["ACC"]
-    exp_type = classify_experiment_type(exp_name)
+    exp_type = load_experiment_index().get(exp_name, {}).get("experiment_type", "")
 
     out: list[SegmentRecord] = []
     for idx, row in gt.iterrows():
@@ -118,7 +118,7 @@ def load_all_segments(
 ) -> list[SegmentRecord]:
     """Load + flatten every experiment (or a subset)."""
     if experiments is None:
-        experiments = list_experiments()
+        experiments = list_structured_experiments()
     records: list[SegmentRecord] = []
     for name in experiments:
         recs = build_segment_records(name, verbose=verbose, **kwargs)
