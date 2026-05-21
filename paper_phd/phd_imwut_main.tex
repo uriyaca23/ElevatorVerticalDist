@@ -1649,10 +1649,14 @@ and editor screenshots for reproducibility.
 \clearpage
 \section{Segmentation: matched-filter and pair-filter details}
 \label{app:segmentation}
+\label{app:thresholds}
 
 This appendix derives the matched-filter solution and the
-shared-shape joint score of~\S\ref{sec:algo-seg}, and explains every
-calibrated threshold of Table~\ref{tab:seg-thresholds}.
+shared-shape joint score of~\S\ref{sec:algo-seg}, then walks every
+calibrated threshold of Table~\ref{tab:seg-thresholds} row by row.
+Each subsection takes one row of the table, explains the intuition
+behind the test, and --- where the picture is worth more than the
+prose --- carries a single illustrative figure.
 
 \begin{table}[H]
 \centering
@@ -1681,6 +1685,14 @@ Gate 6: duration penalty & rank $=S-\lambda\,\Delta t$ & $\lambda=0.01$\,s$^{-1}
   deployed defaults.}
 \label{tab:seg-thresholds}
 \end{table}
+
+\subsection{Matched-filter solution and template grid}
+\label{app:seg-matched-filter}
+
+Before the row-by-row walk, we collect the three pieces of machinery
+the gates all rely on: the per-window least-squares fit, the
+$(W,f)$ template grid that fit ranges over, and the shared-shape
+joint score that turns two candidate lobes into one pair fit.
 
 \paragraph{Matched-filter least-squares solution.}
 The detector fits each window~$a_{[i]}$ with a single scaled template,
@@ -1712,14 +1724,11 @@ of~\eqref{eq:joint-fit}.  Unrelated bursts peak at a different cell
 for each lobe, so forcing one~$(W,f)$ on both is what makes the score
 discriminating.
 
-\paragraph{Per-threshold explanations.}
-\label{app:thresholds}
-The gate equations fix the \emph{form} of each test; the rest of this
-appendix walks Table~\ref{tab:seg-thresholds} row by row and explains
-what each calibrated \emph{value} rejects.
+\subsection{Detection shape and amplitude floors}
+\label{app:seg-detect-floors}
 
-\paragraph{Detection shape and amplitude floors.}
-The first two rows reject samples that cannot be a take-off or
+The first two rows of Table~\ref{tab:seg-thresholds} reject samples
+that cannot be a take-off or
 landing lobe at all~\eqref{eq:detect-gate}.  The shape
 floor~$r_{\min}\!=\!0.40$ is deliberately permissive: hand-held
 jitter and clipped windows pull a real lobe's~$R^{2}$ below a
@@ -1730,8 +1739,11 @@ when a device's measured noise runs higher.  Both favour recall ---
 a missed lobe is lost for good, while a spurious one still faces the
 pairing gates.
 
-\paragraph{Peak de-duplication and the same-sign gap.}
-The next two rows stop one physical lobe from entering the pair stage
+\subsection{Peak de-duplication and same-sign gap}
+\label{app:seg-detect-dedup}
+
+The next two rows of Table~\ref{tab:seg-thresholds} stop one physical
+lobe from entering the pair stage
 as several peaks.  A lobe's matched-filter score forms a ridge
 several samples wide, so non-maximum suppression over a~$1.0$\,s
 radius keeps only its crest, and the same-sign gap collapses any two
@@ -1739,7 +1751,9 @@ radius keeps only its crest, and the same-sign gap collapses any two
 at a neighbouring~$W$.  Opposite-sign peaks pass untouched:
 separating a take-off from its landing is the pairing stage's task.
 
-\paragraph{Gate 1 --- the pairing window $[t_{\min},t_{\max}]$.}
+\subsection{Gate 1 --- pairing window $[t_{\min},t_{\max}]$}
+\label{app:seg-gate1}
+
 Gate~1 bounds how far a take-off and a landing may sit apart before
 the pair is scored~\eqref{eq:partner-set} --- a search window, not a
 model of ride duration.  The lower bound~$t_{\min}\!=\!0$\,s admits
@@ -1750,7 +1764,9 @@ practice~\cite{strakosch2010,cibseguidd2020}.  A high-rise express
 run would need a wider window; the~$30$\,s cap trades that reach
 against joining lobes drawn from \emph{different} rides.
 
-\paragraph{Gate 2 --- the shared-shape joint score $r_{\mathrm{pair}}$.}
+\subsection{Gate 2 --- shared-shape joint score $r_{\mathrm{pair}}$}
+\label{app:seg-gate2}
+
 Gate~2 demands a joint score of at least~$r_{\mathrm{pair}}\!=\!0.90$,
 far above the~$0.40$ detector floor.  A genuine ride offers a
 constraint a single lobe never does: both lobes are cut from
@@ -1760,7 +1776,9 @@ template alone but peak at different cells, and no shared cell scores
 both above~$0.90$.  The strict floor is cheap --- it costs almost no
 true rides while removing the bulk of accidental pairings.
 
-\paragraph{Gate 3 --- the shared amplitude $a_{\mathrm{pair}}$.}
+\subsection{Gate 3 --- shared amplitude $a_{\mathrm{pair}}$}
+\label{app:seg-gate3}
+
 Gate~3 requires the shared amplitude~$A^{\star}$ to clear
 $a_{\mathrm{pair}}\!=\!0.30$\,m/s$^{2}$, above the~$0.20$ detector
 floor.  Since~$A^{\star}$ is the mean of the two lobe
@@ -1769,7 +1787,9 @@ amplitudes~\eqref{eq:joint-fit}, a pair survives only when
 lobe averages below~$0.30$.  The gate thus rejects the asymmetric
 pairings the per-lobe floor lets through.
 
-\paragraph{Gate 4 --- grid energy $e_{\min}$.}
+\subsection{Gate 4 --- grid energy $e_{\min}$}
+\label{app:seg-gate4}
+
 Gate~4 measures \emph{how broadly} the grid supports the match.  A
 genuine ride near-fits a whole neighbourhood of~$(W,f)$ templates ---
 a wide bright band in the joint-$R^{2}$ heatmap --- while a
@@ -1793,7 +1813,9 @@ that clear the best-cell score of Gate~2
 \label{fig:thresh-energy}
 \end{figure}
 
-\paragraph{Gate 5 --- the quiet-middle cruise gate $\rho$.}
+\subsection{Gate 5 --- quiet-middle cruise gate $\rho$}
+\label{app:seg-gate5}
+
 Between its two lobes a real ride holds constant velocity, so the
 vertical acceleration there is near zero.  Gate~5
 takes~$\mathrm{RMS}_{\mathrm{mid}}$, the root-mean-square of the
@@ -1818,7 +1840,9 @@ continuous motion keeps the inter-lobe stretch as loud as the lobes
 \label{fig:thresh-cruise}
 \end{figure}
 
-\paragraph{Gate 6 --- the duration penalty $\lambda$ and greedy resolution.}
+\subsection{Gate 6 --- duration penalty $\lambda$ and greedy resolution}
+\label{app:seg-gate6}
+
 A passenger often rides in stages --- floor~$1$ to~$4$, a stop,
 then~$4$ to~$8$ --- recorded as two back-to-back rides and
 \emph{four} lobes (Figure~\ref{fig:thresh-rank}).  The take-off of
