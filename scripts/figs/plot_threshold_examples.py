@@ -175,7 +175,8 @@ def scan_experiment(name: str) -> dict | None:
     grid_f = state["grid_f"]
 
     found: dict = {"name": name, "rich": [], "low_energy": [], "flat": [],
-                   "tilted": [], "multistop": []}
+                   "tilted": [], "multistop": [],
+                   "low_score": [], "asym_amp": []}
 
     # Accepted predictions feed the "rich heatmap" (F1) and "flat cruise" (F2).
     for p in predictions:
@@ -199,12 +200,31 @@ def scan_experiment(name: str) -> dict | None:
         if res is None:
             continue
         score, W, f, a_abs, r2_1, r2_2, energy = res
-        if score < cfg.joint_r2_thresh or a_abs < cfg.min_pair_abs_a:
-            continue
+        # Per-lobe amplitude proxies — the smoothed acceleration at each peak.
+        A1 = float(abs(a_smooth[i1]))
+        A2 = float(abs(a_smooth[i2]))
         rec = {"name": name, "i1": int(i1), "i2": int(i2),
                "s1": s1, "s2": s2, "score": score, "W": W, "f": f,
-               "A": a_abs, "energy": energy,
+               "A": a_abs, "A1": A1, "A2": A2,
+               "r2_1": r2_1, "r2_2": r2_2, "energy": energy,
                "t_c1": float(t[i1]), "t_c2": float(t[i2])}
+
+        # Gate 2: a pair whose joint score sits well below r_pair = 0.90 —
+        # different (W,f) cells fit each lobe, no shared trapezoid.
+        if 0.40 <= score < 0.75 and a_abs >= 0.10:
+            found["low_score"].append(dict(rec))
+        # Gate 3: a pair whose shape is reasonable but whose per-lobe
+        # amplitudes are very asymmetric, so the shared mean drops below
+        # a_pair = 0.30.
+        small = min(A1, A2)
+        big = max(A1, A2)
+        if score >= 0.70 and big > 1e-3 and small / big <= 0.45 and a_abs < 0.35:
+            asym = dict(rec)
+            asym["asym"] = big / max(small, 1e-3)
+            found["asym_amp"].append(asym)
+
+        if score < cfg.joint_r2_thresh or a_abs < cfg.min_pair_abs_a:
+            continue
         if energy < cfg.heatmap_energy_thresh:
             found["low_energy"].append(rec)
             continue
@@ -342,13 +362,18 @@ def render_quiet_middle(flat: dict, tilted: dict, out: Path) -> None:
 
 
 def render_duration_penalty(ms: dict, out: Path) -> None:
-    """F4 — a multi-stop trip in two stacked panels. Panel 1: the
-    acceleration trace with its four lobes, the two committed short rides
-    shaded, and the super-pair span bracketed. Panel 2: the matched-filter
-    signed-R² score trace, with each lobe's peak score marked. An
-    annotation box compares the joint score ``S`` and the rank
-    ``S - lambda*dt`` for the three candidate pairs — the penalty, not
-    ``S``, is what splits the trip into two rides."""
+    """F4 — a multi-stop trip in THREE stacked panels.
+
+    Panel 1: the raw acceleration trace, no overlays — four visible lobes.
+    Panel 2: the same trace with ONE wide horizontal arrow spanning lobe 1
+             to lobe 4 (the "super pair"), labelled with its rank.
+    Panel 3: the same trace with TWO short arrows, each spanning one stop
+             ride, both labelled with their rank.
+
+    Reader sees the reorganisation directly: with no penalty the super
+    pair scores as well as either short ride, but ``rank = S - λΔt``
+    docks long spans and the two short rides commit first.
+    """
     state = ms["state"]
     pa, pb = ms["pa"], ms["pb"]
     t = state["t"]
@@ -356,21 +381,11 @@ def render_duration_penalty(ms: dict, out: Path) -> None:
     a_vert = state["a_vert"]
     gw, gf = state["grid_w_s"], state["grid_f"]
 
-    def _finite(x: np.ndarray) -> np.ndarray:
-        return np.where(np.isfinite(x), x, 0.0)
-
-    pos_r2 = _finite(state["best_pos_r2"])
-    neg_r2 = _finite(state["best_neg_r2"])
-
-    # Four lobes in time order; each lobe's matched-filter sign is the sign
-    # of its peak acceleration (take-off and landing have opposite signs).
     lobes = [pa["lobe1"], pa["lobe2"], pb["lobe1"], pb["lobe2"]]
     tcs = [float(lb["t_c"]) for lb in lobes]
     idxs = [int(np.argmin(np.abs(t - tc))) for tc in tcs]
     signs = [float(np.sign(lb["a_peak"])) for lb in lobes]
 
-    # Three candidate pairings: ride 1 (lobes 1-2), ride 2 (lobes 3-4), and
-    # the super pair (lobes 1-4). Score each and apply the duration penalty.
     def _cand(ai: int, bi: int) -> dict:
         res = _pair.joint_pair_score(a_smooth, t, idxs[ai], idxs[bi],
                                      signs[ai], signs[bi], gw, gf)
@@ -386,73 +401,301 @@ def render_duration_penalty(ms: dict, out: Path) -> None:
     lo, hi = t_first - W0 - pad, t_last + W0 + pad
     m = (t >= lo) & (t <= hi)
     t0 = lo
-
-    fig, (ax1, ax2) = plt.subplots(
-        2, 1, figsize=(11.5, 6.0), sharex=True,
-        gridspec_kw={"height_ratios": [3, 2], "hspace": 0.13},
-    )
-
-    # --- Panel 1 — acceleration trace --------------------------------------
-    ax1.plot(t[m] - t0, a_vert[m], color="#9aa6b2", lw=0.5,
-             label=r"$a_\mathrm{vert}$")
-    ax1.plot(t[m] - t0, a_smooth[m], color="#2c3e50", lw=1.3, label="smoothed")
-    ax1.axhline(0, color="gray", lw=0.4, ls="--", alpha=0.6)
     win_s = a_smooth[m]
     ymax = max(float(np.max(np.abs(win_s))) if win_s.size else 1.0, 0.3) * 1.5
-    ax1.set_ylim(-ymax, ymax)
-    for p, col in ((pa, "#2ca02c"), (pb, "#1f9e6f")):
-        ax1.axvspan(float(p["lobe1"]["t_c"]) - t0,
-                    float(p["lobe2"]["t_c"]) - t0, color=col, alpha=0.16)
+
+    fig, axes = plt.subplots(3, 1, figsize=(11.0, 7.6), sharex=True,
+                             gridspec_kw={"hspace": 0.18})
+
+    def _trace(ax):
+        ax.plot(t[m] - t0, a_vert[m], color="#9aa6b2", lw=0.5,
+                label=r"$a_\mathrm{vert}$")
+        ax.plot(t[m] - t0, a_smooth[m], color="#2c3e50", lw=1.3,
+                label="smoothed")
+        ax.axhline(0, color="gray", lw=0.4, ls="--", alpha=0.6)
+        ax.set_ylim(-ymax, ymax)
+        ax.set_ylabel(r"$a$ (m/s$^2$)")
+        ax.grid(True, alpha=0.25)
+
+    # Panel 1: bare trace, four lobes named at the top.
+    _trace(axes[0])
     for n, tc in enumerate(tcs, start=1):
-        ax1.axvline(tc - t0, color="#d62728", lw=0.9, ls=":", alpha=0.8)
-        ax1.annotate(f"lobe {n}", (tc - t0, ymax), fontsize=7,
-                     ha="center", va="top", color="#d62728")
-    ax1.annotate("", xy=(t_last - t0, -ymax * 0.82),
-                 xytext=(t_first - t0, -ymax * 0.82),
-                 arrowprops=dict(arrowstyle="<->", color="#888", ls="dashed"))
-    ax1.text((t_first + t_last) / 2 - t0, -ymax * 0.9,
-             "super pair (lobes 1-4) — defeated", fontsize=7, ha="center",
-             color="#888")
-    box = (
-        f"rank $= S - \\lambda\\,\\Delta t$,  "
-        f"$\\lambda = 0.01\\ \\mathrm{{s}}^{{-1}}$\n"
-        f"ride 1 (lobes 1-2):  $S = {ride1['S']:.2f}$,  "
-        f"rank $= {ride1['rank']:.2f}$\n"
-        f"ride 2 (lobes 3-4):  $S = {ride2['S']:.2f}$,  "
-        f"rank $= {ride2['rank']:.2f}$\n"
-        f"super (lobes 1-4):  $S = {superp['S']:.2f}$,  "
-        f"rank $= {superp['rank']:.2f}$"
+        axes[0].axvline(tc - t0, color="#d62728", lw=0.7, ls=":", alpha=0.55)
+        axes[0].annotate(f"lobe {n}", (tc - t0, ymax * 0.94), fontsize=7,
+                         ha="center", va="top", color="#d62728")
+    axes[0].set_title("(a) raw trace — four lobes, no pairings drawn",
+                      fontsize=9)
+    axes[0].legend(fontsize=7, loc="upper right")
+
+    # Panel 2: one big arrow spanning lobe 1 -> lobe 4 (the super pair).
+    _trace(axes[1])
+    y_arr = -ymax * 0.74
+    axes[1].annotate(
+        "", xy=(t_last - t0, y_arr), xytext=(t_first - t0, y_arr),
+        arrowprops=dict(arrowstyle="<->", color="#b3261e", lw=2.2),
     )
-    ax1.text(0.015, 0.96, box, transform=ax1.transAxes, ha="left", va="top",
-             fontsize=7.5, bbox=dict(facecolor="white", alpha=0.92,
-                                     edgecolor="#888",
-                                     boxstyle="round,pad=0.35"))
-    ax1.set_ylabel(r"$a$ (m/s$^2$)")
-    ax1.set_title("a multi-stop trip — the duration penalty commits the two "
-                  "short rides, not the super pair", fontsize=9)
-    ax1.grid(True, alpha=0.25)
-    ax1.legend(fontsize=7, loc="upper right")
+    axes[1].text((t_first + t_last) / 2 - t0, y_arr - ymax * 0.10,
+                 f"super pair (lobes 1$\\to$4):  "
+                 f"$S = {superp['S']:.2f}$,  "
+                 f"rank $= S - \\lambda\\,\\Delta t = {superp['rank']:.2f}$",
+                 ha="center", va="top", fontsize=8, color="#b3261e")
+    axes[1].set_title("(b) super-pair candidate — high $S$, but the duration "
+                      "penalty docks $\\lambda\\,\\Delta t$", fontsize=9)
 
-    # --- Panel 2 — matched-filter signed-R² score --------------------------
-    ax2.plot(t[m] - t0, pos_r2[m], color="#1f77b4", lw=1.1,
-             label=r"$R^2_+$ (take-off)")
-    ax2.plot(t[m] - t0, neg_r2[m], color="#d62728", lw=1.1,
-             label=r"$R^2_-$ (landing)")
-    ax2.set_ylim(0.0, 1.20)
-    for n, (tc, idx, sg) in enumerate(zip(tcs, idxs, signs), start=1):
-        trace = pos_r2 if sg > 0 else neg_r2
-        col = "#1f77b4" if sg > 0 else "#d62728"
-        r2_pk = float(trace[idx])
-        ax2.axvline(tc - t0, color="#d62728", lw=0.7, ls=":", alpha=0.5)
-        ax2.plot(tc - t0, r2_pk, "o", color=col, ms=5)
-        ax2.annotate(f"lobe {n}: {r2_pk:.2f}", (tc - t0, r2_pk), fontsize=7,
-                     ha="center", va="bottom", xytext=(0, 5),
-                     textcoords="offset points", color=col)
-    ax2.set_xlabel("t (s, trip-local)")
-    ax2.set_ylabel(r"matched-filter $R^2$")
-    ax2.grid(True, alpha=0.25)
-    ax2.legend(fontsize=7, loc="upper right")
+    # Panel 3: two short arrows, one per stop-ride.
+    _trace(axes[2])
+    for ri, (ai, bi, info, col) in enumerate((
+        (0, 1, ride1, "#1a7a3a"),
+        (2, 3, ride2, "#1a7a3a"),
+    )):
+        ta, tb = tcs[ai], tcs[bi]
+        axes[2].annotate(
+            "", xy=(tb - t0, y_arr), xytext=(ta - t0, y_arr),
+            arrowprops=dict(arrowstyle="<->", color=col, lw=2.2),
+        )
+        axes[2].text((ta + tb) / 2 - t0, y_arr - ymax * 0.10,
+                     f"ride {ri + 1}:  $S = {info['S']:.2f}$,  "
+                     f"rank $= {info['rank']:.2f}$",
+                     ha="center", va="top", fontsize=8, color=col)
+    axes[2].set_title("(c) two short stop-rides — each rank beats the "
+                      "super pair, so the greedy resolver commits these "
+                      "first", fontsize=9)
+    axes[2].set_xlabel("t (s, trip-local)")
 
+    fig.suptitle(
+        r"the duration penalty $\lambda$ splits one super pair into "
+        "two short stop-rides",
+        fontsize=10, y=0.995,
+    )
+    fig.savefig(out, dpi=140, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  wrote {out.name}")
+
+
+# ---------------------------------------------------------------------------
+# New renderers: Gate 2 (joint score), Gate 3 (shared amplitude),
+# Gate 5 (cruise angle), trapezoid-fit failure
+# ---------------------------------------------------------------------------
+
+def _pair_panel(ax, state, t_c1, t_c2, W, f, A, s1, title, badge, badge_ok):
+    """Trapezoid pulse-pair overlay used by Gate 2 and Gate 3 panels."""
+    t = state["t"]
+    a_vert = state["a_vert"]
+    a_smooth = state["a_smooth"]
+    pad = max(2.0, W)
+    lo, hi = t_c1 - W - pad, t_c2 + W + pad
+    m = (t >= lo) & (t <= hi)
+    t0 = t_c1 - W
+    ax.plot(t[m] - t0, a_vert[m], color="#b9c2cc", lw=0.4, alpha=0.7,
+            label=r"$a_\mathrm{vert}$")
+    ax.plot(t[m] - t0, a_smooth[m], color="#2c3e50", lw=1.5, label="smoothed")
+    for t_c, s, col in ((t_c1, s1, "#ff7f0e"), (t_c2, -s1, "#2ca02c")):
+        tt = np.linspace(t_c - W, t_c + W, 240)
+        ax.plot(tt - t0, s * A * trapezoid_kernel(tt, t_c, W, f),
+                color="#d62728", lw=1.8, alpha=0.85)
+        ax.axvspan(t_c - W - t0, t_c + W - t0, color=col, alpha=0.10)
+    ax.axhline(0, color="gray", lw=0.4, ls="--", alpha=0.6)
+    win_s = a_smooth[m]
+    ymax = max(float(np.max(np.abs(win_s))) if win_s.size else A, A, 0.1) * 1.45
+    ax.set_ylim(-ymax, ymax)
+    vcol = "#1a7a3a" if badge_ok else "#b3261e"
+    ax.text(0.02, 0.04, badge, transform=ax.transAxes, ha="left", va="bottom",
+            fontsize=8, bbox=dict(facecolor="white", alpha=0.9, edgecolor=vcol,
+                                  boxstyle="round,pad=0.3"))
+    ax.set_xlabel("t (s, pair-local)")
+    ax.set_ylabel(r"$a$ (m/s$^2$)")
+    ax.set_title(title, fontsize=9)
+    ax.grid(True, alpha=0.25)
+    ax.legend(fontsize=7, loc="upper right")
+
+
+def render_gate2_examples(high: dict, low: dict, out: Path) -> None:
+    """Gate 2 — high vs low shared-shape joint score.
+
+    Left panel: a real pair with score well above the r_pair = 0.90 floor;
+    one (W,f) trapezoid fits both lobes.
+    Right panel: a real pair with score in [0.40, 0.75]; no single (W,f)
+    fits both lobes.
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(12.0, 4.4))
+
+    # Left: a high-score accepted ride from `rich`.
+    sh = high["state"]
+    p = high["pred"]
+    l1, l2 = p["lobe1"], p["lobe2"]
+    s1 = 1.0 if p["ride_type"] == "up" else -1.0
+    W, f = float(l1["half_width_s"]), float(l1["frac_flat"])
+    A = abs(float(l1["a_peak"]))
+    score = float(p.get("joint_r2_mean", p.get("joint_r2", 0.0)))
+    _pair_panel(
+        axes[0], sh, float(l1["t_c"]), float(l2["t_c"]), W, f, A, s1,
+        title="genuine ride — one $(W,f)$ template fits both lobes",
+        badge=f"$S = {score:.2f}\\ \\geq\\ r_\\mathrm{{pair}} = 0.90$\nACCEPTED",
+        badge_ok=True,
+    )
+
+    # Right: a low-score candidate.
+    sl = low["state"]
+    _pair_panel(
+        axes[1], sl, low["t_c1"], low["t_c2"], low["W"], low["f"], low["A"],
+        low["s1"],
+        title="false pair — each lobe peaks at a different $(W,f)$",
+        badge=f"$S = {low['score']:.2f}\\ <\\ r_\\mathrm{{pair}} = 0.90$\n"
+              f"per-lobe $R^2 = {low['r2_1']:.2f},\\ {low['r2_2']:.2f}$\nREJECTED",
+        badge_ok=False,
+    )
+    fig.suptitle("Gate 2 — the shared-shape joint score discriminates true "
+                 "rides from accidental pairings", fontsize=10, y=1.02)
+    fig.tight_layout()
+    fig.savefig(out, dpi=140, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  wrote {out.name}")
+
+
+def render_gate3_examples(symmetric: dict, asymmetric: dict, out: Path) -> None:
+    """Gate 3 — symmetric vs asymmetric per-lobe amplitudes.
+
+    Left panel: both lobe amplitudes clear the per-lobe floor and their
+    mean A* ≥ 0.30 → ACCEPTED.
+    Right panel: one lobe is firm, the other is weak; A* falls below
+    a_pair = 0.30 → REJECTED, even though the joint shape is plausible.
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(12.0, 4.4))
+
+    # Left: symmetric accepted ride.
+    ss = symmetric["state"]
+    p = symmetric["pred"]
+    l1, l2 = p["lobe1"], p["lobe2"]
+    s1 = 1.0 if p["ride_type"] == "up" else -1.0
+    W, f = float(l1["half_width_s"]), float(l1["frac_flat"])
+    A1 = abs(float(l1["a_peak"]))
+    A2 = abs(float(l2["a_peak"]))
+    Astar = 0.5 * (A1 + A2)
+    _pair_panel(
+        axes[0], ss, float(l1["t_c"]), float(l2["t_c"]), W, f, Astar, s1,
+        title="both lobes firm — shared amplitude clears the floor",
+        badge=f"$A_1 = {A1:.2f}$,  $A_2 = {A2:.2f}$  "
+              f"m/s$^2$\n$A^\\star = {Astar:.2f}\\ \\geq\\ "
+              f"a_\\mathrm{{pair}} = 0.30$\nACCEPTED",
+        badge_ok=True,
+    )
+
+    # Right: asymmetric rejected candidate.
+    sa = asymmetric["state"]
+    A1a, A2a = asymmetric["A1"], asymmetric["A2"]
+    Astar_a = 0.5 * (A1a + A2a)
+    _pair_panel(
+        axes[1], sa, asymmetric["t_c1"], asymmetric["t_c2"], asymmetric["W"],
+        asymmetric["f"], Astar_a, asymmetric["s1"],
+        title="one strong, one weak — mean amplitude falls under the floor",
+        badge=f"$A_1 = {A1a:.2f}$,  $A_2 = {A2a:.2f}$  "
+              f"m/s$^2$\n$A^\\star = {Astar_a:.2f}\\ <\\ "
+              f"a_\\mathrm{{pair}} = 0.30$\nREJECTED",
+        badge_ok=False,
+    )
+    fig.suptitle("Gate 3 — the shared amplitude $A^\\star$ rejects "
+                 "asymmetric pairings the per-lobe floor lets through",
+                 fontsize=10, y=1.02)
+    fig.tight_layout()
+    fig.savefig(out, dpi=140, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  wrote {out.name}")
+
+
+def render_gate5_angle(ms: dict, out: Path) -> None:
+    """Gate 5 — visualise the quiet-middle check as a line tilt.
+
+    Take the first short ride of the multi-stop trip used by Gate 6, slice
+    the inter-lobe cruise samples, fit a regression line, and annotate the
+    line's angle. The deployed gate uses RMS_mid/A* ≤ 0.5, but visually
+    the equivalent statement is "the cruise tilts less than ≈15°".
+    """
+    state = ms["state"]
+    pa = ms["pa"]
+    t = state["t"]
+    a_vert = state["a_vert"]
+    a_smooth = state["a_smooth"]
+
+    l1, l2 = pa["lobe1"], pa["lobe2"]
+    W = float(l1["half_width_s"])
+    t_c1, t_c2 = float(l1["t_c"]), float(l2["t_c"])
+    A = abs(float(l1["a_peak"]))
+
+    # Plot a window that frames both lobes and the cruise in between.
+    pad = max(1.5, 0.6 * W)
+    lo, hi = t_c1 - W - pad, t_c2 + W + pad
+    m = (t >= lo) & (t <= hi)
+    t0 = lo
+
+    # Regression line through the cruise window (t_c1 + W, t_c2 - W).
+    cruise_lo, cruise_hi = t_c1 + W, t_c2 - W
+    mc = (t >= cruise_lo) & (t <= cruise_hi)
+    if not mc.any():
+        print("  SKIP gate5_cruise_angle.png — empty cruise window")
+        return
+    tc = t[mc]
+    ac = a_smooth[mc]
+    slope, intercept = np.polyfit(tc, ac, 1)
+    angle_deg = float(np.degrees(np.arctan(slope)))
+    rms_val = float(np.sqrt(np.mean(ac * ac)))
+    ratio = rms_val / max(A, 1e-6)
+    accepted = ratio <= 0.5
+
+    fig, ax = plt.subplots(figsize=(9.2, 4.6))
+    ax.plot(t[m] - t0, a_vert[m], color="#b9c2cc", lw=0.4, alpha=0.7,
+            label=r"$a_\mathrm{vert}$")
+    ax.plot(t[m] - t0, a_smooth[m], color="#2c3e50", lw=1.4, label="smoothed")
+    ax.axvspan(cruise_lo - t0, cruise_hi - t0, color="#1f77b4", alpha=0.12,
+               label="inter-lobe cruise")
+    # Regression line.
+    tt = np.linspace(cruise_lo, cruise_hi, 80)
+    ax.plot(tt - t0, slope * tt + intercept, color="#d62728", lw=2.2,
+            label=f"regression  $\\theta = {angle_deg:+.1f}^\\circ$")
+    # Horizontal reference at the line's mean.
+    mean_a = float(np.mean(ac))
+    ax.plot([cruise_lo - t0, cruise_hi - t0], [mean_a, mean_a],
+            color="#888", lw=1.0, ls="--", label=r"horizontal reference")
+    ax.axhline(0, color="gray", lw=0.4, ls=":", alpha=0.6)
+    ax.set_ylim(-1.45 * A, 1.45 * A)
+    badge_col = "#1a7a3a" if accepted else "#b3261e"
+    verdict = "ACCEPTED" if accepted else "REJECTED"
+    ax.text(
+        0.02, 0.04,
+        f"$|\\theta| = {abs(angle_deg):.1f}^\\circ$  "
+        f"($\\leq 15^\\circ$ intuition envelope)\n"
+        f"$\\mathrm{{RMS}}_\\mathrm{{mid}}/A^\\star = {ratio:.2f}$  "
+        f"($\\leq \\rho = 0.5$)\n{verdict}",
+        transform=ax.transAxes, ha="left", va="bottom", fontsize=8,
+        bbox=dict(facecolor="white", alpha=0.92, edgecolor=badge_col,
+                  boxstyle="round,pad=0.35"),
+    )
+    ax.set_xlabel("t (s, ride-local)")
+    ax.set_ylabel(r"$a$ (m/s$^2$)")
+    ax.set_title("Gate 5 — fitting a line through the cruise: a flat ride "
+                 "tilts less than $\\approx 15^\\circ$", fontsize=9)
+    ax.grid(True, alpha=0.25)
+    ax.legend(fontsize=7, loc="upper right")
+    fig.tight_layout()
+    fig.savefig(out, dpi=140, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  wrote {out.name}")
+
+
+def render_trapezoid_fit_failure(tilted: dict, out: Path) -> None:
+    """§3.2.2 trapezoid pulse-pair fit — a bad-fit exemplar.
+
+    The same `tilted` pick that used to power the right panel of
+    threshold_quiet_middle.png. When the cruise wobbles, the closed-form
+    integral of the trapezoid template no longer recovers ΔH reliably.
+    """
+    fig, ax = plt.subplots(figsize=(8.4, 4.4))
+    st = tilted["state"]
+    _cruise_panel(ax, st, tilted["t_c1"], tilted["t_c2"], tilted["W"],
+                  tilted["f"], tilted["A"], tilted["s1"], tilted["rms"],
+                  tilted["ratio"], accepted=False)
+    ax.set_title("when the cruise is not flat, the closed-form trapezoid "
+                 "integral becomes unreliable", fontsize=9)
+    fig.tight_layout()
     fig.savefig(out, dpi=140, bbox_inches="tight")
     plt.close(fig)
     print(f"  wrote {out.name}")
@@ -490,6 +733,7 @@ def main() -> int:
     print(f"scanning {len(names)} experiments ...")
 
     rich, low, flat, tilted, multistop = [], [], [], [], []
+    low_score, asym_amp = [], []
     for k, name in enumerate(names):
         res = scan_experiment(name)
         if res is None:
@@ -499,6 +743,8 @@ def main() -> int:
         flat += res["flat"]
         tilted += res["tilted"]
         multistop += res["multistop"]
+        low_score += res["low_score"]
+        asym_amp += res["asym_amp"]
         if (k + 1) % 20 == 0:
             print(f"  ... {k + 1}/{len(names)}")
 
@@ -515,6 +761,10 @@ def main() -> int:
     # keep only up-going multi-stop trips; rank by the inter-ride gap.
     multistop = [r for r in multistop if r["ride_type"] == "up"]
     multistop.sort(key=lambda r: r["inter"])
+    # Gate 2: prefer the lowest-score pair that still has visible structure.
+    low_score.sort(key=lambda r: r["score"])
+    # Gate 3: largest amplitude asymmetry first, A* below the per-pair floor.
+    asym_amp.sort(key=lambda r: -r.get("asym", 0.0))
 
     def _show(tag, rows, fmt):
         print(f"\n[{tag}] {len(rows)} candidates")
@@ -534,6 +784,12 @@ def main() -> int:
     _show("F4 multi-stop trip", multistop,
           lambda r: f"inter={r['inter']:.1f}s span={r['span']:.1f}s  "
                     f"{r['name']}")
+    _show("G2 low-score pair", low_score,
+          lambda r: f"S={r['score']:.2f} A={r['A']:.2f} "
+                    f"r2=({r['r2_1']:.2f},{r['r2_2']:.2f})  {r['name']}")
+    _show("G3 asymmetric amplitude", asym_amp,
+          lambda r: f"A1={r['A1']:.2f} A2={r['A2']:.2f} A*={r['A']:.2f} "
+                    f"asym={r['asym']:.1f}x  {r['name']}")
 
     if args.scan_only:
         return 0
@@ -546,7 +802,7 @@ def main() -> int:
                     return r
         return rows[0] if rows else None
 
-    # F1 + F2 + F3 + F4 need the full detector state of the chosen recording.
+    # All figures need the full detector state of the chosen recording.
     state_cache: dict[str, dict] = {}
 
     def _state(name):
@@ -559,6 +815,8 @@ def main() -> int:
     pick_flat = _pick("cruise", flat)
     pick_tilted = _pick("tilted", tilted)
     pick_ms = _pick("duration", multistop)
+    pick_low_score = _pick("low_score", low_score)
+    pick_asym = _pick("asym_amp", asym_amp)
 
     if pick_rich and pick_low:
         pick_rich["state"] = _state(pick_rich["name"])
@@ -569,20 +827,42 @@ def main() -> int:
     else:
         print("  SKIP threshold_grid_energy.png — missing a candidate")
 
-    if pick_flat and pick_tilted:
-        pick_flat["state"] = _state(pick_flat["name"])
-        pick_tilted["state"] = _state(pick_tilted["name"])
-        if pick_flat["state"] and pick_tilted["state"]:
-            render_quiet_middle(pick_flat, pick_tilted,
-                                PAPER_FIG / "threshold_quiet_middle.png")
+    # Gate 2: high-score (reuse a `rich` accepted ride) vs low-score pair.
+    if pick_rich and pick_low_score:
+        pick_rich["state"] = pick_rich.get("state") or _state(pick_rich["name"])
+        pick_low_score["state"] = _state(pick_low_score["name"])
+        if pick_rich["state"] and pick_low_score["state"]:
+            render_gate2_examples(pick_rich, pick_low_score,
+                                  PAPER_FIG / "gate2_joint_score.png")
     else:
-        print("  SKIP threshold_quiet_middle.png — missing a candidate")
+        print("  SKIP gate2_joint_score.png — missing a candidate")
+
+    # Gate 3: symmetric accepted ride vs asymmetric rejected pair.
+    if pick_rich and pick_asym:
+        pick_rich["state"] = pick_rich.get("state") or _state(pick_rich["name"])
+        pick_asym["state"] = _state(pick_asym["name"])
+        if pick_rich["state"] and pick_asym["state"]:
+            render_gate3_examples(pick_rich, pick_asym,
+                                  PAPER_FIG / "gate3_shared_amplitude.png")
+    else:
+        print("  SKIP gate3_shared_amplitude.png — missing a candidate")
+
+    if pick_tilted:
+        pick_tilted["state"] = _state(pick_tilted["name"])
+        if pick_tilted["state"]:
+            render_trapezoid_fit_failure(
+                pick_tilted, PAPER_FIG / "trapezoid_fit_failure.png",
+            )
+    else:
+        print("  SKIP trapezoid_fit_failure.png — missing a candidate")
 
     if pick_ms:
         pick_ms["state"] = _state(pick_ms["name"])
         if pick_ms["state"]:
             render_duration_penalty(pick_ms,
                                     PAPER_FIG / "threshold_duration_penalty.png")
+            # Gate 5 reuses the multi-stop trip's first short ride.
+            render_gate5_angle(pick_ms, PAPER_FIG / "gate5_cruise_angle.png")
     else:
         print("  SKIP threshold_duration_penalty.png — missing a candidate")
     return 0

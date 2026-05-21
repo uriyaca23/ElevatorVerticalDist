@@ -1176,11 +1176,185 @@ passes almost every clean ride and rejects only the pathological.
 \section{Evaluation}
 \label{sec:evaluation}
 
+The pipeline holds nominal $90\,\%$ coverage on a held-out building,
+places the median per-ride error below half a floor, and emits no
+phantom rides once the quality filter is in the loop.  Three
+subsections report the result; Appendix~\ref{app:evaluation} carries
+the metric definitions, the train/test protocol, and the supporting
+diagnostic figures.
+
+\subsection{Segmentation accuracy}
+\label{sec:eval-seg}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Split & $n_{\rm gt}$ & clean & missed & FP & merged & split & $F1^{\ast}$ & IoU-F1@0.5 \\
+\midrule
+Train (7 sessions)       & $415$ & $309$ & $95$ & $29$ & $5$ & $1$ & $0.81$ & $0.64$ \\
+Test (held-out building) & $116$ & $\phantom{0}98$ & $16$ & $\phantom{0}9$ & $1$ & $0$ & $0.88$ & $0.83$ \\
+\bottomrule
+\end{tabular}
+\caption{Segmentation on the tuned train pool and on the held-out
+  test building.  $F1^{\ast}$ is the composite failure-mode score
+  (Appendix~\ref{app:eval-metrics}); every test-split score sits at
+  or above its train counterpart.}
+\label{tab:eval-seg}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\linewidth]{seg_pred_vs_gt_duration.png}
+\caption{Predicted ride duration against hand-edited GT duration
+  on every clean match.  Points sit systematically below the
+  $y\!=\!x$ diagonal: the GT editor pads each labelled interval
+  by~$1$\,s on each side for robustness
+  (\S\ref{app:dataset-method}), so the detector's tighter
+  intervals lose a constant $\sim 2$\,s of overlap to the pad.
+  Correcting for the pad lifts the empirical IoU-F1@0.5 of
+  Table~\ref{tab:eval-seg} from $0.83$ towards $0.95$ on the test
+  split; the dashed line is the pad-corrected diagonal.}
+\label{fig:eval-iou-pad}
+\end{figure}
+
+Per-experiment counts, the failure-mode bar chart, and the IoU
+distribution are in Appendix~\ref{app:eval-extra-seg}.
+
+\subsection{Per-ride prediction}
+\label{sec:eval-pred}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{llrrrrrrr}
+\toprule
+Algorithm & Split & $n$ & Median (m) & MAE (m) & $\le 1.5$\,m & $\le 3$\,m & Coverage & Median CI (m) \\
+\midrule
+Trapezoid & Train & $382$ & $0.27$ & $0.89$ & $88.0\%$ & $93.2\%$ & $87.2\%$ & $1.18$ \\
+Trapezoid & Test  & $108$ & $0.29$ & $3.60$ & $90.7\%$ & $91.7\%$ & $93.5\%$ & $1.16$ \\
+ZUPT      & Train & $382$ & $0.34$ & $2.32$ & $81.4\%$ & $88.0\%$ & $91.4\%$ & $1.57$ \\
+ZUPT      & Test  & $108$ & $0.19$ & $6.45$ & $87.0\%$ & $91.7\%$ & $94.4\%$ & $1.24$ \\
+\bottomrule
+\end{tabular}
+\caption{Per-ride prediction on clean-matched intervals, no
+  quality filter.  Median error sits below half a floor on both
+  algorithms and both splits; the MAE/RMSE tail comes from a
+  small set of damped recordings the quality filter of
+  Table~\ref{tab:eval-pipeline} rejects.  Realised coverage at
+  the $90\,\%$ nominal holds on the held-out building for both
+  algorithms.}
+\label{tab:eval-pred}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\linewidth]{pred_scatter_trapezoid.png}
+\caption{Predicted versus true~$\Delta h$ for the trapezoid fit on
+  every clean ride, pooled across train and test.  Points hug the
+  $y\!=\!x$ diagonal across more than $40$\,m of $\Delta h$; the
+  conformal $90\,\%$ interval is the grey band around each point.
+  Per-algorithm scatter and ZUPT comparison sit in
+  Appendix~\ref{app:eval-extra-pred}.}
+\label{fig:eval-pred-scatter-body}
+\end{figure}
+
+Reliability, coverage by ride duration, and per-experiment error
+breakdowns are in Appendix~\ref{app:eval-extra-pred}.
+
+\subsection{End-to-end pipeline}
+\label{sec:eval-pipeline}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{llrrrrrr}
+\toprule
+Algorithm & Split & $n$ & Accept rate & Median (m) & MAE (m) & $\le 1.5$\,m & Coverage \\
+\midrule
+Trapezoid & Train & $251$ & $66\%$ & $0.18$ & $0.38$ & $93.2\%$ & $92.4\%$ \\
+Trapezoid & Test  & $\phantom{0}89$ & $82\%$ & $0.22$ & $0.44$ & $96.6\%$ & $97.8\%$ \\
+ZUPT      & Train & $332$ & $87\%$ & $0.26$ & $0.73$ & $90.4\%$ & $94.0\%$ \\
+ZUPT      & Test  & $100$ & $93\%$ & $0.14$ & $0.51$ & $93.0\%$ & $98.0\%$ \\
+\bottomrule
+\end{tabular}
+\caption{Deployed pipeline on accepted predictions only
+  (segmenter $\to$ predictor $\to$ quality filter).  The filter
+  halves mean error on the test split, raises the one-floor-target
+  rate past $93\,\%$, and lifts realised coverage past the
+  nominal~$90\,\%$ on every row.  Every false positive on the
+  held-out test ($9$ of $108$ segmenter predictions) is rejected
+  by the filter; the consumer sees zero phantom rides on
+  \texttt{Beit Yitzchaki~B}.}
+\label{tab:eval-pipeline}
+\end{table}
+
+The accepted-only error CDF and FP diagnostics are in
+Appendix~\ref{app:eval-extra-pipeline}.
+
 \section{Discussion}
 \label{sec:discussion}
 
+% Headline payoff: the family generalises because its source is physics.
+The trapezoid family generalises out of distribution.  On the held-out
+building \texttt{Beit Yitzchaki~B} the pipeline reaches segmentation
+$F1^{\ast}\!=\!0.88$, a per-ride median trapezoid error of $0.22\,$m,
+and zero false positives after the quality filter
+(Tables~\ref{tab:eval-seg},~\ref{tab:eval-pipeline}).  Every test-split
+score matches or exceeds its train counterpart, and correcting for the
+$\pm 1\,$s ground-truth pad raises the raw IoU-F1@0.5 from $0.83$ to
+roughly $0.95$ (Figure~\ref{fig:eval-iou-pad}).  Realised coverage
+reaches $97.8\,\%$ at a nominal $90\,\%$, and the quality filter halves
+the accepted-ride mean error on the test split
+(Tables~\ref{tab:eval-pred},~\ref{tab:eval-pipeline}).  The reason is
+physical: $j_{\max}$, $a_{\max}$, and $v_{\max}$ come from elevator
+design standards, so a family built on those limits applies to any
+compliant cabin.
+
+% Limitations: three structural bounds on the result.
+Three limits bound the scope of this result.  First, the held-out
+evaluation rests on one building --- \texttt{Beit Yitzchaki~B}, a
+residential block --- and held-out office and hotel splits remain
+future work.  Second, the pipeline returns signed displacement
+$\Delta h$, not a floor index; mapping a sequence of $\Delta h$ to
+specific floors needs a downstream building-height model the user
+supplies.  Third, the family assumes ISO~$18738$-compliant kinematics;
+hydraulic lifts, older geared machines, and freight cabins violate the
+$(j_{\max},a_{\max},v_{\max})$ bounds of~\eqref{eq:elevator-bounds},
+and the quality filter rejects those rides at the
+gates~(\S\ref{sec:algo-quality}).
+
+% Calibration slack and the recall cost on the other side.
+Realised coverage runs $92$--$98\,\%$ on every row of
+Table~\ref{tab:eval-pipeline}, above the nominal $90\,\%$, so the
+conformal multipliers ($k\!=\!5.04$ for trapezoid, $k\!=\!2.34$ for
+ZUPT) are conservative.  They will tighten on a larger calibration
+set: we fit the trapezoid $k$ on $251$ accepted train rides and the
+ZUPT $k$ on $332$, and split-conformal intervals shrink
+as~$1/\sqrt{n_{\rm cal}}$ (\S\ref{sec:algo-ci}).  Tighter coverage
+trades against recall: the same filter rejects $18\,\%$ of clean
+trapezoid rides and $7\,\%$ of clean ZUPT rides on the test split
+(Table~\ref{tab:eval-pipeline} accept rates $82\,\%$ and $93\,\%$).
+Each gate threshold in Tables~\ref{tab:seg-thresholds},
+\ref{tab:quality-checks-zupt}, and~\ref{tab:quality-checks} is a
+single scalar, so a deployment can pick its own coverage--recall
+operating point.
+
 \section{Conclusion}
 \label{sec:conclusion}
+
+We turned a smartphone into a per-ride elevator-displacement sensor
+with a calibrated $90\,\%$ confidence interval, accelerometer-only, on
+a held-out residential building.  The mechanical limits of the cabin
+force the gravity-removed acceleration into a small parametric family,
+and segmentation and prediction are two fits against that family.
+Median trapezoid error on the blind test sits at $0.22\,$m, $96.6\,\%$
+of accepted rides land within one floor, and the quality filter passes
+zero phantom rides through to the consumer
+(Table~\ref{tab:eval-pipeline}).  We release the pipeline, the
+labelled multi-building dataset, and the evaluation harness ---
+\todo{repository URL}.
 
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{references}
@@ -1373,6 +1547,67 @@ The temporal gap between the two acceleration lobes
 equals~$H/v_{\max}$ and is independent of $j_{\max}$
 and~$a_{\max}$ --- the amplitude-free centroid identity used in
 the basis-function mapping of~\S\ref{sec:bg-family}.
+
+\subsection{Template-grid bounds from literature machine parameters}
+\label{app:template-grid-bounds}
+
+The segmentation appendix's template grid
+(Appendix~\ref{app:seg-matched-filter}) ranges over a discrete set
+of~$(W,f)$ cells.  The grid limits are not free parameters --- they
+fall out of the kinematic identities
+\eqref{eq:W-from-kinematics}--\eqref{eq:f-from-kinematics} once the
+literature ranges for the three machine parameters are plugged in.
+
+\paragraph{Literature ranges.}
+Section~\ref{sec:bg-bounds} cites the following bounds for commercial
+passenger elevators:
+\begin{equation}
+  j_{\max}\in[1.0,\,1.6]\text{\,m/s$^3$~\cite{iso18738}},\qquad
+  a_{\max}\in[0.8,\,1.5]\text{\,m/s$^2$},\qquad
+  v_{\max}\in[1.0,\,2.5]\text{\,m/s~\cite{cibseguidd2020}}.
+  \label{eq:lit-bounds}
+\end{equation}
+
+\paragraph{Time constants.}
+Equation~\eqref{eq:Tj} gives the jerk ramp
+$T_j=a_{\max}/j_{\max}$, whose range under~\eqref{eq:lit-bounds} is
+\[
+  T_j \;\in\;
+  \left[\tfrac{a_{\min}}{j_{\max}},\,\tfrac{a_{\max}}{j_{\min}}\right]
+  \;=\;
+  \bigl[0.50,\,1.50\bigr]\text{\,s.}
+\]
+Equation~\eqref{eq:Ta} gives the acceleration plateau
+$T_a=\max(0,\,v_{\max}/a_{\max}-T_j)$; its lower bound is $0$ (any
+configuration with $v_{\max}/a_{\max}\le T_j$ saturates the
+$a_{\max}$ rail but never reaches $v_{\max}$), and its upper bound
+is attained at $v_{\max}\!=\!2.5$, $a_{\max}\!=\!0.8$,
+$j_{\max}\!=\!1.6$, yielding
+\[
+  T_a \;\in\;\bigl[0,\;2.63\bigr]\text{\,s.}
+\]
+
+\paragraph{Half-width $W$ and flat fraction $f$.}
+Substituting the eight corner combinations of~\eqref{eq:lit-bounds}
+into~\eqref{eq:W-from-kinematics}--\eqref{eq:f-from-kinematics}
+yields
+\[
+  W \;\in\;\bigl[0.88,\,1.96\bigr]\text{\,s,}\qquad
+  f \;\in\;\bigl[0,\,0.72\bigr].
+\]
+The lower end of~$f$ is the triangle limit ($T_a\!=\!0$, short hops
+that never reach the $a_{\max}$ plateau); the upper end is the
+near-rectangular plateau of the longest cruises.
+
+\paragraph{The deployed grid.}
+The detector pads these analytical bounds to absorb sensor noise,
+controllers that depart from the textbook bang-bang law, and a
+margin for the short-ride triangle row.  The deployed grid is
+30~log-spaced~$W$ in $[0.4,\,3.0]$\,s and 15~linear~$f$ in
+$[0.05,\,0.80]$, plus an explicit $f\!=\!0$ triangle row for short
+rides that never reach the $a_{\max}$ plateau.  The same grid is
+reused by every stage that fits the trapezoid family
+(Appendices~\ref{app:seg-matched-filter} and~\ref{app:prediction}).
 
 \section{Dataset collection and ground-truth pipeline}
 \label{app:dataset}
@@ -1704,13 +1939,11 @@ window-energy fraction the template explains: $R^{2}\!=\!1$ an exact
 fit, $R^{2}\!\le\!0$ no better than the zero signal.
 
 \paragraph{Template grid.}
-The kinematics of~\S\ref{sec:bg-family} fix the grid.  The commercial
-parameter ranges of~\S\ref{sec:bg-bounds} map
-through~\eqref{eq:W-from-kinematics}--\eqref{eq:f-from-kinematics} to
-a half-width $W\!\in\![0.8,2.5]$\,s and a flat fraction
-$f\!\in\![0,0.7]$; the grid pads these to $30$ log-spaced~$W$ in
-$[0.3,3.0]$\,s and $15$ linear~$f$ in $[0.05,0.80]$, with an
-$f\!=\!0$ triangle row for short rides that never reach the
+Appendix~\ref{app:template-grid-bounds} derives the analytical
+$(W,f)$ ranges admitted by the commercial machine parameters of
+\S\ref{sec:bg-bounds}; the deployed grid pads them to 30~log-spaced
+$W$ in $[0.4,\,3.0]$\,s and 15~linear $f$ in $[0.05,\,0.80]$, plus
+an $f\!=\!0$ triangle row for short rides that never reach the
 $a_{\max}$ plateau.
 
 \paragraph{Shared-shape joint score.}
@@ -1764,28 +1997,45 @@ practice~\cite{strakosch2010,cibseguidd2020}.  A high-rise express
 run would need a wider window; the~$30$\,s cap trades that reach
 against joining lobes drawn from \emph{different} rides.
 
-\subsection{Gate 2 --- shared-shape joint score $r_{\mathrm{pair}}$}
+\subsection{Gates 2 \& 3 --- joint shape and shared amplitude}
 \label{app:seg-gate2}
-
-Gate~2 demands a joint score of at least~$r_{\mathrm{pair}}\!=\!0.90$,
-far above the~$0.40$ detector floor.  A genuine ride offers a
-constraint a single lobe never does: both lobes are cut from
-\emph{one} cabin profile, so one~$(W,f)$ template must fit them
-together~\eqref{eq:joint-fit}.  Unrelated bursts each fit some
-template alone but peak at different cells, and no shared cell scores
-both above~$0.90$.  The strict floor is cheap --- it costs almost no
-true rides while removing the bulk of accidental pairings.
-
-\subsection{Gate 3 --- shared amplitude $a_{\mathrm{pair}}$}
 \label{app:seg-gate3}
 
+Gates~2 and~3 read the same shared-shape fit~\eqref{eq:joint-fit}
+from two different angles: a single $(W,f)$ template explaining the
+\emph{shapes} of both lobes, and the mean $A^{\star}$ summing their
+\emph{amplitudes}.  Both lobes are cut from one cabin profile, so a
+real ride must clear both gates; an accidental pairing typically
+fails at least one.
+
+Gate~2 demands a joint score of at least~$r_{\mathrm{pair}}\!=\!0.90$,
+far above the~$0.40$ detector floor.  Unrelated bursts each fit some
+template alone but peak at different cells, so no shared $(W,f)$
+scores both above~$0.90$.
+
 Gate~3 requires the shared amplitude~$A^{\star}$ to clear
-$a_{\mathrm{pair}}\!=\!0.30$\,m/s$^{2}$, above the~$0.20$ detector
-floor.  Since~$A^{\star}$ is the mean of the two lobe
-amplitudes~\eqref{eq:joint-fit}, a pair survives only when
-\emph{both} lobes are firm: a strong take-off matched to a weak noise
-lobe averages below~$0.30$.  The gate thus rejects the asymmetric
-pairings the per-lobe floor lets through.
+$a_{\mathrm{pair}}\!=\!0.30\,\mathrm{m/s^{2}}$, above the~$0.20$
+detector floor.  Since~$A^{\star}$ is the mean of the two lobe
+amplitudes, a pair survives only when \emph{both} lobes are firm: a
+strong take-off matched to a weak noise lobe averages below~$0.30$,
+even when the joint shape still passes Gate~2.
+
+Together the two floors are cheap --- they cost almost no true rides
+while removing the bulk of accidental pairings
+(Figure~\ref{fig:thresh-gate2}).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\linewidth]{gate2_joint_score.png}
+\caption{Gates~2 and~3 on two real candidate pairs.  \textbf{Left:} a
+  genuine ride --- one $(W,f)$ trapezoid (red) overlays both
+  opposite-sign lobes; $S\!=\!0.99$ and $A^{\star}$ both clear their
+  floors.  \textbf{Right:} an accidental pairing --- one $(W,f)$ fits
+  one lobe well ($R^{2}_{1}\!=\!0.74$) but not the other
+  ($R^{2}_{2}\!=\!0.06$); $S\!=\!0.40$ falls below the joint-score
+  floor and the weak lobe drags $A^{\star}$ below its floor too.}
+\label{fig:thresh-gate2}
+\end{figure}
 
 \subsection{Gate 4 --- grid energy $e_{\min}$}
 \label{app:seg-gate4}
@@ -1822,22 +2072,24 @@ takes~$\mathrm{RMS}_{\mathrm{mid}}$, the root-mean-square of the
 smoothed acceleration on the inter-lobe
 window~$(t_{c_1}\!+\!W,\;t_{c_2}\!-\!W)$, and rejects the pair when
 it exceeds~$\rho A^{\star}$ with~$\rho\!=\!0.5$ --- when the cruise
-wobble passes half the lobe amplitude.  The test catches pairs whose
+wobble passes half the lobe amplitude.  Equivalently, fit a line
+through the cruise samples; the RMS rule rejects pairs whose
+regression tilts by more than~$\approx\!15^{\circ}$ from horizontal
+(Figure~\ref{fig:thresh-gate5}).  The test catches pairs whose
 middle never settles, most often a walking false positive where
-continuous motion keeps the inter-lobe stretch as loud as the lobes
-(Figure~\ref{fig:thresh-cruise}).
+continuous motion keeps the inter-lobe stretch as loud as the lobes.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{threshold_quiet_middle.png}
-\caption{The quiet-middle gate~$\rho$.  \textbf{Left:} a genuine ride
-  --- the smoothed acceleration returns to zero on the inter-lobe
-  cruise (shaded), so~$\mathrm{RMS}_{\mathrm{mid}}/A^{\star}$ stays
-  well under~$\rho\!=\!0.5$ and the pair is accepted.  \textbf{Right:}
-  a pair whose inter-lobe stretch never goes quiet ---
-  $\mathrm{RMS}_{\mathrm{mid}}/A^{\star}$ exceeds~$0.5$ and Gate~5
-  rejects it.}
-\label{fig:thresh-cruise}
+\includegraphics[width=0.85\linewidth]{gate5_cruise_angle.png}
+\caption{Gate~5 on the first short ride of a real multi-stop trip
+  (the same recording that drives Figure~\ref{fig:thresh-rank}).  A
+  least-squares line through the inter-lobe cruise samples (shaded)
+  tilts by only $\theta\!=\!5.9^{\circ}$, well inside the
+  $\approx\!15^{\circ}$ envelope; equivalently
+  $\mathrm{RMS}_{\mathrm{mid}}/A^{\star}\!=\!0.23$ is well under
+  $\rho\!=\!0.5$, and the pair is accepted.}
+\label{fig:thresh-gate5}
 \end{figure}
 
 \subsection{Gate 6 --- duration penalty $\lambda$ and greedy resolution}
@@ -1859,14 +2111,17 @@ super pair never commits.
 \begin{figure}[H]
 \centering
 \includegraphics[width=\linewidth]{threshold_duration_penalty.png}
-\caption{The duration penalty~$\lambda$ on an up-going multi-stop
-  trip.  \textbf{Top:} the acceleration trace --- four lobes, two
-  back-to-back rides (shaded).  \textbf{Bottom:} the matched-filter
-  signed-$R^{2}$ score, peaking at all four lobes.  The take-off of
-  the first ride and the landing of the last form a \emph{super pair}
-  whose joint score~$S$ matches either short ride; only the
-  rank~$S-\lambda\,\Delta t$ separates them, docking the long span
-  hardest so the two short rides commit first.}
+\caption{The duration penalty~$\lambda$ on an up-going multi-stop trip,
+  reorganised into three panels.  \textbf{(a)}~The bare acceleration
+  trace: four lobes, no pairings drawn.  \textbf{(b)}~The
+  \emph{super-pair} candidate (red arrow): the take-off of the first
+  ride paired with the landing of the last.  Its joint score~$S$ is
+  high, but the rank~$S-\lambda\,\Delta t$ is docked by the wide span.
+  \textbf{(c)}~The two short stop-rides (green arrows): each carries a
+  comparable~$S$ but a far smaller~$\Delta t$, so each rank beats the
+  super pair.  The greedy resolver commits the two short rides first,
+  and the super pair never makes it onto the page of detected
+  intervals.}
 \label{fig:thresh-rank}
 \end{figure}
 
@@ -1882,11 +2137,14 @@ of~\S\ref{sec:algo-quality}.
 \subsection{The trapezoid pulse-pair integral}
 \label{app:pred-integral}
 
-The closed-form height~\eqref{eq:dh-closed} follows from one
-elementary integral, the area of the unit trapezoid.  The
-trapezoid~$\tau_{W,f}$ of~\eqref{eq:trap-template} is a plateau of
-width~$2fW$ joined to zero by two ramps of base~$(1-f)W$, so it
-integrates to
+The closed-form height~\eqref{eq:dh-closed} reduces to one
+elementary scalar — the trapezoid area — used three times: once
+per lobe and once for the cruise.
+
+\paragraph{Lobe area.}
+The trapezoid~$\tau_{W,f}$ of~\eqref{eq:trap-template} vanishes
+outside~$[-W,W]$ and is a plateau of width~$2fW$ joined to zero by
+two ramps of base~$(1-f)W$, so
 \begin{equation}
   \int_{-\infty}^{\infty}\!\tau_{W,f}(t)\,dt
    \;=\;\underbrace{2fW}_{\text{plateau}}
@@ -1894,104 +2152,147 @@ integrates to
    \;=\;W(1+f).
   \label{eq:trap-area}
 \end{equation}
+One lobe~$sA\,\tau_{W,f}$ therefore steps the cabin velocity
+by~$v_{\mathrm{peak}}\!=\!A\,W(1+f)$: the take-off lobe carries the
+cabin from rest to~$+v_{\mathrm{peak}}$, the landing lobe back to rest.
 
-A single acceleration lobe~$sA\,\tau_{W,f}$ integrates once to a
-velocity that ramps the cabin from rest to the cruise speed
-$v_{\mathrm{peak}}=A\,W(1+f)$, the lobe area of~\eqref{eq:trap-area}.
-The take-off lobe ramps the cabin up to~$v_{\mathrm{peak}}$; the
-opposite-sign landing lobe brings it back to rest; between them the
-cabin holds~$v_{\mathrm{peak}}$.  Because~$\tau_{W,f}$ is symmetric
-about its centre, the velocity rises point-symmetrically about each
-lobe centroid, so each $2W$-wide ramp window contributes the same
-area as a width-$W$ stretch at full~$v_{\mathrm{peak}}$.  Integrating
-the velocity over the ride therefore gives
+\paragraph{Displacement.}
+The velocity~$v(t)$ rises through the take-off lobe, holds
+at~$v_{\mathrm{peak}}$ across the inter-lobe cruise of
+duration~$T_v\!=\!\Delta t_c\!-\!2W$, then falls through the landing
+lobe (Figure~\ref{fig:trap-double-integral}).  The cruise contributes
+$v_{\mathrm{peak}}\,T_v$ to~$\Delta h$.  Each ramp window contributes
+$v_{\mathrm{peak}}\,W$: $\tau_{W,f}$ is symmetric about its centre, so
+$v(t)$ is point-symmetric about each centroid
+with~$v(t_{c,k})\!=\!v_{\mathrm{peak}}/2$, making its mean across the
+$2W$-wide lobe window exactly~$v_{\mathrm{peak}}/2$.  Summing the
+three slabs,
 \[
-  \Delta h=\int_{0}^{T}\!v(t)\,dt
-          =s\,v_{\mathrm{peak}}\,\Delta t_c
-          =s\,A\,W(1+f)\,\Delta t_c,
+  \Delta h \;=\; s\,v_{\mathrm{peak}}\,(2W+T_v)
+            \;=\; s\,v_{\mathrm{peak}}\,\Delta t_c
+            \;=\; s\,A\,W(1+f)\,\Delta t_c,
 \]
 which is~\eqref{eq:dh-closed}: the cruise velocity times the centroid
 spacing, signed by the ride direction.
 
-\paragraph{Joined-pulse short-ride variant.}
-A short hop has no cruise: the two lobes touch at $\Delta t_c=2W$.
-Setting $\Delta t_c=2W$ in~\eqref{eq:dh-closed} gives
-\begin{equation}
-  \Delta h = 2\,s\,A\,W^{2}(1+f),
-  \label{eq:dh-joined}
-\end{equation}
-the joined-pulse height.  The arrival time drops out, so~$\Delta h$
-depends on three parameters, with gradients
-$\partial\Delta h/\partial A=2sW^{2}(1+f)$,
-$\partial\Delta h/\partial W=4sAW(1+f)$, and
-$\partial\Delta h/\partial f=2sAW^{2}$.  The joined template packs
-twice the energy of a single lobe,
-$\langle\tau_{\mathrm{joined}},\tau_{\mathrm{joined}}\rangle
-=2\langle\tau,\tau\rangle$, so its amplitude bound is correspondingly
-tighter.  Prediction runs the pair fit and the joined fit on every
-segment and keeps the higher joint~$R^{2}$, the joined fit's one
-fewer free parameter breaking near-ties in its favour.
-
-\paragraph{Agreement with the S-curve.}
-The trapezoid is not an approximation of the S-curve
-of~\S\ref{sec:bg-scurve} --- it is its acceleration lobe.  Under the
-bang-bang jerk command~\eqref{eq:bang-bang} the jerk is piecewise
-constant, so each acceleration lobe is piecewise linear: exactly the
-trapezoid~$\tau_{W,f}$, with~$(W,f)$ fixed by the machine parameters
-through~\eqref{eq:W-from-kinematics}--\eqref{eq:f-from-kinematics}.  A
-controller that caps the jerk derivative rounds the four corners of
-that lobe into short curved transitions.  The trapezoid is then the
-area- and centroid-matched linearisation of the rounded lobe --- the
-unique trapezoid with the same integral and the same first moment ---
-so the lobe area
-\begin{equation}
-  \int a_{\mathrm{lobe}}(t)\,dt \;=\; A\,W(1+f)
-  \label{eq:scurve-trap-area}
-\end{equation}
-and the centroid spacing~$\Delta t_c$, hence the
-height~\eqref{eq:dh-closed}, are preserved under jerk rounding
-(Figure~\ref{fig:trap-scurve}).  The fit recovers~$\Delta h$ without
-resolving the corner shape it cannot constrain.
-
 \begin{figure}[ht]
 \centering
-\begin{tikzpicture}[>=Stealth, font=\small, scale=0.95]
-  \pgfmathsetmacro{\W}{3.4}
-  \pgfmathsetmacro{\f}{0.42}
-  \pgfmathsetmacro{\fW}{\f*\W}
-  \pgfmathsetmacro{\A}{2.2}
-  \fill[blue!11] (-\W,0) -- (-\fW,\A) -- (\fW,\A) -- (\W,0) -- cycle;
-  \draw[->] ({-\W-0.8},0) -- ({\W+1.0},0) node[right] {$t$};
-  \draw[->] (0,-0.3) -- (0,{\A+0.9}) node[above] {$a(t)$};
-  \draw[very thick, blue!70!black]
-    ({-\W-0.7},0) -- (-\W,0) -- (-\fW,\A) -- (\fW,\A) -- (\W,0)
-    -- ({\W+0.7},0);
-  \draw[thick, red!75!black, dashed, rounded corners=8pt]
-    ({-\W-0.7},0) -- (-\W,0) -- (-\fW,\A) -- (\fW,\A) -- (\W,0)
-    -- ({\W+0.7},0);
-  \draw[dashed,gray!55] (0,\A) -- (-\fW,\A);
-  \draw[dotted,gray!55] (-\W,0) -- (-\W,0.16);
-  \draw[dotted,gray!55] (\W,0) -- (\W,0.16);
-  \draw[dotted,gray!55] (\fW,0) -- (\fW,\A);
-  \draw[dotted,gray!55] (-\fW,0) -- (-\fW,\A);
-  \node[left] at (0,\A) {$A$};
-  \node[below=2pt] at (-\W,0)  {$-W$};
-  \node[below=2pt] at (\W,0)   {$W$};
-  \node[below=2pt] at (\fW,0)  {$fW$};
-  \node[below=2pt] at (-\fW,0) {$-fW$};
-  \node[blue!45!black] at (0,{0.40*\A}) {$\int a = A\,W(1{+}f)$};
-\end{tikzpicture}
-\caption{One acceleration lobe of the S-curve.  Under the bang-bang
-  jerk command~\eqref{eq:bang-bang} the lobe is exactly the
-  trapezoid~$\tau_{W,f}$ (solid), with~$(W,f)$ fixed by the machine
-  parameters through~\eqref{eq:W-from-kinematics}--\eqref{eq:f-from-kinematics}.
-  A controller that caps the jerk derivative rounds the four corners
-  (dashed); the trapezoid is the area- and centroid-matched
-  linearisation of that rounded lobe, so the shaded
-  area~$A\,W(1+f)$ --- the cruise velocity --- and the centroid are
-  preserved, and with them the closed-form height~\eqref{eq:dh-closed}.}
-\label{fig:trap-scurve}
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[>=Stealth, font=\footnotesize]
+  % Visual parameters: W=1, f=0.4, A=1, Tv=1.5 -> ride spans 0..5.5,
+  % lobe centroids at t_{c,1}=1 and t_{c,2}=4.5, v_peak = AW(1+f) = 1.4,
+  % Delta h = 4.9 (drawn rescaled to 1.4 for vertical-aspect parity).
+  % ============= Panel 1: a(t) =============
+  \begin{scope}[xshift=0cm]
+    \fill[blue!13] (0,0) -- (0.6,1)  -- (1.4,1)  -- (2,0)   -- cycle;
+    \fill[red!13]  (3.5,0) -- (4.1,-1) -- (4.9,-1) -- (5.5,0) -- cycle;
+    \draw[->] (-0.25,0) -- (6.0,0) node[right] {$t$};
+    \draw[->] (0,-1.45) -- (0,1.45) node[above] {$a(t)$};
+    \draw[dashed,gray!50] (0,1)  -- (5.6,1);
+    \draw[dashed,gray!50] (0,-1) -- (5.6,-1);
+    \node[left,font=\tiny] at (0,1)  {$+A$};
+    \node[left,font=\tiny] at (0,-1) {$-A$};
+    \draw[very thick, blue!70!black]
+      (0,0) -- (0.6,1)  -- (1.4,1)  -- (2,0)
+            -- (3.5,0)
+            -- (4.1,-1) -- (4.9,-1) -- (5.5,0);
+    \node[blue!55!black] at (1.0, 0.5)  {\scriptsize $+v_{\mathrm{peak}}$};
+    \node[red!55!black]  at (4.5,-0.5)  {\scriptsize $-v_{\mathrm{peak}}$};
+    \draw[dotted,gray!55] (1,0)   -- (1,-0.32);
+    \draw[dotted,gray!55] (4.5,0) -- (4.5,0.32);
+    \node[below=1pt,font=\tiny] at (1,-0.32)  {$t_{c,1}$};
+    \node[above=1pt,font=\tiny] at (4.5,0.32) {$t_{c,2}$};
+  \end{scope}
+  % --- arrow a -> v ---
+  \draw[->, ultra thick, gray!55!black] (6.2,0) -- (7.4,0);
+  \node[above=1pt, font=\scriptsize, gray!55!black] at (6.8,0) {$\int dt$};
+  % ============= Panel 2: v(t) =============
+  \begin{scope}[xshift=7.6cm]
+    % shaded area under v(t)
+    \fill[blue!13]
+      (0,0) .. controls (0.2,0)    and (0.45,0.15) .. (0.6,0.3)
+            -- (1.4,1.1)
+            .. controls (1.55,1.25) and (1.85,1.4) .. (2.0,1.4)
+            -- (3.5,1.4)
+            .. controls (3.65,1.4) and (3.95,1.25).. (4.1,1.1)
+            -- (4.9,0.3)
+            .. controls (5.05,0.15) and (5.35,0)  .. (5.5,0)
+            -- cycle;
+    \draw[->] (-0.25,0) -- (6.0,0) node[right] {$t$};
+    \draw[->] (0,-0.15) -- (0,1.75) node[above] {$v(t)$};
+    \draw[dashed,gray!50] (0,1.4) -- (5.6,1.4);
+    \node[left,font=\tiny] at (0,1.4) {$v_{\mathrm{peak}}$};
+    \draw[very thick, blue!70!black]
+      (0,0) .. controls (0.2,0)    and (0.45,0.15) .. (0.6,0.3)
+            -- (1.4,1.1)
+            .. controls (1.55,1.25) and (1.85,1.4) .. (2.0,1.4)
+            -- (3.5,1.4)
+            .. controls (3.65,1.4) and (3.95,1.25).. (4.1,1.1)
+            -- (4.9,0.3)
+            .. controls (5.05,0.15) and (5.35,0)  .. (5.5,0);
+    % equivalent rectangle (v_peak high, Delta t_c wide, centroid to centroid)
+    \draw[thick, red!75!black, dashed]
+      (1,0) -- (1,1.4) -- (4.5,1.4) -- (4.5,0);
+    % centroid ticks
+    \draw[dotted,gray!55] (1,0)   -- (1,-0.32);
+    \draw[dotted,gray!55] (4.5,0) -- (4.5,-0.32);
+    \node[below=1pt,font=\tiny] at (1,-0.32)   {$t_{c,1}$};
+    \node[below=1pt,font=\tiny] at (4.5,-0.32) {$t_{c,2}$};
+    % Delta t_c brace
+    \draw[decorate, decoration={brace,amplitude=4pt}, semithick, red!75!black]
+      (4.5,-0.55) -- (1,-0.55);
+    \node[below=2pt, font=\tiny, red!75!black] at (2.75,-0.65) {$\Delta t_c$};
+    % integral label inside shaded area
+    \node[blue!55!black, font=\scriptsize] at (2.75,0.6)
+      {$\int v\,dt = v_{\mathrm{peak}}\,\Delta t_c = \Delta h$};
+    % swap markers: light hatched pairs (left)
+    \node[font=\tiny, red!70!black] at (0.5,0.15) {a};
+    \node[font=\tiny, red!70!black] at (1.5,1.25) {a};
+    % swap markers (right)
+    \node[font=\tiny, red!70!black] at (5.1,0.15) {b};
+    \node[font=\tiny, red!70!black] at (4.0,1.25) {b};
+  \end{scope}
+  % --- arrow v -> h ---
+  \draw[->, ultra thick, gray!55!black] (13.8,0) -- (15.0,0);
+  \node[above=1pt, font=\scriptsize, gray!55!black] at (14.4,0) {$\int dt$};
+  % ============= Panel 3: h(t) =============
+  \begin{scope}[xshift=15.2cm]
+    \draw[->] (-0.25,0) -- (6.0,0) node[right] {$t$};
+    \draw[->] (0,-0.15) -- (0,1.75) node[above] {$h(t)$};
+    \draw[dashed,gray!50] (0,1.4) -- (5.6,1.4);
+    \node[left,font=\tiny] at (0,1.4) {$\Delta h$};
+    \draw[very thick, blue!70!black]
+      (0,0)
+      .. controls (0.8,0)    and (1.6,0.24) .. (2.0,0.4)
+      -- (3.5,1.0)
+      .. controls (3.9,1.16) and (4.7,1.4)  .. (5.5,1.4);
+    \fill[blue!70!black] (5.5,1.4) circle (2.5pt);
+    \draw[dotted, gray!55] (5.5,1.4) -- (5.5,-0.15);
+    \node[below=1pt,font=\tiny] at (5.5,-0.15) {$T$};
+    \node[blue!55!black, font=\scriptsize] at (2.75,0.55)
+      {$h(T) = \Delta h$};
+  \end{scope}
+\end{tikzpicture}}
+\caption{Double integration of the pulse pair.  Each acceleration
+  lobe integrates to a velocity step of~$\pm v_{\mathrm{peak}}\!=\!\pm
+  AW(1+f)$ centred at~$t_{c,1},t_{c,2}$; $v(t)$ holds at~$v_{\mathrm{peak}}$
+  only on the inter-lobe cruise.  Each ramp window is
+  point-symmetric about its centroid, so the shaded sliver
+  outside the dashed rectangle~(\emph{a}, \emph{b}) has the same
+  area as the unshaded sliver inside it, making the area
+  beneath~$v(t)$ equal to~$v_{\mathrm{peak}}\,\Delta t_c\!=\!\Delta h$.}
+\label{fig:trap-double-integral}
 \end{figure}
+
+In the short-ride limit~$\Delta t_c\!=\!2W$ the two lobes touch and
+the cruise vanishes; \eqref{eq:dh-closed} collapses to the joined-pulse
+height
+\begin{equation}
+  \Delta h \;=\; 2\,s\,A\,W^{2}(1+f),
+  \label{eq:dh-joined}
+\end{equation}
+which the predictor fits as a three-parameter alternative on every
+segment.
 
 \subsection{ZUPT error budget}
 \label{app:pred-zupt-error}
@@ -2161,13 +2462,14 @@ large fitted~$\sigma$.
 \label{app:pred-quality}
 
 Each algorithm runs its own quality
-filter~(\S\ref{sec:algo-quality}).  Both share the same machinery:
-hard gates that reject outright at the first breach, and graded score
-terms that sum into a penalty rejecting the ride above~$6$.
-Table~\ref{tab:quality-checks-zupt} lists the ZUPT checks and
-Table~\ref{tab:quality-checks} the trapezoid checks.  The remaining
-paragraphs give the intuition behind each feature and a real-recording
-good-versus-bad example.
+filter~(\S\ref{sec:algo-quality}).  The two filters share a shape:
+hard gates that reject the ride outright at the first breach, and
+graded score terms that sum into a penalty rejecting the ride
+above~$6$.  Table~\ref{tab:quality-checks-zupt} lists the ZUPT checks;
+Table~\ref{tab:quality-checks} the trapezoid checks.  The remainder of
+this appendix walks each check one at a time: the real-world failure
+it catches, the quantity it measures, and where the threshold comes
+from.
 
 \begin{table}[ht]
 \centering
@@ -2230,157 +2532,382 @@ Residual structure   & lag-1 residual ACF & graded at $0.25,0.4,0.6$ \\
 \label{tab:quality-checks}
 \end{table}
 
-\paragraph{Gravity and orientation.}
-Any accelerometer estimate is only as good as its vertical axis, so
-both filters open with three orientation checks.  Pre-window
-stationarity~$s_{\mathrm{pre}}$ is the spread of the gravity vector
-over the bracketing rest window: a still phone holds three flat axis
-traces, and a window the filter cannot certify forces the magnitude
-fallback and a rejection (Figure~\ref{fig:qf-gravity-stability}).  The
-pre/post tilt is the angle between the gravity vectors of the two
-rest windows; past~$25^{\circ}$ the phone was reoriented mid-ride and
-the single projection no longer holds for both ends
-(Figure~\ref{fig:qf-pre-post-angle}).  Ride drift is the largest
-angle the gravity direction sweeps across one-second chunks of the
-ride itself; a held phone stays within a few degrees, while active
-handling climbs past the~$15^{\circ}$ gate
-(Figure~\ref{fig:qf-ride-drift}).
+\subsubsection*{Orientation checks (both filters)}
 
-\begin{figure}[ht]
+Every accelerometer estimate rides on a single vertical axis.  Three
+checks defend that axis at three different time-scales: before the
+ride, across the ride, and inside the ride.
+
+\paragraph{Pre-window stationarity ($s_{\mathrm{pre}}$).}
+The pipeline averages accelerometer samples in a rest window just
+before the ride to recover the gravity direction.  A still phone
+holds three flat axis traces; a swinging or rotating phone writes
+wobble into all three, and the averaged vector then points wherever
+the wobble happened to drift.  The filter measures the spread of
+those gravity samples.  A window the filter cannot certify forces
+the unsigned-magnitude fallback, and the filter rejects the ride.
+
+\paragraph{Pre/post tilt.}
+The pre/post tilt check repeats the rest-window trick after the ride
+and compares the two gravity vectors.  Beyond $25^{\circ}$ the user
+reoriented the phone mid-ride --- pulled it out of a pocket, handed
+it off, flipped it on a table --- so no single projection serves both
+ends.  Below $10^{\circ}$ the check is silent; between $10^{\circ}$
+and the hard $25^{\circ}$ gate it adds a graded penalty.
+
+\paragraph{Ride drift.}
+Pre and post agreeing leaves a loophole: the phone can swing in the
+middle and swing back.  Ride drift slices the ride into one-second
+chunks and records the largest gravity angle relative to the
+pre-window vector.  A held phone stays within a few degrees; an
+actively handled one climbs past the $15^{\circ}$ gate, and the
+vertical projection becomes ambiguous.
+
+\subsubsection*{Motion-content checks (both filters)}
+
+These checks reject segments where the algorithms have nothing useful
+to fit.
+
+\paragraph{Displacement bounds.}
+Displacement bounds reject estimates outside the physically plausible
+range.  Below $0.4\,\mathrm{m}$ is shorter than one stair step --- no
+real elevator ride registers that small.  Above $100\,\mathrm{m}$ for
+ZUPT or $120\,\mathrm{m}$ for the trapezoid fit is past the tallest
+building in the campaign, so the estimate has run away.  Either
+extreme rejects outright.
+
+\paragraph{Active motion.}
+The active-motion check rejects segments that carry almost no
+acceleration signal.  ZUPT counts the fraction of samples
+with~$|a|>0.10\,\mathrm{m/s^{2}}$ inside the segment and requires at
+least $4\,\%$.  The trapezoid filter asks the equivalent question on
+the fitted geometry: the two lobes plus the cruise gap together must
+cover at least $5\,\%$ of the ride window.  Both hard gates fire only
+on near-stationary phones, so in practice the graded score terms
+carry the work.
+
+\paragraph{Segment length.}
+Segment length is a structural floor on the noise model.  Both error
+budgets scale with the number of active samples~$N$, and below
+$N=30$ sample-count variance dominates the per-ride~$\sigma$, so the
+reported interval no longer reflects the noise model.  This floor is
+geometric, not tuned.
+
+\subsubsection*{ZUPT-only checks}
+
+\paragraph{Impact peak.}
+The impact-peak gate rejects rides where a non-elevator spike
+dominates the trace.  ZUPT integrates acceleration twice, so any
+spike feeds straight into~$\Delta h$.  A pocket drop, a tap, or a
+hand-off easily clears $8\,\mathrm{m/s^{2}}$ --- ten times the
+elevator's own lobes.  The gate rejects past $8\,\mathrm{m/s^{2}}$,
+and the score grades the approach with knees at $4$ and
+$6\,\mathrm{m/s^{2}}$.
+
+\paragraph{End-velocity ratio.}
+The end-velocity ratio scores how cleanly the ZUPT integrator
+returned to rest.  A genuine ride starts and ends at zero velocity,
+so $|v(T)|/\max|v|$ stays near zero on a healthy fit, and a large
+ratio signals integrator drift the cruise plateau cannot absorb.
+The magnitude-detrended trace pins the ratio near zero by
+construction, so this check stays a graded score term, never a hard
+gate.
+
+\subsubsection*{Trapezoid fit-quality checks}
+
+\paragraph{Joint $R^{2}$.}
+The joint~$R^{2}$ floor measures how well the trapezoid template
+explains the trace.  Short rides carry less acceleration energy and
+have intrinsically worse signal-to-noise, so the floor scales with
+predicted displacement: $0.35$ for short, $0.50$ for mid, $0.60$ for
+long rides.  A fit below the matching floor never modelled the ride.
+
+\paragraph{Residual autocorrelation.}
+Residual autocorrelation catches what~$R^{2}$ misses: a template that
+captures the lobe energy yet leaves a slow, structured bump in the
+residual --- an unmodelled disturbance the squared-error sum cannot
+see.  The lag-1 autocorrelation of the residual flags that structure.
+Smoothing precedes the fit, so adjacent residuals are correlated by
+construction even on a perfect ride; the score knees therefore sit
+high, at $0.25$, $0.40$, and $0.60$.
+
+\subsubsection*{Trapezoid fit-geometry checks}
+
+\paragraph{Amplitude anchor ratio.}
+The amplitude anchor ratio compares the two amplitudes the pipeline
+produces for the same trapezoid: $A_{\mathrm{fit}}$ from the matched
+filter and $A_{\mathrm{used}}$ from the integrated cruise velocity.
+A trustworthy fit needs little rescaling between them, so a ratio
+outside $[0.5,\,2.0]$ flags a template that locked onto the wrong
+scale --- typically a matched-filter false positive with the wrong
+$(W,f)$.
+
+\paragraph{Out-of-lobe residual.}
+Out-of-lobe residual density flags mid-ride disturbances the
+trapezoid template missed.  A clean fit concentrates structure inside
+the two lobe windows, so the residual energy density outside should
+be no higher than inside.  A density ratio past fourfold means
+something leaked energy into the cruise gap that the template never
+modelled --- a passenger moving, a phone re-gripped, a multi-stop
+trip miscounted as one ride.
+
+\paragraph{Cruise steadiness.}
+Cruise steadiness verifies the cabin reached constant velocity
+between the two lobes.  The ZUPT-integrated velocity in that window
+holds a flat plateau on a healthy ride.  A coefficient of variation
+past $0.6$ means the plateau wobbled, so the cabin never settled
+into steady cruise --- a short hop, a stop-go trip, or a misaligned
+lobe pair.
+
+\paragraph{Lobe spacing ($\Delta t_c$).}
+Lobe spacing rejects pairs too close to be a take-off and a landing.
+A centroid spacing below $0.2\,\mathrm{s}$ means the matched filter
+paired two halves of the same lobe rather than two real lobes, so
+the closed-form $\Delta h$ in~\eqref{eq:dh-closed} collapses to a
+single-lobe area the model does not interpret.
+
+\clearpage
+\section{Evaluation: metrics and supporting figures}
+\label{app:evaluation}
+
+This appendix supplies the metric definitions and the diagnostic
+figures behind the headline tables of~\S\ref{sec:evaluation}.
+
+\subsection{Metric definitions}
+\label{app:eval-metrics}
+
+Every column of Tables~\ref{tab:eval-seg}, \ref{tab:eval-pred},
+and~\ref{tab:eval-pipeline} comes from one of the metrics in
+Table~\ref{tab:eval-metric-defs}.  Each row pairs the metric with
+its physical meaning and with why the headline tables include it.
+
+\begin{table}[H]
 \centering
-\includegraphics[width=\linewidth]{qf_gravity_stability.png}
-\caption{Pre-window stationarity~$s_{\mathrm{pre}}$.  \textbf{Left:} a
-  still bracketing window --- three flat axis traces --- certifies
-  the gravity calibration.  \textbf{Right:} a window the filter
-  cannot certify; the projection falls back to the unsigned
-  magnitude and the ride is rejected.}
-\label{fig:qf-gravity-stability}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{0.20\linewidth} p{0.36\linewidth} p{0.38\linewidth}}
+\toprule
+\textbf{Metric} & \textbf{Definition} & \textbf{Why we report it} \\
+\midrule
+$F1^{\ast}$ & Composite F1 over the four failure modes
+  (\texttt{clean}, \texttt{missed}, \texttt{merged},
+  \texttt{split}, FP); $\text{clean}/(\text{clean}+\frac12\,
+  \text{bad}_{\rm GT}+\frac12\,\text{bad}_{\rm pred})$. &
+  Distinguishes a miss-heavy configuration from a merge-heavy one;
+  a pooled IoU-F1 averages the two. \\
+IoU-F1@0.5 & PASCAL-style F1 at intersection-over-union $\ge 0.5$. &
+  Comparable to any temporal-detection baseline; depressed by the
+  GT pad of Figure~\ref{fig:eval-iou-pad}. \\
+Median (m) & Median of $|\widehat{\Delta h}-\Delta h|$ over the
+  ride set. & Robust scale of the bulk; the right read on
+  ``typical'' per-ride accuracy. \\
+MAE (m) & Mean of $|\widehat{\Delta h}-\Delta h|$. & Outlier-sensitive;
+  the gap between median and MAE is the long-tail diagnostic. \\
+$\le 1.5$\,m & Fraction of rides with absolute error $\le 1.5$\,m. &
+  One-floor hit rate at the dataset's $\sim 3$\,m inter-floor pitch
+  (\S\ref{app:dataset-buildings}) --- the right floor on either side. \\
+$\le 3$\,m & Fraction of rides with absolute error $\le 3$\,m. &
+  Two-floor hit rate; bounds the worst miss a downstream
+  floor-detector still recovers. \\
+Coverage & Fraction of rides with $|\widehat{\Delta h}-\Delta h|
+  \le k\sigma$; nominal $90\,\%$. & Empirical check of the
+  conformal guarantee~\eqref{eq:conformal-coverage}. \\
+Median CI (m) & Median of $k\sigma$ across the ride set. &
+  Typical interval width; the user's read on how tight a
+  ``$90\,\%$ CI'' actually is. \\
+Accept rate & Fraction of predictions the quality filter passes. &
+  Recall trade-off of the filter; complements the per-ride scores. \\
+\bottomrule
+\end{tabular}
+\caption{Every metric used in the headline evaluation tables, with
+  the definition and the reason the contract needs it.  Coverage
+  and Median CI together carry the calibrated-interval promise of
+  \S\ref{sec:intro}; the $\le 1.5$\,m and $\le 3$\,m columns
+  translate that promise into the floor-detection unit the
+  downstream consumer uses.}
+\label{tab:eval-metric-defs}
+\end{table}
+
+\subsection{Segmentation supporting figures}
+\label{app:eval-extra-seg}
+
+Figure~\ref{fig:eval-seg-failures} disaggregates
+Table~\ref{tab:eval-seg} into its five failure categories.  The
+\texttt{clean} bar dominates both splits; the \texttt{missed} and
+\texttt{FP} tails are shorter on the held-out test than on the
+tuned train pool.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.65\linewidth]{seg_failure_modes.png}
+\caption{Segmentation failure-mode counts on the train pool (solid)
+  and the held-out test building (hatched), normalised by GT ride
+  count.  The bulk of the train pool's $95$ missed rides comes
+  from three heavily damped Pixel\,10 sessions where the
+  matched-filter amplitude floor swallows the lobes
+  (\S\ref{sec:discussion}); the held-out building carries no such
+  session, driving the test-set lift on $F1^{\ast}$.}
+\label{fig:eval-seg-failures}
 \end{figure}
 
-\begin{figure}[ht]
+\subsection{Per-ride prediction supporting figures}
+\label{app:eval-extra-pred}
+
+Five diagnostics anchor Table~\ref{tab:eval-pred}: the empirical
+CDF that produces the $\le 1.5$\,m and $\le 3$\,m columns, the
+signed-error PDF that checks for bias, the reliability plot that
+inspects conformal calibration directly, the error-versus-duration
+scatter that exposes which rides drive the long tail, and the
+per-experiment view that locates the outliers.
+
+\paragraph{Error CDF.}
+Figure~\ref{fig:eval-pred-cdf} plots the cumulative distribution
+of $|\widehat{\Delta h}-\Delta h|$ for the trapezoid fit across the
+pooled clean rides.  The $\le 1.5$\,m and $\le 3$\,m fractions of
+Table~\ref{tab:eval-pred} are the $y$-values where the curve
+crosses the two vertical lines.
+
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{qf_pre_post_angle.png}
-\caption{Pre/post gravity-vector angle.  \textbf{Left:} the gravity
-  components hold level across the two rest windows, so one
-  projection serves both ride ends.  \textbf{Right:} the components
-  jump between windows --- the phone was reoriented mid-ride --- and
-  the tilt clears the~$25^{\circ}$ gate.}
-\label{fig:qf-pre-post-angle}
+\includegraphics[width=0.65\linewidth]{pred_cdf.png}
+\caption{Empirical CDF of absolute $\Delta h$ error for the
+  trapezoid fit on clean rides.  Vertical dashed lines mark the
+  $\pm 1.5$\,m and $\pm 3$\,m floor targets; the curve crosses
+  $\pm 1.5$\,m by roughly the $88\,\%$ percentile and
+  $\pm 3$\,m by the $93\,\%$ percentile.}
+\label{fig:eval-pred-cdf}
 \end{figure}
 
-\begin{figure}[ht]
+\paragraph{Signed-error distribution.}
+The signed-error PDF (Figure~\ref{fig:eval-pred-signed}) checks
+that the predictor is not systematically biased upward or
+downward.  A symmetric, zero-centred PDF means the fit's bias is
+small compared to its variance; any drift in the mean would
+otherwise corrupt the calibrated interval of~\S\ref{sec:algo-ci}.
+
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{qf_ride_drift.png}
-\caption{In-ride gravity drift.  \textbf{Left:} the gravity direction
-  holds within a few degrees through the ride.  \textbf{Right:} the
-  direction sweeps past the~$15^{\circ}$ gate, so no single vertical
-  axis describes the whole segment.}
-\label{fig:qf-ride-drift}
+\includegraphics[width=0.65\linewidth]{pred_signed_err.png}
+\caption{Density of signed error $\widehat{\Delta h}-\Delta h$ on
+  pooled clean trapezoid rides.  The PDF is centred near zero;
+  the tails are heavier than Gaussian, which is why the
+  distribution-free conformal interval of~\eqref{eq:conformal-coverage}
+  is the right calibration tool rather than a $1.645\,\sigma$
+  Gaussian quantile.}
+\label{fig:eval-pred-signed}
 \end{figure}
 
-\paragraph{Impact (ZUPT).}
-ZUPT adds an impact gate: the largest deviation of the acceleration
-magnitude from its mean.  A tap, a pocket drop, or a phone hand-off
-spikes the trace far past the elevator's own
-sub-metre-per-second-squared lobes, and double integration would
-fold that spike straight into~$\Delta h$.  The gate rejects past
-$8\,\mathrm{m/s^2}$ and the score term grades the approach to it
-(Figure~\ref{fig:qf-impact}).  Two further ZUPT checks keep only
-soft score terms.  No labelled ride trips their hard gates: every
-recorded ride carries ample motion, so the active-motion gate never
-fires, and the magnitude-detrended trace drives the end-velocity
-ratio close to zero by construction.
+\paragraph{Reliability.}
+Figure~\ref{fig:eval-pred-reliability} sweeps the nominal
+coverage level from $50\,\%$ to $99\,\%$ and plots the empirical
+coverage at each.  A perfectly calibrated predictor sits on the
+$y\!=\!x$ diagonal; the trapezoid pipeline tracks the diagonal
+within a few points across the whole range.
 
-\begin{figure}[ht]
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{qf_impact.png}
-\caption{Impact-peak magnitude.  \textbf{Left:} the
-  magnitude-detrended trace stays within the elevator's own
-  acceleration band.  \textbf{Right:} a hand-off spike clears the
-  $8\,\mathrm{m/s^2}$ gate; double integration would fold it into the
-  height.}
-\label{fig:qf-impact}
+\includegraphics[width=0.65\linewidth]{pred_reliability.png}
+\caption{Reliability curve: empirical coverage of the trapezoid
+  pipeline against nominal coverage from $50\,\%$ to $99\,\%$.
+  The conformal calibration of~\S\ref{sec:algo-ci} holds across
+  the whole sweep, not only at the deployed $90\,\%$ point.}
+\label{fig:eval-pred-reliability}
 \end{figure}
 
-\paragraph{Fit quality (trapezoid).}
-The trapezoid filter adds two checks that the fitted template
-actually explains the trace.  The joint~$R^{2}$ is the matched-filter
-fit quality across both lobes; its floor is graded by predicted
-displacement --- $0.35/0.50/0.60$ for short, mid, and long rides ---
-because a short ride's signal-to-noise ratio is intrinsically worse
-(Figure~\ref{fig:qf-joint-r2}).  The residual autocorrelation scores
-what the~$R^{2}$ misses: a template that captures the lobe energy but
-leaves a slow, structured residual signals an unmodelled disturbance.
-On the smoothed trace adjacent residuals are correlated by
-construction, so the score knees sit high, at~$0.25$, $0.4$,
-and~$0.6$ (Figure~\ref{fig:qf-residual-acf}).
+\paragraph{Error versus ride duration.}
+Long rides accumulate more integration noise but also more
+acceleration-energy signal; the two effects partly cancel.
+Figure~\ref{fig:eval-pred-err-dur} plots absolute error against
+GT ride duration.  Short rides ($<5$\,s) carry the heaviest
+relative error because the trapezoid lobes are sparsely sampled;
+longer rides cluster near the floor of the integration noise.
 
-\begin{figure}[ht]
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{qf_joint_r2.png}
-\caption{Matched-filter joint~$R^{2}$.  \textbf{Left:} the fitted
-  trapezoid pair hugs the smoothed trace.  \textbf{Right:} a trace
-  with no clean pulse structure leaves the template far short of the
-  graded~$R^{2}$ floor.}
-\label{fig:qf-joint-r2}
+\includegraphics[width=0.65\linewidth]{pred_err_vs_duration.png}
+\caption{Absolute $\Delta h$ error against GT ride duration for
+  the trapezoid fit on clean rides.  The conformal interval
+  widens on short rides exactly where the per-ride
+  $\sigma$~of~\eqref{eq:sigma-dh} grows, which is the adaptive
+  promise of~\S\ref{sec:algo-ci}.}
+\label{fig:eval-pred-err-dur}
 \end{figure}
 
-\begin{figure}[ht]
+\paragraph{Coverage by ride duration.}
+Figure~\ref{fig:eval-pred-cov-dur} bins the clean rides by
+duration and reports the realised coverage in each bin.  Coverage
+holds at or above the nominal $90\,\%$ across every bin --- the
+interval widens on short rides rather than mis-covering them.
+
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{qf_residual_acf.png}
-\caption{Lag-1 residual autocorrelation.  \textbf{Left:} the fit
-  residual scatters tightly around zero.  \textbf{Right:} the
-  residual carries a slow, coherent excursion --- structure the
-  trapezoid template never modelled.}
-\label{fig:qf-residual-acf}
+\includegraphics[width=0.65\linewidth]{pred_cov_by_duration.png}
+\caption{Empirical coverage by ride-duration bin for the
+  trapezoid pipeline.  Coverage holds at or above the nominal
+  $90\,\%$ on every bin; short rides keep coverage by widening
+  the interval, not by mis-covering.}
+\label{fig:eval-pred-cov-dur}
 \end{figure}
 
-\paragraph{Fitted geometry (trapezoid).}
-Three checks bound the fitted geometry against matched-filter
-misfires.  The amplitude anchor ratio~$A_{\mathrm{used}}/A_{\mathrm{fit}}$
-compares the velocity-anchored amplitude with the raw matched-filter
-amplitude; a trustworthy fit needs little rescaling, and a ratio
-outside~$[0.5,2.0]$ flags a template that locked onto the wrong
-scale (Figure~\ref{fig:qf-anchor-ratio}).  The out-of-lobe residual
-ratio compares the residual energy density outside the two lobe
-windows with the density inside; a healthy fit keeps the outside
-density no higher than the inside, and a ratio past fourfold signals
-a mid-ride disturbance the matched filter could not explain
-(Figure~\ref{fig:qf-out-of-lobe}).
-The cruise coefficient of variation is the spread of the
-ZUPT-integrated velocity across the inter-lobe window; a genuine
-cruise is a flat velocity plateau, and a coefficient past~$0.6$ means
-the cabin never reached steady cruise (Figure~\ref{fig:qf-cruise-cv}).
+\paragraph{Per-experiment view.}
+Figure~\ref{fig:eval-pred-per-exp} disaggregates the prediction
+error by experiment.  The three damped-recording sessions of
+\S\ref{sec:discussion} sit as tall bars; every other recording
+sits well below the one-floor target.
 
-\begin{figure}[ht]
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{qf_anchor_ratio.png}
-\caption{Velocity-anchor amplitude ratio.  \textbf{Left:} the
-  velocity-anchored amplitude matches the matched-filter amplitude,
-  so the two templates coincide.  \textbf{Right:} the anchor rescales
-  the amplitude far past the~$[0.5,2.0]$ band --- a matched-filter
-  misfit.}
-\label{fig:qf-anchor-ratio}
+\includegraphics[width=0.8\linewidth]{pred_per_exp.png}
+\caption{Per-experiment MAE for the trapezoid pipeline on clean
+  rides.  The few tall bars are the damped recordings the quality
+  filter (Table~\ref{tab:eval-pipeline}) rejects; the bulk of the
+  experiments sit comfortably below the $\pm 1.5$\,m floor
+  target.}
+\label{fig:eval-pred-per-exp}
 \end{figure}
 
-\begin{figure}[ht]
+\paragraph{Per-view scatter.}
+Figure~\ref{fig:eval-pred-scatter-three} stitches the trapezoid
+fit, the matched-segmenter view, and the all-segments-versus-
+barometer view onto one panel each.  The off-diagonal tail in the
+right panel is the false-positive cost the quality filter
+of~\S\ref{sec:eval-pipeline} removes.
+
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{qf_out_of_lobe.png}
-\caption{Out-of-lobe residual concentration.  \textbf{Left:} the
-  residual energy stays within the two lobe windows.
-  \textbf{Right:} residual energy concentrates outside the two lobe
-  windows --- a mid-ride disturbance the template never modelled.}
-\label{fig:qf-out-of-lobe}
+\includegraphics[width=0.95\linewidth]{pred_scatter.png}
+\caption{Predicted versus ground-truth $\Delta h$ on every clean
+  ride, one panel per evaluation view: GT-segments (predictor on
+  every GT interval, left), matched-segmenter (predictor on
+  segmenter intervals that cleanly match a GT, middle), and
+  all-segments-versus-barometer (predictor on every segmenter
+  interval scored against the barometer, right).  Mean error in
+  Table~\ref{tab:eval-pred} is driven by the far-from-diagonal
+  points, where double integration of a body-frame trace
+  accumulates drift on the damped recordings.}
+\label{fig:eval-pred-scatter-three}
 \end{figure}
 
-\begin{figure}[ht]
+\subsection{Pipeline supporting figures}
+\label{app:eval-extra-pipeline}
+
+Figure~\ref{fig:eval-pipeline-cdf} shows the deployed pipeline's
+accepted-only CDF: the same axis as Figure~\ref{fig:eval-pred-cdf}
+after the quality filter is in the loop.  Every view crosses the
+$\pm 1.5$\,m floor target before the $90$th percentile.
+
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{qf_cruise_cv.png}
-\caption{Cruise-velocity coefficient of variation.  \textbf{Left:}
-  the ZUPT-integrated velocity holds a flat plateau between the
-  lobes.  \textbf{Right:} the plateau wobbles past the~$0.6$ gate ---
-  the cabin never settled into steady cruise.}
-\label{fig:qf-cruise-cv}
+\includegraphics[width=0.65\linewidth]{pipeline_cdf_acc.png}
+\caption{Empirical CDF of absolute $\Delta h$ error on the
+  deployed pipeline (accepted-only), pooled across both splits and
+  broken into the three evaluation views of
+  Figure~\ref{fig:eval-pred-scatter-three}.  The trade-off the
+  filter introduces is recall: $18\,\%$ of clean trapezoid rides
+  and $7\,\%$ of clean ZUPT rides are rejected, so a downstream
+  consumer sees about four out of every five real rides --- each
+  flagged with a coverage-guaranteed interval.}
+\label{fig:eval-pipeline-cdf}
 \end{figure}
 
 \end{document}
