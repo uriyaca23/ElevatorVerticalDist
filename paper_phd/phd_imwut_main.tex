@@ -2337,9 +2337,16 @@ $\sigma_{\mathrm{proj}}=(\pi-1)\cdot 0.25\,|\Delta h|$ scales with a
 method factor $\pi\in\{1.0,1.2,1.3,3.0\}$ for the pre-and-post,
 pre-only, post-only, and magnitude-only projections, further
 multiplied by $1+\min(\rho_{\mathrm{pp}}/12.5^{\circ},2)$ for the
-pre/post rotation angle~$\rho_{\mathrm{pp}}$.  The four terms combine
-in quadrature~\eqref{eq:sigma-zupt-total}, floored at
-$\sigma_{\mathrm{ZUPT}}=\max(\sqrt{\textstyle\sum},\,0.15\,\mathrm{m})$
+pre/post rotation angle~$\rho_{\mathrm{pp}}$.  Combined in
+quadrature~\eqref{eq:sigma-zupt-total} and floored at~$0.15\,\mathrm{m}$,
+the four terms give the per-ride standard deviation
+\[
+  \sigma_{\mathrm{ZUPT}}
+  =\max\!\Big(
+    \sqrt{\sigma_{\mathrm{white}}^{2}+\sigma_{\mathrm{mech}}^{2}
+          +\sigma_{\mathrm{rel}}^{2}+\sigma_{\mathrm{proj}}^{2}},\;
+    0.15\,\mathrm{m}\Big),
+\]
 so the conformal multiplier cannot blow up on a degenerate fit.
 
 \subsection{Trapezoid error budget}
@@ -2379,8 +2386,15 @@ four gradients
   \label{eq:dh-grad}
 \end{equation}
 and substituting~\eqref{eq:crb} and~\eqref{eq:dh-grad}
-into~\eqref{eq:sigma-dh} yields the per-segment
-variance~$\sigma_{\Delta h}^{2}$.
+into the delta-method sum~\eqref{eq:sigma-dh} yields the per-segment
+variance
+\[
+  \sigma_{\Delta h}^{2}
+  =[W(1{+}f)\,\Delta t_c]^{2}\,\sigma_A^{2}
+   +[A(1{+}f)\,\Delta t_c]^{2}\,\sigma_W^{2}
+   +[AW\,\Delta t_c]^{2}\,\sigma_f^{2}
+   +[AW(1{+}f)]^{2}\,\sigma_{\Delta t_c}^{2}.
+\]
 
 \paragraph{Data-adaptive effective noise.}
 The white-noise figure from the sensor datasheet understates the
@@ -2753,12 +2767,9 @@ tuned train pool.
 \subsection{Per-ride prediction supporting figures}
 \label{app:eval-extra-pred}
 
-Five diagnostics anchor Table~\ref{tab:eval-pred}: the empirical
-CDF that produces the $\le 1.5$\,m and $\le 3$\,m columns, the
-signed-error PDF that checks for bias, the reliability plot that
-inspects conformal calibration directly, the error-versus-duration
-scatter that exposes which rides drive the long tail, and the
-per-experiment view that locates the outliers.
+Two diagnostics anchor Table~\ref{tab:eval-pred}: the empirical
+CDF that produces the $\le 1.5$\,m and $\le 3$\,m columns, and the
+signed-error PDF that checks for bias.
 
 \paragraph{Error CDF.}
 Figure~\ref{fig:eval-pred-cdf} plots the cumulative distribution
@@ -2795,75 +2806,6 @@ otherwise corrupt the calibrated interval of~\S\ref{sec:algo-ci}.
   is the right calibration tool rather than a $1.645\,\sigma$
   Gaussian quantile.}
 \label{fig:eval-pred-signed}
-\end{figure}
-
-\paragraph{Reliability.}
-Figure~\ref{fig:eval-pred-reliability} sweeps the nominal
-coverage level from $50\,\%$ to $99\,\%$ and plots the empirical
-coverage at each.  A perfectly calibrated predictor sits on the
-$y\!=\!x$ diagonal; the trapezoid pipeline tracks the diagonal
-within a few points across the whole range.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.65\linewidth]{pred_reliability.png}
-\caption{Reliability curve: empirical coverage of the trapezoid
-  pipeline against nominal coverage from $50\,\%$ to $99\,\%$.
-  The conformal calibration of~\S\ref{sec:algo-ci} holds across
-  the whole sweep, not only at the deployed $90\,\%$ point.}
-\label{fig:eval-pred-reliability}
-\end{figure}
-
-\paragraph{Error versus ride duration.}
-Long rides accumulate more integration noise but also more
-acceleration-energy signal; the two effects partly cancel.
-Figure~\ref{fig:eval-pred-err-dur} plots absolute error against
-GT ride duration.  Short rides ($<5$\,s) carry the heaviest
-relative error because the trapezoid lobes are sparsely sampled;
-longer rides cluster near the floor of the integration noise.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.65\linewidth]{pred_err_vs_duration.png}
-\caption{Absolute $\Delta h$ error against GT ride duration for
-  the trapezoid fit on clean rides.  The conformal interval
-  widens on short rides exactly where the per-ride
-  $\sigma$~of~\eqref{eq:sigma-dh} grows, which is the adaptive
-  promise of~\S\ref{sec:algo-ci}.}
-\label{fig:eval-pred-err-dur}
-\end{figure}
-
-\paragraph{Coverage by ride duration.}
-Figure~\ref{fig:eval-pred-cov-dur} bins the clean rides by
-duration and reports the realised coverage in each bin.  Coverage
-holds at or above the nominal $90\,\%$ across every bin --- the
-interval widens on short rides rather than mis-covering them.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.65\linewidth]{pred_cov_by_duration.png}
-\caption{Empirical coverage by ride-duration bin for the
-  trapezoid pipeline.  Coverage holds at or above the nominal
-  $90\,\%$ on every bin; short rides keep coverage by widening
-  the interval, not by mis-covering.}
-\label{fig:eval-pred-cov-dur}
-\end{figure}
-
-\paragraph{Per-experiment view.}
-Figure~\ref{fig:eval-pred-per-exp} disaggregates the prediction
-error by experiment.  The three damped-recording sessions of
-\S\ref{sec:discussion} sit as tall bars; every other recording
-sits well below the one-floor target.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.8\linewidth]{pred_per_exp.png}
-\caption{Per-experiment MAE for the trapezoid pipeline on clean
-  rides.  The few tall bars are the damped recordings the quality
-  filter (Table~\ref{tab:eval-pipeline}) rejects; the bulk of the
-  experiments sit comfortably below the $\pm 1.5$\,m floor
-  target.}
-\label{fig:eval-pred-per-exp}
 \end{figure}
 
 \paragraph{Per-view scatter.}
