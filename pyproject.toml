@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyramidElevatorDist"
+version = "0.1.0"
+description = "Estimate elevator vertical travel from phone accelerometer signals."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
+    "scikit-learn>=1.3",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+
+# The public API lives in the `pyramidElevatorDist` façade; it imports the
+# existing implementation packages under `src`, so both are shipped. `ui`,
+# `api`, scripts, the Streamlit pipeline and the data recordings are not
+# part of the installable surface.
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pyramidElevatorDist*", "src*"]
+exclude = [
+    "src.pipelines*",
+    "src.data.structuredData*",
+    "src.data.gramushka*",
+    "tests*",
+    "ui*",
+    "api*",
+    "scripts*",
+]
+
+# The two detector/predictor configs are read at runtime via
+# Path(__file__).with_name("config.json"), so they must travel in the wheel.
+[tool.setuptools.package-data]
+"src.segmentation.algorithms" = ["config.json"]
+"src.prediction.algorithms" = ["config.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

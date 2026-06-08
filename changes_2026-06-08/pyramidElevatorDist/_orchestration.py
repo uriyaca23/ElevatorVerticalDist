@@ -1,16 +1,15 @@
-"""In-process wrappers around the segmentation and prediction stages.
+"""Private orchestration shared by the public façade modules.
 
-Originally a thin HTTP client around the FastAPI service in ``api/`` —
-the Streamlit boutique pipeline now calls these wrappers directly so the
-app runs without spinning up the API container. The function signatures
-and return shapes mirror the ``/segment`` and ``/predict`` endpoints
-exactly (see :mod:`api.main` for the HTTP-facing contract), so the
-Streamlit step modules use them with no other changes.
+This module is **not** part of the public API. It mirrors the in-process
+orchestration that the Streamlit boutique pipeline uses today
+(``ui/api_client.py``) so the installed package reproduces the exact same
+segmentation and prediction outputs without depending on the ``ui/``
+application layer (which is not shipped in the wheel).
 
-The only behavioural difference vs. the HTTP path: state arrays come
-back as ``np.ndarray`` and ``state['config']`` as the real
-``DetectConfig`` dataclass, because nothing has been forced through
-JSON. :func:`rehydrate_state` is therefore a no-op compatibility shim.
+The slicing helpers, the per-algorithm signal policy, and the predict loop
+below are kept byte-for-byte equivalent to ``ui/api_client.py`` —
+``ui/api_client.py`` remains the source of truth; the regression tests in
+``tests/`` pin this copy to it.
 """
 from __future__ import annotations
 
@@ -19,40 +18,85 @@ from typing import Any, Iterable, Optional
 
 import pandas as pd
 
+from src.data.loader import resample_sensor_with_gaps
 from src.prediction.algorithms import (
     PREDICT_ALGORITHM_CONFIG, PredictAlgorithm, Predictor,
 )
-from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (
+from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E501
     detect as _detect,
 )
 
+
+# --------------------------------------------------------------------------
+# Input normalization (public API entry point)
+# --------------------------------------------------------------------------
+
+# Canonical uniform cadence the detector + Δh estimators are tuned for.
+RESAMPLE_TARGET_HZ = 50
+
+
+def _resample_acc(acc: pd.DataFrame, target_hz: int = RESAMPLE_TARGET_HZ):
+    """Normalize an external accelerometer trace onto a uniform ``target_hz``
+    grid (default 50 Hz).
+
+    The public API accepts data at any — possibly variable — sample rate, but
+    the matched-filter detector and the Δh estimators are tuned for a clean
+    uniform cadence. Resampling is gap-aware (splits on >1 s holes rather than
+    interpolating across them) and time-correct (each output sample keeps its
+    true timestamp, so ``findSegments`` ride coordinates line up with
+    ``predictSegment``). The first timestamp and the overall time span are
+    preserved, so relative-second segment coordinates stay valid.
+
+    Returns the input unchanged when it is ``None``, lacks ``timestamp_ms``,
+    or has fewer than 2 rows.
+    """
+    if (acc is None or "timestamp_ms" not in getattr(acc, "columns", [])
+            or len(acc) < 2):
+        return acc
+    resampled, _intervals = resample_sensor_with_gaps(acc, target_hz=target_hz)
+    return resampled
+
+
+# --------------------------------------------------------------------------
+# Constants — kept in lock-step with ui/api_client.py
+# --------------------------------------------------------------------------
 
 # Stationary-window length used to calibrate gravity around a ride.
 PRE_POST_WINDOW_SEC = 5.0
 PRE_POST_MIN_SEC = 1.0
 
-# Algorithms exposed — short id -> enum. The first entry is the
-# "primary" the UI's sidebar list and PDF report default to. Kept in
-# lock-step with ``api/main.py::_ACCEL_ALGO_MAP``.
+# Algorithms exposed — short id -> enum. The first entry is the "primary"
+# the sidebar list and PDF report default to.
 _ACCEL_ALGO_MAP: dict[str, PredictAlgorithm] = {
     "trap": PredictAlgorithm.TRAPEZOID_ACCEL,
     "zupt": PredictAlgorithm.ZUPT_ACCEL,
 }
 _PRIMARY_ALGO_ID = "trap"
 
-# Kept as an exported label so legacy error messages can still cite a
-# "where" without being misleading.
-API_URL = "in-process"
+# Boutique-pipeline hybrid signal policy: trapezoid runs on the
+# rotation-invariant |a|-g (matching what segmentation feeds it), ZUPT
+# keeps the gravity-projected a_vert because its quality is bounded by the
+# double-integration drift model, not the matched-filter signal choice.
+_PER_ALGO_OVERRIDES: dict[str, dict] = {
+    "trap": {"input_signal": "a_mag_minus_g"},
+    "zupt": {},
+}
 
+# Segmentation signal: the boutique pipeline scores the matched filter on
+# the rotation-invariant |a|-g residual.
+_SEGMENT_INPUT_SIGNAL = "a_mag_minus_g"
+
+
+# --------------------------------------------------------------------------
+# Slicing helpers (copied from ui/api_client.py)
+# --------------------------------------------------------------------------
 
 def _slice_acc(
     acc: pd.DataFrame, t0_ms: float, t_lo: float, t_hi: float,
 ) -> pd.DataFrame:
-    # Inclusive on both ends — matches the segmenter's slicing
-    # convention (build_ride_slices in fit_elevator_parameters.common,
-    # editor._slice_sensor_ms) so a row whose timestamp lands exactly
-    # on a segment boundary is consistently kept rather than silently
-    # dropped on uneven sampling.
+    # Inclusive on both ends — matches the segmenter's slicing convention
+    # so a row whose timestamp lands exactly on a segment boundary is
+    # consistently kept rather than silently dropped on uneven sampling.
     ts = acc["timestamp_ms"].astype(float).to_numpy()
     lo_ms = t0_ms + t_lo * 1000.0
     hi_ms = t0_ms + t_hi * 1000.0
@@ -115,68 +159,81 @@ def _selected_algos(req_algos: Optional[Iterable[str]]) -> list[str]:
     return out
 
 
-def rehydrate_state(state: dict[str, Any] | None) -> dict[str, Any] | None:
-    """No-op shim kept for backwards compatibility.
-
-    The HTTP client used to convert JSON-decoded lists back to
-    ``np.ndarray`` and ``state['config']`` from a dict back to an
-    attribute-accessible namespace. The in-process call returns those
-    shapes already, so this function just returns its input.
-    """
-    return state
-
+# --------------------------------------------------------------------------
+# Segmentation primitive
+# --------------------------------------------------------------------------
 
 def _segment_cfg():
     """Build the matched-filter detector config from the live segmentation
     ``config.json`` (key ``acc_template_match``) — the same source of truth the
-    ``Segmenter`` and the evaluators read — so tuned hyperparameters written by
-    ``scripts/tune_hyperparameters.py`` take effect on the next call with no
-    code change. The boutique signal policy (rotation-invariant ``|a|-g``) is
-    applied as an override.
+    ``Segmenter`` and the evaluators read. This is what makes tuned
+    hyperparameters written by ``scripts/tune_hyperparameters.py`` take effect
+    in the public API on the very next call, with no code change. The boutique
+    signal policy (rotation-invariant ``|a|-g``) is applied as an override.
     """
     from src.segmentation.algorithms.configTypes import (
         SEGMENT_ALGORITHM_CONFIG, SegmentAlgorithm, TemplateMatchConfig,
     )
     params = SEGMENT_ALGORITHM_CONFIG(
         algorithm=SegmentAlgorithm.ACC_TEMPLATE_MATCH,
-        overrides={"input_signal": "a_mag_minus_g"},
+        overrides={"input_signal": _SEGMENT_INPUT_SIGNAL},
     ).load_params()
     return _detect.DetectConfig(**TemplateMatchConfig(**params).model_dump())
 
 
-def segment(acc: pd.DataFrame, phone_model: str = "",
-            include_state: bool = True) -> tuple[list[dict], dict | None, float | None]:
-    """Detect ride intervals in an accelerometer trace.
+def _segment(acc: pd.DataFrame, phone_model: str = ""):
+    """Run the trapezoid-template detector on the boutique |a|-g signal.
 
-    Returns ``(predictions, state, t0_ms)`` — same shape as the
-    ``/segment`` endpoint. ``state`` is ``None`` when the detector
-    produced nothing (e.g. empty trace) or when ``include_state=False``.
-
-    Boutique pipeline runs the matched filter on the rotation-invariant
-    ``|a|-g`` magnitude residual (rather than the gravity-projected
-    ``a_vert``) so the signal the user inspects in step 3 matches what
-    the algorithm actually scores against. See
-    ``docs/latex/main.tex`` §12 (Gravity Calculation Change). Detector
-    hyperparameters come from the live ``config.json`` (so tuning propagates).
+    Returns ``(predictions, state)`` exactly as
+    :func:`detect.predict_intervals`. ``state`` is ``{}`` when the trace is
+    unusable.
     """
     cfg = _segment_cfg()
     predictions, state = _detect.predict_intervals(
         acc, cfg, phone_model=phone_model,
     )
-    t0_ms_raw = float(state.get("t0_ms", float("nan"))) if state else float("nan")
-    t0_ms: float | None = t0_ms_raw if math.isfinite(t0_ms_raw) else None
-    return predictions, (state if (include_state and state) else None), t0_ms
+    return predictions, state
 
 
-def predict(acc: pd.DataFrame,
-            segments: Iterable[dict],
-            phone_model: str = "",
-            algorithms: list[str] | None = None) -> tuple[dict[str, list[dict]], str]:
-    """Run Δh estimators on a list of ride intervals.
+def find_matching_prediction(
+    predictions: list[dict], t_lo: float, t_hi: float,
+) -> dict | None:
+    """Best-overlap detector prediction for a user-edited segment.
+
+    Returns ``None`` when there is no overlap — happens when the user marks
+    a segment the detector never proposed. Inlined from
+    ``src/pipelines/streamlit/common.py`` so the package never imports the
+    Streamlit layer.
+    """
+    best = None
+    best_overlap = 0.0
+    for p in predictions:
+        s = float(p["t_start_s"])
+        e = float(p["t_end_s"])
+        overlap = max(0.0, min(e, t_hi) - max(s, t_lo))
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best = p
+    return best
+
+
+# --------------------------------------------------------------------------
+# Prediction orchestration (copied from ui/api_client.py::predict)
+# --------------------------------------------------------------------------
+
+def _predict_segments(
+    acc: pd.DataFrame,
+    segments: Iterable[dict],
+    phone_model: str = "",
+    algorithms: list[str] | None = None,
+) -> tuple[dict[str, list[dict]], str]:
+    """Run the Δh estimators over a list of ride intervals.
 
     ``segments`` is an iterable of dicts with ``type``, ``start_s``,
-    ``end_s``. Returns ``(rows_by_algo, primary_algo_id)`` — same shape
-    as the ``/predict`` endpoint.
+    ``end_s`` (and optional ``trapezoid_override``). Neighbour clamping for
+    the pre/post gravity windows uses each segment's position in the list,
+    so callers wanting isolated single-segment behaviour pass a 1-element
+    list. Returns ``(rows_by_algo, primary_algo_id)``.
     """
     segs = list(segments)
     if not segs:
@@ -185,16 +242,6 @@ def predict(acc: pd.DataFrame,
     t0_ms = float(acc["timestamp_ms"].iloc[0])
 
     chosen = _selected_algos(algorithms)
-    # Boutique-pipeline hybrid signal policy: trapezoid runs on the
-    # rotation-invariant |a|-g (matching what the segmentation step
-    # already feeds it via ``api_client.segment``), ZUPT keeps the
-    # gravity-projected a_vert because its quality is bounded by the
-    # double-integration drift model, not the matched-filter signal
-    # choice. See ``docs/latex/main.tex`` §12--13.
-    _PER_ALGO_OVERRIDES: dict[str, dict] = {
-        "trap": {"input_signal": "a_mag_minus_g"},
-        "zupt": {},
-    }
     predictors: dict[str, Predictor] = {
         aid: Predictor(PREDICT_ALGORITHM_CONFIG(
             algorithm=_ACCEL_ALGO_MAP[aid],
@@ -228,9 +275,8 @@ def predict(acc: pd.DataFrame,
             for aid in predictors:
                 rows_by_algo[aid].append(_empty_pred_row(base, "empty_slice"))
             continue
-        # Manual trapezoid override (Streamlit step-3 UI) — only the
-        # trapezoid estimator consumes it; other algorithms ignore the
-        # kwarg via the Predictor dispatcher.
+        # Manual trapezoid override — only the trapezoid estimator consumes
+        # it; other algorithms ignore the kwarg via the Predictor dispatcher.
         seg_override = seg.get("trapezoid_override")
         for aid, predictor in predictors.items():
             try:
