@@ -42,6 +42,53 @@ _TRAP_ALGO_ID = "trap"
 _ZUPT_ALGO_ID = "zupt"
 
 
+def _prediction_from_trap_params(params: dict | None) -> dict | None:
+    """Adapt the predictor's own trapezoid fit into a detector-shaped dict.
+
+    The parameter card and override editor were originally seeded from the
+    *detector's* matched prediction (the segmentation step). A hand-added
+    segment has no such detector match — but the predictor still fits its
+    own shared-shape trapezoid to the slice (that's the fit drawn in the
+    chart above), exposing ``(W, f, A_used, sign, t_c1, t_c2)`` in its
+    ``meta["params"]``. That is everything the override needs, so we
+    repackage those flat params into the ``lobe1`` / ``lobe2`` structure
+    :func:`render_trapezoid_params` and :func:`effective_trapezoid_params`
+    expect. The two lobes share ``(W, f, |A|)`` and carry opposite signs,
+    matching the pulse-pair template the predictor built.
+
+    Returns ``None`` when the predictor produced no usable fit (e.g. the
+    segment fell through to the ZUPT fallback), so genuinely unfittable
+    segments keep the "shape unavailable" behaviour.
+    """
+    if not params:
+        return None
+    try:
+        W = float(params["W"])
+        f = float(params["f"])
+        A_used = float(params["A_used"])
+        sign = float(params.get("sign", 1.0))
+        t_c1 = float(params["t_c1"])
+        t_c2 = float(params["t_c2"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (np.isfinite(W) and np.isfinite(f) and np.isfinite(A_used)):
+        return None
+    a1 = sign * abs(A_used)  # lobe-1 take-off peak; lobe 2 is the mirror
+    return {
+        "lobe1": {
+            "t_c": t_c1, "half_width_s": W, "frac_flat": f,
+            "a_peak": a1, "r2_local": float("nan"),
+        },
+        "lobe2": {
+            "t_c": t_c2, "half_width_s": W, "frac_flat": f,
+            "a_peak": -a1, "r2_local": float("nan"),
+        },
+        "joint_r2_mean": float(params.get("joint_r2", float("nan"))),
+        "heatmap_energy": float("nan"),
+        "_source": "predictor",
+    }
+
+
 def _segment_inside_valid_interval(
     seg_start_s: float, seg_end_s: float,
     valid_intervals: list[tuple[int, int]] | None,
@@ -769,9 +816,20 @@ def render() -> None:
             predictions,
             float(sel_primary["start_s"]), float(sel_primary["end_s"]),
         )
+        # Hand-added segments have no detector match, but the predictor
+        # still fit its own trapezoid (shown in the chart above). Fall
+        # back to that fit so the param card and the override editor work
+        # off the predictor's own (W, f, |A|, t_c1, t_c2) instead of
+        # showing "shape unavailable".
+        from_predictor = False
+        if matching is None and trap_sel is not None:
+            matching = _prediction_from_trap_params(
+                (trap_sel.get("meta") or {}).get("params")
+            )
+            from_predictor = matching is not None
         # Show the *effective* (override-applied) values so the card
         # reflects what the predictor just used. With no override this
-        # is identical to the detector's matching prediction.
+        # is identical to the matching prediction.
         active_override = (
             (st.session_state.get("lobe_overrides") or {}).get(selected)
         )
@@ -781,7 +839,9 @@ def render() -> None:
         title = (
             "**Trapezoid shape used by the predictor**"
             if active_override
-            else "**Fitted trapezoid parameters (detector fit)**"
+            else ("**Fitted trapezoid parameters (predictor fit)**"
+                  if from_predictor
+                  else "**Fitted trapezoid parameters (detector fit)**")
         )
         st.markdown(title)
         render_trapezoid_params(effective)
