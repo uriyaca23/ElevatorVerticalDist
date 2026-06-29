@@ -77,8 +77,10 @@ from .pipeline import (
     list_experiments,
     list_structured_experiments,
     load_experiment_index,
+    read_experiment_metadata,
     rebuild_metadata_index,
     saveExperimentData,
+    update_experiment_metadata,
 )
 from .selection import (
     add_selection_args,
@@ -125,6 +127,8 @@ __all__ = [
     "list_experiments",
     "list_structured_experiments",
     "load_experiment_index",
+    "read_experiment_metadata",
+    "update_experiment_metadata",
     "rebuild_metadata_index",
     # Selection
     "add_selection_args",

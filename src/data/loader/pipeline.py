@@ -52,6 +52,7 @@ from .constants import (
     SOURCE_EXPERIMENT,
     STRUCTURED_DATA_DIR,
     STRUCTURED_INDEX_CSV,
+    VALID_SOURCES,
 )
 from .parsing import (
     _find_sensor_log,
@@ -1213,3 +1214,63 @@ def saveExperimentData(
     _write_csvs(out_dir, sensors, gt, meta_row)
     rebuild_metadata_index()
     return out_dir
+
+
+def read_experiment_metadata(name: str) -> dict[str, str]:
+    """Return an experiment's per-experiment ``metadata.csv`` row as a dict
+    keyed by :data:`METADATA_COLUMNS` (missing columns default to ``""``).
+
+    Light counterpart to :func:`getExperimentData` — reads only the metadata
+    file, never the sensor CSVs. ``exp_name`` is forced to ``name`` so the
+    returned row is always self-consistent. Raises ``FileNotFoundError`` when
+    the experiment has no metadata file.
+    """
+    mpath = _structured_dir_for(name) / METADATA_CSV
+    if not mpath.exists():
+        raise FileNotFoundError(
+            f"no {METADATA_CSV} for experiment {name!r} ({mpath})"
+        )
+    df = pd.read_csv(mpath, dtype=str).fillna("")
+    raw = df.iloc[0].to_dict() if len(df) else {}
+    row = {c: str(raw.get(c, "")) for c in METADATA_COLUMNS}
+    row["exp_name"] = name  # canonical key
+    return row
+
+
+def update_experiment_metadata(
+    name: str, updates: dict[str, str],
+) -> dict[str, str]:
+    """Apply ``updates`` to an experiment's metadata and rebuild the index.
+
+    Edits ONLY the per-experiment ``metadata.csv`` (sensor CSVs and ``gt.csv``
+    are untouched), then calls :func:`rebuild_metadata_index` so the top-level
+    ``structuredData/metadata.csv`` — the authoritative train/test source —
+    reflects the change. Only keys in :data:`METADATA_COLUMNS` are honoured and
+    ``exp_name`` is never changed (it is the folder key). ``experiment_type``
+    and ``source``, when non-empty, are validated against their allowed sets.
+
+    Returns the written row. Raises ``FileNotFoundError`` if the experiment has
+    no metadata file, or ``ValueError`` on an invalid ``experiment_type`` /
+    ``source``.
+    """
+    row = read_experiment_metadata(name)
+    for key, value in updates.items():
+        if key in METADATA_COLUMNS and key != "exp_name":
+            row[key] = "" if value is None else str(value)
+    row["exp_name"] = name  # never editable
+
+    et = row.get("experiment_type", "")
+    if et and et not in EXPERIMENT_TYPES:
+        raise ValueError(
+            f"experiment_type must be one of {EXPERIMENT_TYPES}, got {et!r}"
+        )
+    src = row.get("source", "")
+    if src and src not in VALID_SOURCES:
+        raise ValueError(
+            f"source must be one of {VALID_SOURCES}, got {src!r}"
+        )
+
+    mpath = _structured_dir_for(name) / METADATA_CSV
+    pd.DataFrame([row], columns=METADATA_COLUMNS).to_csv(mpath, index=False)
+    rebuild_metadata_index()
+    return row

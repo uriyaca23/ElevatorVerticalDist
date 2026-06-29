@@ -43,6 +43,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.data.loader import (
+    EXPERIMENT_TYPES,
     RAW_DATA_ROOT,
     SOURCE_EXPERIMENT,
     STRUCTURED_DATA_DIR,
@@ -51,7 +52,9 @@ from src.data.loader import (
     getExperimentData,
     list_experiments,
     list_structured_experiments,
+    read_experiment_metadata,
     saveExperimentData,
+    update_experiment_metadata,
 )
 from src.data.loader.alignment import _smoothed_velocity
 from src.data.loader.pipeline import (
@@ -367,6 +370,9 @@ class GtEditor(tk.Tk):
         ttk.Button(top, text="Load", command=self.load_experiment).pack(side=tk.LEFT)
         ttk.Button(top, text="Add experiment…",
                    command=self._open_add_experiment_dialog)\
+            .pack(side=tk.LEFT, padx=(4, 0))
+        ttk.Button(top, text="✎ Edit params…",
+                   command=self._open_edit_params_dialog)\
             .pack(side=tk.LEFT, padx=(4, 0))
         ttk.Button(top, text="Save (Ctrl+S)", command=self.save_gt).pack(side=tk.RIGHT)
         ttk.Button(top, text="🗑 Delete experiment",
@@ -729,6 +735,114 @@ class GtEditor(tk.Tk):
         self._refresh_plot()
         self._refresh_tree()
         self.status_var.set(f"Deleted '{name}' ✓")
+
+    def _open_edit_params_dialog(self):
+        """Edit the selected experiment's metadata parameters (train/test,
+        description, temperature, …) in a pre-filled dialog, then write them
+        back to the per-experiment ``metadata.csv`` and rebuild the top-level
+        index. Sensor data, GT, and the folder name (``exp_name``, the stable
+        key) are never touched."""
+        name = self.exp_var.get().strip()
+        if not name:
+            messagebox.showinfo("Edit parameters", "Pick an experiment first.")
+            return
+        try:
+            meta = read_experiment_metadata(name)
+        except FileNotFoundError:
+            messagebox.showinfo(
+                "Edit parameters",
+                f"No structuredData metadata for '{name}'.\n"
+                "Add or load the experiment first.",
+            )
+            return
+
+        dlg = tk.Toplevel(self)
+        dlg.title(f"Edit parameters — {name}")
+        dlg.transient(self)
+        dlg.grab_set()
+        dlg.resizable(False, False)
+
+        frm = ttk.Frame(dlg, padding=12)
+        frm.pack(fill=tk.BOTH, expand=True)
+        frm.columnconfigure(1, weight=1)
+
+        # exp_name is the folder key — shown, but never editable.
+        ttk.Label(frm, text="exp_name:")\
+            .grid(row=0, column=0, sticky=tk.W, pady=2)
+        ttk.Label(frm, text=name, foreground="#888", font=("Menlo", 9))\
+            .grid(row=0, column=1, sticky=tk.W, padx=4, pady=2)
+
+        md_vars: dict[str, tk.StringVar] = {}
+        row_i = 1
+
+        def _add_entry(key: str, label: str):
+            nonlocal row_i
+            ttk.Label(frm, text=label)\
+                .grid(row=row_i, column=0, sticky=tk.W, pady=2)
+            v = tk.StringVar(value=meta.get(key, ""))
+            ttk.Entry(frm, textvariable=v, width=42)\
+                .grid(row=row_i, column=1, sticky=tk.EW, padx=4, pady=2)
+            md_vars[key] = v
+            row_i += 1
+
+        def _add_combo(key: str, label: str, values):
+            nonlocal row_i
+            ttk.Label(frm, text=label)\
+                .grid(row=row_i, column=0, sticky=tk.W, pady=2)
+            v = tk.StringVar(value=meta.get(key, ""))
+            ttk.Combobox(frm, textvariable=v, values=list(values),
+                         state="readonly", width=20)\
+                .grid(row=row_i, column=1, sticky=tk.W, padx=4, pady=2)
+            md_vars[key] = v
+            row_i += 1
+
+        _add_combo("experiment_type", "Experiment type:", EXPERIMENT_TYPES)
+        _add_combo("source", "Source:", VALID_SOURCES)
+        _add_entry("experimenter", "Experimenter:")
+        _add_entry("phone", "Phone:")
+        _add_entry("location", "Location:")
+        _add_entry("date", "Date:")
+        _add_entry("time", "Time (HH:MM):")
+        _add_entry("description", "Description:")
+        _add_entry("temperature_c", "Temperature (°C):")
+        _add_entry("start_floor", "Start floor:")
+
+        ttk.Label(
+            frm,
+            text="Writes structuredData/data/<name>/metadata.csv and rebuilds "
+                 "the top-level index. Sensor data and GT are untouched.",
+            foreground="#888", font=("", 8), wraplength=420, justify=tk.LEFT,
+        ).grid(row=row_i, column=0, columnspan=2, sticky=tk.W, pady=(8, 4))
+        row_i += 1
+
+        def _on_save():
+            updates = {k: v.get() for k, v in md_vars.items()}
+            try:
+                new_row = update_experiment_metadata(name, updates)
+            except (ValueError, FileNotFoundError) as e:
+                messagebox.showerror("Save failed", str(e), parent=dlg)
+                return
+            # Keep the in-memory pipeline's metadata in sync when the edited
+            # experiment is the one currently loaded (it feeds figure labels).
+            if (self.exp_path is not None and self.exp_path.name == name
+                    and self.pipeline is not None):
+                try:
+                    self.pipeline.metaData.update(new_row)
+                except Exception:
+                    pass
+            self._populate_experiments()
+            self.status_var.set(
+                f"Updated params for '{name}' "
+                f"(experiment_type={new_row.get('experiment_type', '')}) ✓"
+            )
+            dlg.destroy()
+
+        btns = ttk.Frame(frm)
+        btns.grid(row=row_i, column=0, columnspan=2, sticky=tk.E, pady=(10, 0))
+        ttk.Button(btns, text="Cancel", command=dlg.destroy)\
+            .pack(side=tk.RIGHT, padx=4)
+        ttk.Button(btns, text="Save", command=_on_save)\
+            .pack(side=tk.RIGHT)
 
     # ---------- Plot ----------
 
