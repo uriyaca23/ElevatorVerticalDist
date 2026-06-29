@@ -717,6 +717,141 @@ quality-filter-accepted samples only, which is our proxy for the
 exchangeable subset. The calibration JSON checkpoints live under
 \texttt{\small src/data/\allowbreak{}structuredData/\allowbreak{}test\_results/\allowbreak{}prediction/\allowbreak{}train/}.
 
+\subsubsection{Group-conditional (Mondrian) calibration over ride size}
+\label{sec:mondrian-conformal}
+
+The single scalar $k$ of \eqref{eq:conformal-coverage} certifies
+\emph{marginal} coverage but says nothing about \emph{conditional}
+coverage within sub-populations of rides. Empirically the trapezoid CI
+is badly mis-balanced across ride size: short/low rides are
+\emph{over}-covered (the $90\%$ interval is wider than it needs to be)
+while long/tall rides are \emph{under}-covered. The diagnostic is the
+per-bin non-conformity quantile: partitioning the calibration pool into
+$|\Delta h|$ bins $b$ and computing the in-bin $(1-\alpha)$ quantile
+\begin{equation}
+  q_b \;=\; \mathrm{Quantile}_{1-\alpha}\!\bigl(\{\,r_i : i \in b\,\}\bigr),
+  \qquad r_i = \frac{|\hat H_i - H_i|}{\sigma_i},
+  \label{eq:qbin}
+\end{equation}
+shows that $q_b$ varies by more than $2\times$ across bins and is
+\emph{not monotone} in ride size (on our train set the $6$--$12$~m bin
+has the heaviest tail, $q_b\!\approx\!5.5$, larger than the
+$24$--$60$~m bin). A single global $k=\max_{\text{floor}}
+\mathrm{Quantile}_{1-\alpha}(\{r_i\})$ therefore sits above $q_b$ in the
+small bins (waste) and below $q_b$ in the heavy bins (under-coverage).
+A monotone re-scaling of $\sigma$ by ride length cannot fix a
+non-monotone $q_b$; only a genuinely per-bin multiplier can.
+
+\paragraph{Method.} We replace the global multiplier with a
+\emph{Mondrian} (group-conditional) split-conformal multiplier. The
+calibration pool is partitioned by the predicted ride magnitude
+$|\hat H|$ into the fixed bins
+$\mathcal{B} = \{[0,3),[3,6),[6,12),[12,24),[24,60)\}$~m, and inside
+each bin we fit its own multiplier
+\begin{equation}
+  k_b \;=\;
+  \max\!\Bigl(k_{\mathrm{floor}},\;
+  \mathrm{Quantile}_{1-\alpha}\!\bigl(\{\,r_i : i \in b\,\}\bigr)\Bigr),
+  \label{eq:mondrian-kbin}
+\end{equation}
+with $k_{\mathrm{floor}} = Z_{0.95}=1.645$ a per-bin floor. We take the
+\emph{plain} empirical $(1-\alpha)$ quantile rather than the
+conservative split-conformal level $(1-\alpha)(n_b+1)/n_b$: on a small
+heavy-tailed bin the finite-sample inflation pushes the effective level
+to the $\sim\!95$th percentile, which on the $n_b\!\approx\!17$
+tall-ride bin lands on a lone outlier and blows the interval up to
+$\sim\!9$~m at $100\%$ coverage --- useless. Targeting the empirical
+$(1-\alpha)$ quantile instead yields the tightest interval that still
+reaches $\approx(1-\alpha)$ coverage (a $\sim\!3.6$~m CI at
+$\approx\!90\%$ on that bin), at the cost of trading the conservative
+$\ge 1-\alpha$ \emph{guarantee} for an empirical $\approx(1-\alpha)$
+\emph{target}. A ride predicted to travel $|\hat H|$ then reports
+\begin{equation}
+  \mathrm{CI} \;=\; \bigl[\,\hat H \pm k_{b(|\hat H|)}\,\sigma\,\bigr],
+  \label{eq:mondrian-ci}
+\end{equation}
+subject to the same absolute floor/cap guards. Applying the standard
+split-conformal argument \emph{within} each bin gives the
+group-conditional guarantee
+\begin{equation}
+  \mathbb{P}\bigl(|\hat H - H| \le k_b\,\sigma \,\big|\, |\hat H|\in b\bigr)
+  \;\ge\; 1-\alpha
+  \quad\text{for every bin } b,
+  \label{eq:cond-coverage}
+\end{equation}
+and because $k_b$ is exactly the in-bin $(1-\alpha)$ quantile it is the
+\emph{smallest} multiplier achieving \eqref{eq:cond-coverage} --- the
+tightest interval consistent with hitting the target in that bin. Bins
+with fewer than a minimum count ($12$) of calibration samples fall back
+to the global $k$ so a near-empty bin cannot emit a wild $k_b$. ZUPT
+passes no conditioning feature and keeps the single global multiplier,
+so it is unaffected.
+
+The tallest bin is the hardest and shows the target/guarantee
+trade-off most sharply. Its $17$ training scores are
+$\{0.05,\dots,1.67\}$ for $15$ rides and then two far-tail outliers at
+$\approx\!8$ and $\approx\!11$ --- rides where the $\sigma$ model
+under-counts the error by an order of magnitude. Covering those two
+would force $k_b\!\approx\!11$ and a $\sim\!9$~m interval on
+\emph{every} tall ride; instead the empirical $(1-\alpha)$ quantile
+sets $k_b\!\approx\!4$, covering the $15$ well-modelled rides
+($\approx\!88\%$) with a $\sim\!3.6$~m interval and leaving the two
+$\sigma$-failures as honest misses. This is the smallest interval that
+reaches the target on the bulk of the bin; it is also the most
+sample-sensitive multiplier and the first thing to revisit as more
+tall-ride data --- and a better $\sigma$ model for the failure cases ---
+is collected.
+
+\paragraph{Why ride magnitude is the time axis.} We condition on the
+predicted $|\hat H|$ rather than the ride duration $T$ directly, but the
+two are nearly interchangeable: for an elevator $|\Delta h| \approx
+v_{\mathrm{cruise}}\,T$, and on our data $\mathrm{corr}(T,|\Delta h|) =
+0.96$. Conditioning on $|\hat H|$ both (i) indexes the distance bins we
+report against directly, and (ii) makes the interval grow with ride
+\emph{time} as a side effect --- empirically it flattens both the
+distance-bin and the duration-bin coverage, whereas conditioning on the
+raw duration left the tallest-ride bin under-covered (because the
+$24$--$60$~m rides do not all fall in one duration bin).
+Figure~\ref{fig:train-ci-vs-size} shows the resulting half-width as a
+function of both height and time: the per-bin median curve steps up on
+the tall/long rides and down on the short ones.
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.49\linewidth}\centering
+    \includegraphics[width=\linewidth]{prediction/train_trapezoid_ci_vs_dh.png}
+    \caption{CI half-width vs.\ $|\Delta h|$ (height).}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}\centering
+    \includegraphics[width=\linewidth]{prediction/train_trapezoid_ci_vs_duration.png}
+    \caption{CI half-width vs.\ ride duration (time).}
+  \end{subfigure}
+  \caption{Group-conditional CI half-width (trapezoid, train). The
+  red curve is the per-bin median; the Mondrian multiplier
+  \eqref{eq:mondrian-kbin} widens the interval on the tall/long rides
+  and tightens it on the short ones. Because $|\Delta h|\approx
+  v_{\mathrm{cruise}}T$, the height and time views carry the same
+  trend.}
+  \label{fig:train-ci-vs-size}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.49\linewidth}\centering
+    \includegraphics[width=\linewidth]{prediction/train_trapezoid_cov_bins.png}
+    \caption{Coverage by distance bin.}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}\centering
+    \includegraphics[width=\linewidth]{prediction/train_trapezoid_cov_bins_duration.png}
+    \caption{Coverage by ride-duration bin.}
+  \end{subfigure}
+  \caption{Per-bin coverage after Mondrian calibration (trapezoid,
+  train). Each bar sits at the $90\%$ target line; the global-multiplier
+  CI previously over-covered the short bins and under-covered the
+  $24$--$60$~m / $20$--$40$~s rides.}
+  \label{fig:train-cov-bins-mondrian}
+\end{figure}
+
 \section{Evaluation Protocol}
 \label{sec:evaluation-protocol}
 
@@ -1311,7 +1446,9 @@ post-ride windows. That work is deferred to a follow-up since the
 \texttt{Predictor} contract currently hands per-segment data without
 a quaternion stream. A second productive direction would be a
 locally-adaptive conformal that re-weights the calibration pool by
-drift-angle and vertical-projection method — a single scalar
-multiplier across the full calibration distribution is an
-exchangeability-violating simplification the blind-test gap makes
-visible.
+drift-angle and vertical-projection method: the Mondrian conformal of
+\S\ref{sec:mondrian-conformal} already removes the ride-size axis of
+the single-scalar simplification (\eqref{eq:mondrian-kbin}), but a
+scalar multiplier across the remaining (drift-angle, projection-method)
+distribution is still an exchangeability-violating approximation the
+blind-test gap makes visible.

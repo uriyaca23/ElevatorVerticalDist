@@ -255,8 +255,51 @@ def fig_ci_vs_distance(df: pd.DataFrame, out_path: Path, title: str) -> None:
     if not sub.empty:
         ax.scatter(np.abs(sub["true_dh"]), sub["ci_half_width"], s=22,
                    c="tab:purple", alpha=0.6, edgecolor="white", linewidth=0.3)
+        # Median CI per |Δh| bin: shows the group-conditional (Mondrian)
+        # multiplier widening the interval on the tall-ride bins.
+        edges = np.array([0.0, 3.0, 6.0, 12.0, 24.0, 60.0])
+        h = np.abs(sub["true_dh"].to_numpy()); w = sub["ci_half_width"].to_numpy()
+        cx, cy = [], []
+        for lo, hi in zip(edges, edges[1:]):
+            m = (h >= lo) & (h < hi)
+            if m.sum():
+                cx.append(0.5 * (lo + min(hi, h[m].max())))
+                cy.append(float(np.median(w[m])))
+        if cx:
+            ax.plot(cx, cy, "-o", color="tab:red", lw=2, ms=6,
+                    label="median CI per bin")
     ax.axhline(1.5, color="b", ls=":", alpha=0.7, label="±1.5 m")
     ax.set_xlabel("|true Δh| (m)")
+    ax.set_ylabel("CI half-width (m)")
+    ax.set_title(title)
+    ax.legend()
+    fig.savefig(out_path)
+    plt.close(fig)
+
+
+def fig_ci_vs_duration(df: pd.DataFrame, out_path: Path, title: str) -> None:
+    """CI half-width against ride duration — the time view of the
+    group-conditional CI. Because |Δh| ≈ v·T (corr≈0.96) the per-bin
+    multiplier read off the predicted distance also makes the interval
+    grow with ride time."""
+    sub = _clean(df)
+    fig, ax = plt.subplots(figsize=(7, 5))
+    if not sub.empty and "duration_sec" in sub.columns:
+        t = sub["duration_sec"].to_numpy(); w = sub["ci_half_width"].to_numpy()
+        ax.scatter(t, w, s=22, c="teal", alpha=0.6,
+                   edgecolor="white", linewidth=0.3)
+        edges = DURATION_BIN_EDGES
+        cx, cy = [], []
+        for lo, hi in zip(edges, edges[1:]):
+            m = (t >= lo) & (t < hi)
+            if m.sum():
+                cx.append(0.5 * (lo + min(hi, t[m].max())))
+                cy.append(float(np.median(w[m])))
+        if cx:
+            ax.plot(cx, cy, "-o", color="tab:red", lw=2, ms=6,
+                    label="median CI per bin")
+    ax.axhline(1.5, color="b", ls=":", alpha=0.7, label="±1.5 m")
+    ax.set_xlabel("ride duration (s)")
     ax.set_ylabel("CI half-width (m)")
     ax.set_title(title)
     ax.legend()
@@ -544,6 +587,7 @@ def save_all_figures(
     _f("per_exp", fig_per_experiment_mae, "MAE by experiment")
     _f("reject", fig_rejection_reasons, "Rejection reasons")
     _f("ci_vs_dh", fig_ci_vs_distance, "CI width vs. |true Δh|")
+    _f("ci_vs_duration", fig_ci_vs_duration, "CI width vs. ride duration")
     _f("cov_bins", fig_coverage_vs_distance_bins, "Coverage by distance bin")
     _f("cov_bins_duration", fig_coverage_vs_duration_bins,
        "Coverage by ride-duration bin")

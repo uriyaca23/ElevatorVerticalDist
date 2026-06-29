@@ -4849,4 +4849,113 @@ filter actually scores against.
 \IfFileExists{results_noise_prediction.tex}{\input{results_noise_prediction.tex}}{}
 \IfFileExists{results_noise_pipeline.tex}{\input{results_noise_pipeline.tex}}{}
 
+% ------------------------------------------------------------------
+% Alternative (external) data survey. Hand-written, not auto-generated.
+% Compares public elevator-ride datasets against our campaign on the
+% two axes that matter for this pipeline: barometer presence and an
+% explicit height-difference / floor-level label. Surveyed June 2026.
+% ------------------------------------------------------------------
+\section{Alternative Data}
+\label{sec:alternative-data}
+
+The field campaign documented in \S\ref{sec:data-collection} is
+deliberately small and homogeneous: seven elevators across six
+buildings, all in central Israel, all recorded with the same Android
+logging app and the same four-phone rig. That is enough to develop and
+calibrate the pipeline, but it is natural to ask what \emph{external}
+data exists for elevator rides --- both as a check on how unusual our
+setup is and as a possible source of pre-training or cross-dataset
+validation. We therefore surveyed publicly described datasets that
+contain smartphone or wearable \emph{accelerometer} recordings of
+\emph{labelled elevator rides}; Table~\ref{tab:alternative-data}
+collects them. Two columns deserve emphasis because they are the two
+ingredients our own data is built around: a \textbf{barometer} channel
+(our ground-truth altitude source, \S\ref{sec:logging-app}) and an
+explicit \textbf{height-difference / floor-level} label (our prediction
+target, \S\ref{sec:height-prediction}).
+
+\begin{table}[H]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{p{2.8cm} p{3.3cm} p{3.2cm} c c c}
+\toprule
+\textbf{Dataset} & \textbf{Sensors (device)} &
+\textbf{Elevator labelling} & \textbf{Baro.} &
+\textbf{$\Delta h$ GT} & \textbf{Public} \\
+\midrule
+USC-HAD \newline {\footnotesize (Zhang \& Sawchuk, 2012)} &
+Acc, Gyr \newline {\footnotesize wearable IMU; 14 subj.; 100\,Hz} &
+\texttt{Elevator-up} / \texttt{Elevator-down} classes (of 12 ADLs) &
+$\times$ & $\times$ & \checkmark \\
+\midrule
+ExtraSensory \newline {\footnotesize (Vaizman et al., 2017)} &
+Acc, Gyr, Mag, audio, GPS, phone-state \newline {\footnotesize phone $+$ watch; 60 users; in-the-wild} &
+\texttt{elevator} context label (no up/down) &
+$\times$ & $\times$ & \checkmark \\
+\midrule
+Indoor-loc.\ HAR \newline {\footnotesize (Zhao et al., \emph{Sensors}, 2019)} &
+Acc, Gyr, Mag, \textbf{Baro} \newline {\footnotesize phone; 10 subj.; 50\,Hz; $>$6\,GB} &
+up/down elevator, escalator \& stairs (9 HAR classes; also walk, still, turn) &
+\checkmark & $\times$ & $\dagger$ \\
+\midrule
+ELESON \newline {\footnotesize (arXiv:2405.03218, 2024)} &
+Acc, Gyr, Mag \newline {\footnotesize phones; 36{,}420 inst.; 10 malls} &
+elevator / escalator / neither (state, no up/down) &
+$\times$ & $\times$ & $\times$ \\
+\midrule
+IMU floor-height est. \newline {\footnotesize (Chen et al., IEEE Sensors J., 2024)} &
+Acc, Gyr, Mag $+$ Baro$^\ddagger$ \newline {\footnotesize phone; 50\,Hz; i2nav lab} &
+elevator $+$ escalator (no stairs) &
+\checkmark$^\ddagger$ & \checkmark & $\times$ \\
+\bottomrule
+\end{tabular}
+\caption{Publicly described datasets containing accelerometer recordings
+of labelled elevator rides, and how they compare to our campaign on the
+two properties that matter for this work: a barometer channel
+(\textbf{Baro.}) and explicit vertical height-difference or floor-level
+ground truth (\textbf{$\Delta h$ GT}). \checkmark~$=$~present,
+$\times$~$=$~absent. $\ddagger$~for the IMU floor-height row, the
+barometer is recorded \emph{only} as the ground-truth height reference
+(via the ISA formula and an EKF), while the height is \emph{estimated}
+from the IMU --- precisely the barometer-as-truth / accelerometer-as-
+estimator split this work uses (\S\ref{sec:logging-app}); its
+``$\Delta h$ GT'' is therefore that barometric floor-level height.
+$\dagger$~the authors state the corpus will be made public ``to
+contribute to academic research'' but give no download link as of
+June~2026, so we could not confirm availability. Sampling rates and
+subject counts are as reported by each source; ``ADL''~$=$~activities of
+daily living. Every dataset here records the \emph{accelerometer}, which
+is the one channel our pipeline always requires.}
+\label{tab:alternative-data}
+\end{table}
+
+\paragraph{Access.} Live entry points at the time of writing: USC-HAD
+\href{https://sipi.usc.edu/had/}{sipi.usc.edu/had}; ExtraSensory
+\href{http://extrasensory.ucsd.edu/}{extrasensory.ucsd.edu} (also
+mirrored on Kaggle); the \emph{Sensors}~2019 indoor-localization paper
+\href{https://pmc.ncbi.nlm.nih.gov/articles/PMC6387421/}{PMC6387421};
+ELESON \href{https://arxiv.org/abs/2405.03218}{arXiv:2405.03218}; and the
+IMU floor-height paper
+\href{https://ieeexplore.ieee.org/document/10648587}{IEEE~Xplore~10648587}.
+
+\paragraph{What the table shows.} No public dataset we found matches our
+recording setup on all three axes at once --- accelerometer \emph{and}
+barometer \emph{and} a per-ride height label. Each near match drops one
+axis: the activity-recognition corpora (USC-HAD, ExtraSensory, ELESON)
+label elevator use but carry neither a barometer nor a height target;
+the \emph{Sensors}~2019 indoor-localization set adds a barometer (and
+even covers stairs) but never ships per-ride $\Delta h$ and was not, as
+far as we can tell, ever released; and the IMU height-estimation work of
+Chen et al.\ --- the one entry that, exactly like our data, carries
+accelerometer, barometer (as ground truth) \emph{and} a floor-level
+height all at once --- keeps its raw data private. Two large,
+barometer-rich locomotion datasets --- SHL (Sussex--Huawei, 2{,}800\,h,
+accelerometer $+$ barometer across three phones) and UCI-HAR --- are
+worth noting as generic pre-training material but contain \emph{no}
+elevator class at all. The empty cell our campaign fills is therefore a
+barometer-backed, height-labelled, accelerometer recording of real
+elevator rides.
+
 \end{document}

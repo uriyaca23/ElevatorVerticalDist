@@ -196,12 +196,25 @@ class TrapezoidAccelConfig(BaseModel):
     r2_epsilon: float = 1e-3
     min_theoretical_sigma_m: float = 0.15
 
-    # CI floor + cap (absolute meters, applied after conformal multiplier)
+    # CI floor + cap (absolute meters, applied after conformal multiplier).
     ci_absolute_floor_m: float = 0.5
     ci_absolute_cap_m: float = 40.0
 
     # Conformal
-    alpha: float = 0.08
+    alpha: float = 0.10   # 90% target CI (1 - alpha)
+    # Group-conditional (Mondrian) CI: when on, the conformal multiplier is
+    # fit *per bin* of the predicted ride magnitude |Δh| (≈ ride duration,
+    # corr≈0.96) instead of a single global scalar. This flattens coverage to
+    # the target in every distance/duration bin — shrinking the CI where the
+    # global multiplier over-covers (short rides) and widening it where it
+    # under-covers (long rides) — at the tightest width consistent with the
+    # per-bin target. Bins with < ci_bin_min_count calibration samples fall
+    # back to the global multiplier. Edges are the |Δh| bins (m).
+    conditional_ci: bool = True
+    ci_distance_bins_m: list[float] = Field(
+        default_factory=lambda: [0.0, 3.0, 6.0, 12.0, 24.0, 60.0]
+    )
+    ci_bin_min_count: int = 12
 
     # Phone / sampling defaults
     default_phone: str = ""

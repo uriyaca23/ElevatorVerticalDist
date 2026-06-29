@@ -38,6 +38,9 @@ change.zip
 change 2.zip
 elevator_export.zip
 
+# External public dataset (USC-HAD, ~44 MB, kept locally, not pushed)
+src/data/USC-HAD/
+
 # Local evaluator runs (figures + per-run CSVs + metrics dumps)
 elevator_reports/
 

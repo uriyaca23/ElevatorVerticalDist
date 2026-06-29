@@ -45,6 +45,7 @@ class CalibrationSample:
     signal_clear: bool
     exp_name: str = ""
     segment_idx: int = -1
+    duration_sec: float = 0.0  # ride duration, for time-scaled conformal CI
 
     @property
     def abs_error(self) -> float:

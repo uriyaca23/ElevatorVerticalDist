@@ -105,6 +105,7 @@ def to_calibration_samples(preds: list[RecordPrediction]) -> list[CalibrationSam
             signal_clear=rp.record.signal_clear,
             exp_name=rp.record.exp_name,
             segment_idx=rp.record.seg_idx,
+            duration_sec=rp.record.duration_sec,
         )
         for rp in preds
     ]

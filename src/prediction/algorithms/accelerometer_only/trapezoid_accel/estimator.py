@@ -71,7 +71,14 @@ class TrapezoidAccelEstimator:
 
     def __init__(self, config: TrapezoidAccelConfig | None = None):
         self.config = config or TrapezoidAccelConfig()
-        self.conformal = ConformalCalibrator(alpha=self.config.alpha)
+        self.conformal = ConformalCalibrator(
+            alpha=self.config.alpha,
+            bin_min_count=self.config.ci_bin_min_count,
+            # Tightest CI that still reaches ≈(1−α) per bin: use the plain
+            # empirical quantile, not the conservative (1−α)(n+1)/n inflation
+            # which over-covers small heavy-tailed bins (the 24–60 m rides).
+            finite_sample_correction=False,
+        )
 
     def save(self, path: Path | str) -> None:
         self.conformal.save(path)
@@ -325,7 +332,7 @@ class TrapezoidAccelEstimator:
                         overlap_delta=c.overlap_delta,
                     )
                 theo_sigma = max(sig["sigma_dh"], c.min_theoretical_sigma_m)
-                ci = self.conformal.half_width(theo_sigma)
+                ci = self.conformal.half_width(theo_sigma, abs(height_diff))
                 ci = max(c.ci_absolute_floor_m, min(ci, c.ci_absolute_cap_m))
                 a_template_ov = (
                     ov_fit.sign * ov_fit.A * trapezoid_kernel(
@@ -387,7 +394,7 @@ class TrapezoidAccelEstimator:
                 if mode == "zupt_fallback":
                     theo_sigma = sigma_zupt
                     height_diff = zupt_height
-                    ci = self.conformal.half_width(theo_sigma)
+                    ci = self.conformal.half_width(theo_sigma, abs(height_diff))
                     ci = max(c.ci_absolute_floor_m, min(ci, c.ci_absolute_cap_m))
                     return PredictionOutput(
                         height_diff=float(height_diff),
@@ -475,7 +482,7 @@ class TrapezoidAccelEstimator:
         theo_sigma = max(sig["sigma_dh"], c.min_theoretical_sigma_m)
 
         # ---- Conformal half-width ----
-        ci = self.conformal.half_width(theo_sigma)
+        ci = self.conformal.half_width(theo_sigma, abs(height_diff))
         ci = max(c.ci_absolute_floor_m, min(ci, c.ci_absolute_cap_m))
 
         # ---- Out-of-lobe residual concentration (quality feature) ----
@@ -603,9 +610,25 @@ class TrapezoidAccelEstimator:
             return {"n_used": 0, "note": "no_usable_samples"}
         abs_errors = [s.abs_error for s in usable]
         sigmas = [s.theoretical_sigma for s in usable]
-        self.conformal.fit(abs_errors, sigmas)
+        # Group-conditional (Mondrian) CI: bin the calibration pool by the
+        # predicted ride magnitude |Δh| and fit a separate conformal
+        # multiplier per bin, so every distance/duration regime hits the
+        # target coverage with the tightest interval. When disabled, fall
+        # back to the single global multiplier.
+        if self.config.conditional_ci:
+            features = [abs(s.predicted_dh) for s in usable]
+            self.conformal.fit(
+                abs_errors, sigmas,
+                features=features,
+                bin_edges=self.config.ci_distance_bins_m,
+            )
+        else:
+            self.conformal.fit(abs_errors, sigmas)
         return {
             "n_used": len(usable),
             "multiplier": self.conformal.multiplier,
             "p95_score": self.conformal.p95_score,
+            "bin_edges": self.conformal.bin_edges,
+            "bin_multipliers": self.conformal.bin_multipliers,
+            "bin_counts": self.conformal.bin_counts,
         }
