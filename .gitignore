@@ -6,6 +6,12 @@ __pycache__/
 venv/
 .env
 
+# Packaging: build_wheel.py staging + outputs (never committed — generated from src/)
+build/
+dist/
+*.egg-info/
+pyramidElevatorDist/_impl/
+
 # OS / IDE
 .DS_Store
 desktop.ini
@@ -56,3 +62,4 @@ docs/latex/figures/pipeline_amg/
 /changes_2026-06-08
 /changes_2026-06-08
 /changes_2026-06-08
+/moveToOtherPC

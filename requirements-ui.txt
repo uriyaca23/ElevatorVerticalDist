@@ -1,13 +1,34 @@
-# Runtime deps for the Streamlit boutique UI (ui/ + src/pipelines/streamlit/).
-# Keep in sync with ui/Dockerfile.
+# FULL project dependencies — everything needed to run the ENTIRE repo on
+# another machine: the pyramidElevatorDist logic PLUS the Streamlit UI, PDF
+# report export, the legacy data/video loaders, doc builders, and tests.
+#
+# For the package logic alone, use requirements.txt.
+
+# --- core numerics (also the package's own runtime deps) ---
 numpy>=1.24
 pandas>=2.0
 scipy>=1.10
 pydantic>=2.0
+matplotlib>=3.7
+
+# --- Streamlit boutique UI (src/pipelines/streamlit/) ---
 streamlit>=1.30
 plotly>=5.18
-requests>=2.31
-openpyxl>=3.1
-matplotlib>=3.7
+
+# --- PDF report export (src/pipelines/streamlit/step5_report.py) ---
 reportlab>=4.0
 python-bidi>=0.4
+
+# --- legacy experiment ingest + video/DTW sync (src/data/loader/legacy.py) ---
+openpyxl>=3.1
+scikit-learn>=1.3
+requests>=2.31
+opencv-python>=4.8
+moviepy>=1.0
+fastdtw>=0.3
+
+# --- Word report / doc builders (docs/, python-docx) ---
+python-docx>=1.0
+
+# --- tests ---
+pytest>=7.0
