@@ -1,0 +1,32 @@
+{
+  "alpha": 0.1,
+  "floor_multiplier": 1.645,
+  "extra_margin_m": 0.0,
+  "bin_min_count": 12,
+  "finite_sample_correction": false,
+  "n_calibration": 274,
+  "multiplier": 3.83850144625666,
+  "p95_score": 3.83850144625666,
+  "bin_edges": [
+    0.0,
+    3.0,
+    6.0,
+    12.0,
+    24.0,
+    60.0
+  ],
+  "bin_multipliers": [
+    2.6151200083309014,
+    4.303316134912716,
+    3.666765470236737,
+    4.893190786823183,
+    1.645
+  ],
+  "bin_counts": [
+    14,
+    103,
+    79,
+    60,
+    18
+  ]
+}

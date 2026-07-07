@@ -1,0 +1,12 @@
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Reconstruction & $n_{gt}$ & detect & miss & FP & F1* & IoU-F1 & recall & prec \\
+\midrule
+none & 627 & 498 & 116 & 43 & 0.847 & 0.726 & 0.794 & 0.907 \\
+Complementary & 627 & 540 & 67 & 10 & 0.902 & 0.742 & 0.861 & 0.947 \\
+\textbf{Mahony} & \textbf{627} & \textbf{550} & \textbf{67} & \textbf{8} & \textbf{0.921} & \textbf{0.774} & \textbf{0.877} & \textbf{0.970} \\
+Madgwick & 627 & 511 & 91 & 92 & 0.803 & 0.660 & 0.815 & 0.792 \\
+Valenti & 627 & 531 & 79 & 12 & 0.898 & 0.739 & 0.847 & 0.957 \\
+ESKF & 627 & 524 & 86 & 43 & 0.860 & 0.715 & 0.836 & 0.885 \\
+\bottomrule
+\end{tabular}
