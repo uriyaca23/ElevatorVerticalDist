@@ -14,6 +14,9 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from pyramidElevatorDist import (
+    LobeFit,
+    PredictionRow,
+    RideSegment,
     displaySeries,
     predictByParameters,
     predictSegment,
@@ -28,6 +31,7 @@ from .common import (
     SELECTED_COLOR,
     STEP_REPORT,
     STEP_SEGMENT,
+    TrapezoidShapeView,
     effective_trapezoid_params,
     find_matching_prediction,
     goto,
@@ -47,8 +51,10 @@ _TRAP_ALGO_ID = "trap"
 _ZUPT_ALGO_ID = "zupt"
 
 
-def _prediction_from_trap_params(params: dict | None) -> dict | None:
-    """Adapt the predictor's own trapezoid fit into a detector-shaped dict.
+def _prediction_from_trap_params(
+    params: dict | None,
+) -> TrapezoidShapeView | None:
+    """Adapt the predictor's own trapezoid fit into a detector-shaped view.
 
     The parameter card and override editor were originally seeded from the
     *detector's* matched prediction (the segmentation step). A hand-added
@@ -79,19 +85,18 @@ def _prediction_from_trap_params(params: dict | None) -> dict | None:
     if not (np.isfinite(W) and np.isfinite(f) and np.isfinite(A_used)):
         return None
     a1 = sign * abs(A_used)  # lobe-1 take-off peak; lobe 2 is the mirror
-    return {
-        "lobe1": {
-            "t_c": t_c1, "half_width_s": W, "frac_flat": f,
-            "a_peak": a1, "r2_local": float("nan"),
-        },
-        "lobe2": {
-            "t_c": t_c2, "half_width_s": W, "frac_flat": f,
-            "a_peak": -a1, "r2_local": float("nan"),
-        },
-        "joint_r2_mean": float(params.get("joint_r2", float("nan"))),
-        "heatmap_energy": float("nan"),
-        "_source": "predictor",
-    }
+    return TrapezoidShapeView(
+        lobe1=LobeFit(
+            t_c=t_c1, half_width_s=W, frac_flat=f,
+            a_peak=a1, r2_local=float("nan"),
+        ),
+        lobe2=LobeFit(
+            t_c=t_c2, half_width_s=W, frac_flat=f,
+            a_peak=-a1, r2_local=float("nan"),
+        ),
+        joint_r2_mean=float(params.get("joint_r2", float("nan"))),
+        heatmap_energy=float("nan"),
+    )
 
 
 def _segment_inside_valid_interval(
@@ -114,7 +119,7 @@ def _segment_inside_valid_interval(
 
 def _run_predictions(
     loaded: LoadedSignal, segments: pd.DataFrame,
-) -> dict[str, list[dict]]:
+) -> dict[str, list[PredictionRow]]:
     """Predict Δh for every segment via ``pyramidElevatorDist`` and return
     one row-list per algorithm, keyed by short id.
 
@@ -141,7 +146,7 @@ def _run_predictions(
     overrides: dict[int, dict] = (
         st.session_state.get("lobe_overrides") or {}
     )
-    rows_by_algo: dict[str, list[dict]] = {"trap": [], "zupt": []}
+    rows_by_algo: dict[str, list[PredictionRow]] = {"trap": [], "zupt": []}
     skipped = 0
     for pos, (_, row) in enumerate(segments.iterrows()):
         s = float(row["start_s"]); e = float(row["end_s"])
@@ -166,11 +171,10 @@ def _run_predictions(
                 resample=False, gyro=loaded.gyr, reconstruct=method,
             )
         for algo_id in rows_by_algo:
-            r = result.get(algo_id)
+            r = result.row(algo_id)
             if r is None:
                 continue
-            r = dict(r)
-            r["segment"] = pos
+            r = r.model_copy(update={"segment": pos})
             rows_by_algo[algo_id].append(r)
     if skipped:
         st.warning(
@@ -182,7 +186,8 @@ def _run_predictions(
 
 
 def _prediction_main_figure(
-    disp: pd.DataFrame, t0_ms: float, rows: list[dict], selected: int | None,
+    disp: pd.DataFrame, t0_ms: float, rows: list[PredictionRow],
+    selected: int | None,
     valid_intervals: list[tuple[int, int]] | None = None,
     has_gyro: bool = False, method: str = "none",
 ) -> go.Figure:
@@ -200,9 +205,9 @@ def _prediction_main_figure(
     if t.size:
         _add_gap_overlays(fig, valid_intervals, t0_ms, float(t[0]), float(t[-1]))
     for r in rows:
-        s = float(r["start_s"]); e = float(r["end_s"])
-        rt = r["type"]
-        is_sel = (selected is not None and int(r["segment"]) == selected)
+        s = float(r.start_s); e = float(r.end_s)
+        rt = r.type
+        is_sel = (selected is not None and r.segment == selected)
         base = RIDE_COLORS.get(rt, "#777")
         fig.add_vrect(
             x0=to_datetime(s, t0_ms), x1=to_datetime(e, t0_ms),
@@ -210,8 +215,8 @@ def _prediction_main_figure(
             opacity=0.35 if is_sel else 0.15,
             line_width=2 if is_sel else 0,
             line_color=SELECTED_COLOR if is_sel else base,
-            annotation_text=f"#{r['segment']} Δh={r['delta_height_m']:+.1f}m"
-                            if np.isfinite(r["delta_height_m"]) else f"#{r['segment']}",
+            annotation_text=f"#{r.segment} Δh={r.delta_height_m:+.1f}m"
+                            if np.isfinite(r.delta_height_m) else f"#{r.segment}",
             annotation_position="top left",
             annotation_font_color=SELECTED_COLOR if is_sel else base,
             annotation_font_size=10,
@@ -227,9 +232,9 @@ def _prediction_main_figure(
     # Zoom to the currently-selected segment so the ride is centred.
     # Double-click on the chart reverts to the full range.
     if selected is not None:
-        sel_row = next((r for r in rows if int(r["segment"]) == selected), None)
+        sel_row = next((r for r in rows if r.segment == selected), None)
         if sel_row is not None:
-            s_sel = float(sel_row["start_s"]); e_sel = float(sel_row["end_s"])
+            s_sel = float(sel_row.start_s); e_sel = float(sel_row.end_s)
             if np.isfinite(s_sel) and np.isfinite(e_sel) and e_sel > s_sel:
                 pad = max(5.0, 0.5 * (e_sel - s_sel))
                 x_lo = s_sel - pad; x_hi = e_sel + pad
@@ -248,7 +253,7 @@ def _prediction_main_figure(
 
 
 def _prediction_bar_figure(
-    rows_by_algo: dict[str, list[dict]], selected: int | None,
+    rows_by_algo: dict[str, list[PredictionRow]], selected: int | None,
     t0_ms: float | None,
 ) -> go.Figure:
     """Grouped bar chart — one bar per (segment, algorithm) pair.
@@ -262,9 +267,9 @@ def _prediction_bar_figure(
     fig = go.Figure()
     primary_id = ACCEL_ALGOS[0][0]
     rows_template = rows_by_algo.get(primary_id, [])
-    seg_ids = [int(r["segment"]) for r in rows_template]
-    starts_dt = [to_datetime(float(r["start_s"]), t0_ms) for r in rows_template]
-    ends_dt = [to_datetime(float(r["end_s"]), t0_ms) for r in rows_template]
+    seg_ids = [r.segment for r in rows_template]
+    starts_dt = [to_datetime(float(r.start_s), t0_ms) for r in rows_template]
+    ends_dt = [to_datetime(float(r.end_s), t0_ms) for r in rows_template]
     # Categorical x labels so plotly groups bars cleanly per segment;
     # the time stays first-class via customdata for the hover.
     xs = [dt.strftime("%H:%M:%S") for dt in starts_dt]
@@ -272,8 +277,8 @@ def _prediction_bar_figure(
         [seg_ids[i],
          starts_dt[i].strftime("%Y-%m-%d %H:%M:%S"),
          ends_dt[i].strftime("%H:%M:%S"),
-         float(rows_template[i]["start_s"]),
-         float(rows_template[i]["end_s"])]
+         float(rows_template[i].start_s),
+         float(rows_template[i].end_s)]
         for i in range(len(rows_template))
     ]
 
@@ -281,8 +286,8 @@ def _prediction_bar_figure(
         rows = rows_by_algo.get(algo_id, [])
         if not rows:
             continue
-        ys = [0.0 if not np.isfinite(r["delta_height_m"])
-              else float(r["delta_height_m"]) for r in rows]
+        ys = [0.0 if not np.isfinite(r.delta_height_m)
+              else float(r.delta_height_m) for r in rows]
         opacities = [
             1.0 if (selected is None or sid == selected) else 0.35
             for sid in seg_ids
@@ -445,7 +450,9 @@ def _zupt_position_figure(meta: dict) -> go.Figure | None:
     return fig
 
 
-def _build_comparison_table(rows_by_algo: dict[str, list[dict]]) -> pd.DataFrame:
+def _build_comparison_table(
+    rows_by_algo: dict[str, list[PredictionRow]],
+) -> pd.DataFrame:
     """Wide-format comparison table: one row per segment, one column
     block per algorithm. The shared columns (segment, type, start/end,
     duration) come from the primary algorithm's row list.
@@ -456,11 +463,11 @@ def _build_comparison_table(rows_by_algo: dict[str, list[dict]]) -> pd.DataFrame
     out: list[dict] = []
     for i, base in enumerate(primary):
         rec = {
-            "segment":    int(base["segment"]),
-            "type":       base["type"],
-            "start_s":    float(base["start_s"]),
-            "end_s":      float(base["end_s"]),
-            "duration_s": float(base["duration_s"]),
+            "segment":    base.segment,
+            "type":       base.type,
+            "start_s":    float(base.start_s),
+            "end_s":      float(base.end_s),
+            "duration_s": float(base.duration_s),
         }
         for algo_id, _label, _color in ACCEL_ALGOS:
             rows_a = rows_by_algo.get(algo_id, [])
@@ -472,11 +479,11 @@ def _build_comparison_table(rows_by_algo: dict[str, list[dict]]) -> pd.DataFrame
                 rec[f"{algo_id}_accepted"] = False
                 rec[f"{algo_id}_reject"]   = ""
             else:
-                rec[f"{algo_id}_dh"]      = r["delta_height_m"]
-                rec[f"{algo_id}_ci"]      = r["ci_half_width"]
-                rec[f"{algo_id}_quality"] = r["quality_score"]
-                rec[f"{algo_id}_accepted"] = bool(r["accepted"])
-                rec[f"{algo_id}_reject"]   = r.get("reject_reason", "")
+                rec[f"{algo_id}_dh"]      = r.delta_height_m
+                rec[f"{algo_id}_ci"]      = r.ci_half_width
+                rec[f"{algo_id}_quality"] = r.quality_score
+                rec[f"{algo_id}_accepted"] = bool(r.accepted)
+                rec[f"{algo_id}_reject"]   = r.reject_reason
         out.append(rec)
     return pd.DataFrame(out)
 
@@ -522,21 +529,20 @@ def _repredict_single_segment(
             resample=False, gyro=loaded.gyr, reconstruct=method,
         )
 
-    by_algo: dict[str, list[dict]] = (
+    by_algo: dict[str, list[PredictionRow]] = (
         st.session_state.get("prediction_rows_by_algo") or {}
     )
     for algo_id in ("trap", "zupt"):
-        r = result.get(algo_id)
+        r = result.row(algo_id)
         if r is None:
             continue
-        new_row = dict(r)
         # predictSegment numbered the single segment as ``segment=0``;
         # restore the canonical seg_pos so the row keys line up with the
         # rest of the cache.
-        new_row["segment"] = seg_pos
+        new_row = r.model_copy(update={"segment": seg_pos})
         existing = by_algo.get(algo_id, [])
         for i, r_existing in enumerate(existing):
-            if int(r_existing["segment"]) == seg_pos:
+            if r_existing.segment == seg_pos:
                 existing[i] = new_row
                 break
         else:
@@ -547,7 +553,7 @@ def _repredict_single_segment(
 
 
 def _render_override_controls(
-    sel: int, matching: dict | None,
+    sel: int, matching: RideSegment | TrapezoidShapeView | None,
     loaded: LoadedSignal, valid: pd.DataFrame,
 ) -> None:
     """Trapezoid-shape override editor for the predictor.
@@ -576,11 +582,11 @@ def _render_override_controls(
     cur = overrides.get(sel)
     cur_mode = (cur or {}).get("mode", "none")
 
-    l1 = matching.get("lobe1") or {}
+    l1 = matching.lobe1
     det = {
-        "W":     float(l1.get("half_width_s", 0.5)),
-        "f":     float(l1.get("frac_flat",    0.5)),
-        "abs_A": abs(float(l1.get("a_peak",   1.0))),
+        "W":     float(l1.half_width_s),
+        "f":     float(l1.frac_flat),
+        "abs_A": abs(float(l1.a_peak)),
     }
 
     st.markdown("**Override trapezoid shape (predictor)**")
@@ -737,17 +743,17 @@ def render() -> None:
             by_algo = _run_predictions(loaded, valid)
             st.session_state["prediction_rows_by_algo"] = by_algo
             st.session_state["prediction_rows"] = by_algo.get(PRIMARY_ALGO_ID, [])
-    rows_by_algo: dict[str, list[dict]] = (
+    rows_by_algo: dict[str, list[PredictionRow]] = (
         st.session_state["prediction_rows_by_algo"] or {}
     )
-    rows: list[dict] = st.session_state["prediction_rows"] or []
+    rows: list[PredictionRow] = st.session_state["prediction_rows"] or []
     if not rows:
         st.info("No predictable segments.")
         if st.button("← Back"):
             goto(STEP_SEGMENT)
         return
 
-    valid_segment_ids = [int(r["segment"]) for r in rows]
+    valid_segment_ids = [r.segment for r in rows]
     if st.session_state["predict_selected"] not in valid_segment_ids:
         st.session_state["predict_selected"] = valid_segment_ids[0]
     selected: int = int(st.session_state["predict_selected"])
@@ -773,7 +779,7 @@ def render() -> None:
     metric_cols = st.columns(len(ACCEL_ALGOS))
     for col, (algo_id, label, color) in zip(metric_cols, ACCEL_ALGOS):
         rows_a = rows_by_algo.get(algo_id, [])
-        sel = next((r for r in rows_a if int(r["segment"]) == selected), None)
+        sel = next((r for r in rows_a if r.segment == selected), None)
         with col:
             st.markdown(
                 f'<div style="font-weight:600;color:{color};'
@@ -789,25 +795,25 @@ def render() -> None:
             mc = st.columns(4)
             mc[0].metric(
                 "Δh",
-                f"{sel['delta_height_m']:+.2f} m"
-                if np.isfinite(sel['delta_height_m']) else "—",
+                f"{sel.delta_height_m:+.2f} m"
+                if np.isfinite(sel.delta_height_m) else "—",
             )
             mc[1].metric(
                 "±CI 90%",
-                f"{sel['ci_half_width']:.2f} m"
-                if np.isfinite(sel['ci_half_width']) else "—",
+                f"{sel.ci_half_width:.2f} m"
+                if np.isfinite(sel.ci_half_width) else "—",
             )
             mc[2].metric(
                 "Quality",
-                f"{sel['quality_score']:.1f}"
-                if np.isfinite(sel['quality_score']) else "—",
+                f"{sel.quality_score:.1f}"
+                if np.isfinite(sel.quality_score) else "—",
             )
             mc[3].metric(
-                "Accepted", "yes" if sel["accepted"] else "no",
+                "Accepted", "yes" if sel.accepted else "no",
             )
-            if sel.get("reject_reason"):
-                st.caption(f"reject_reason: `{sel['reject_reason']}`")
-            ov_meta = (sel.get("meta") or {}).get("trapezoid_override")
+            if sel.reject_reason:
+                st.caption(f"reject_reason: `{sel.reject_reason}`")
+            ov_meta = sel.meta.get("trapezoid_override")
             if ov_meta:
                 st.caption(
                     f":orange[**override active** — "
@@ -823,17 +829,17 @@ def render() -> None:
     trap_rows = rows_by_algo.get(_TRAP_ALGO_ID, [])
     zupt_rows = rows_by_algo.get(_ZUPT_ALGO_ID, [])
     trap_sel = next(
-        (r for r in trap_rows if int(r["segment"]) == selected), None,
+        (r for r in trap_rows if r.segment == selected), None,
     )
     zupt_sel = next(
-        (r for r in zupt_rows if int(r["segment"]) == selected), None,
+        (r for r in zupt_rows if r.segment == selected), None,
     )
     diag_cols = st.columns(2)
     with diag_cols[0]:
         if trap_sel:
             trap_fig = _trapezoid_fit_figure(
-                (trap_sel.get("meta") or {}),
-                start_s=float(trap_sel["start_s"]),
+                trap_sel.meta,
+                start_s=float(trap_sel.start_s),
                 t0_ms=t0_ms,
             )
         else:
@@ -847,7 +853,7 @@ def render() -> None:
             )
     with diag_cols[1]:
         zupt_fig = _zupt_position_figure(
-            (zupt_sel or {}).get("meta") or {}
+            zupt_sel.meta
         ) if zupt_sel else None
         if zupt_fig is None:
             st.caption("No ZUPT trajectory for this segment.")
@@ -859,12 +865,12 @@ def render() -> None:
 
     # Trapezoid template parameters for the selected segment (from the
     # segmentation-step fits — same as before).
-    sel_primary = next((r for r in rows if int(r["segment"]) == selected), None)
+    sel_primary = next((r for r in rows if r.segment == selected), None)
     if sel_primary is not None:
         predictions = st.session_state.get("predictions") or []
         matching = find_matching_prediction(
             predictions,
-            float(sel_primary["start_s"]), float(sel_primary["end_s"]),
+            float(sel_primary.start_s), float(sel_primary.end_s),
         )
         # Hand-added segments have no detector match, but the predictor
         # still fit its own trapezoid (shown in the chart above). Fall
@@ -874,7 +880,7 @@ def render() -> None:
         from_predictor = False
         if matching is None and trap_sel is not None:
             matching = _prediction_from_trap_params(
-                (trap_sel.get("meta") or {}).get("params")
+                trap_sel.meta.get("params")
             )
             from_predictor = matching is not None
         # Show the *effective* (override-applied) values so the card

@@ -55,7 +55,7 @@ def _seg_key(t_lo: float, t_hi: float, ride_type: str) -> tuple:
     return (round(float(t_lo), 3), round(float(t_hi), 3), str(ride_type).lower())
 
 
-def _shift_prediction(p: dict, shift_s: float) -> dict:
+def _shift_prediction(p: RideSegment, shift_s: float) -> RideSegment:
     """Return a copy of ``p`` with every time-domain field offset by
     ``shift_s`` seconds. Per-part calls return predictions in chunk-local
     seconds; downstream code wants canonical full-signal seconds, and we
@@ -65,16 +65,12 @@ def _shift_prediction(p: dict, shift_s: float) -> dict:
     parked at the start of the recording while the actual signal slice
     was minutes later).
     """
-    q = dict(p)
-    if "t_start_s" in p:
-        q["t_start_s"] = float(p["t_start_s"]) + shift_s
-    if "t_end_s" in p:
-        q["t_end_s"] = float(p["t_end_s"]) + shift_s
-    for lobe_key in ("lobe1", "lobe2"):
-        lobe = p.get(lobe_key)
-        if isinstance(lobe, dict) and "t_c" in lobe:
-            q[lobe_key] = {**lobe, "t_c": float(lobe["t_c"]) + shift_s}
-    return q
+    return p.model_copy(update={
+        "t_start_s": p.t_start_s + shift_s,
+        "t_end_s":   p.t_end_s + shift_s,
+        "lobe1": p.lobe1.model_copy(update={"t_c": p.lobe1.t_c + shift_s}),
+        "lobe2": p.lobe2.model_copy(update={"t_c": p.lobe2.t_c + shift_s}),
+    })
 
 
 def _run_detector(loaded: LoadedSignal) -> None:
@@ -103,7 +99,7 @@ def _run_detector(loaded: LoadedSignal) -> None:
         return
 
     canonical_t0_ms = float(loaded.acc["timestamp_ms"].iloc[0])
-    preds: list[dict] = []
+    preds: list[RideSegment] = []
     with st.spinner(
         f"Running trapezoid-template detector on {len(parts)} part(s)…"
     ):
@@ -129,10 +125,10 @@ def _run_detector(loaded: LoadedSignal) -> None:
 
     st.session_state["predictions"] = preds
     rows = [
-        {"type":     p["ride_type"],
-         "start_s":  round(float(p["t_start_s"]), 2),
-         "end_s":    round(float(p["t_end_s"]), 2),
-         "joint_r2": round(float(p.get("joint_r2_mean", 0.0)), 3)}
+        {"type":     p.ride_type,
+         "start_s":  round(float(p.t_start_s), 2),
+         "end_s":    round(float(p.t_end_s), 2),
+         "joint_r2": round(float(p.joint_r2_mean), 3)}
         for p in preds
     ]
     st.session_state["segments_df"] = pd.DataFrame(
@@ -288,7 +284,7 @@ def _heatmap_figure(heat, grid_w_s, grid_f, title: str,
     """Per-lobe R² heatmap over the (W, f) template grid.
 
     ``heat`` / ``grid_w_s`` / ``grid_f`` come straight from
-    ``findSegmentParameters(...)["heatmaps"]``.
+    ``findSegmentParameters(...).heatmaps``.
     """
     fig = go.Figure(go.Heatmap(
         z=np.asarray(heat), x=np.asarray(grid_f), y=np.asarray(grid_w_s),
@@ -309,17 +305,17 @@ def _heatmap_figure(heat, grid_w_s, grid_f, title: str,
 
 
 def _correlation_figure(
-    correlation: dict, t_lo: float, t_hi: float, t0_ms: float,
+    correlation: CorrelationCurves, t_lo: float, t_hi: float, t0_ms: float,
 ) -> go.Figure:
     """Per-sign best-R² correlation curves over a window.
 
     Plots only the two curves from
-    ``findSegmentParameters(...)["correlation"]`` — no threshold line and
+    ``findSegmentParameters(...).correlation`` — no threshold line and
     no peak-status dots (those needed detector internals).
     """
-    t = np.asarray(correlation["t"], dtype=float)
-    pos_r2 = np.asarray(correlation["best_pos_r2"], dtype=float)
-    neg_r2 = np.asarray(correlation["best_neg_r2"], dtype=float)
+    t = np.asarray(correlation.t, dtype=float)
+    pos_r2 = np.asarray(correlation.best_pos_r2, dtype=float)
+    neg_r2 = np.asarray(correlation.best_neg_r2, dtype=float)
     pos_plot = np.where(np.isfinite(pos_r2), pos_r2, np.nan)
     neg_plot = np.where(np.isfinite(neg_r2), neg_r2, np.nan)
     mask = (t >= t_lo) & (t <= t_hi)
@@ -473,30 +469,30 @@ def render() -> None:
                 "has no usable +peak / −peak pair."
             )
         else:
-            heat = params["heatmaps"]
-            grid_w_s = heat["grid_w_s"]; grid_f = heat["grid_f"]
-            W_star = float(params["lobe1"]["half_width_s"])
-            f_star = float(params["lobe1"]["frac_flat"])
-            tc1 = float(params["lobe1"]["t_c"])
-            tc2 = float(params["lobe2"]["t_c"])
+            heat = params.heatmaps
+            grid_w_s = heat.grid_w_s; grid_f = heat.grid_f
+            W_star = float(params.lobe1.half_width_s)
+            f_star = float(params.lobe1.frac_flat)
+            tc1 = float(params.lobe1.t_c)
+            tc2 = float(params.lobe2.t_c)
 
             h1, h2 = st.columns(2)
             with h1:
                 st.plotly_chart(
-                    _heatmap_figure(heat["lobe1"], grid_w_s, grid_f,
+                    _heatmap_figure(heat.lobe1, grid_w_s, grid_f,
                                     f"lobe1 @ t={tc1:.1f}s", W_star, f_star),
                     use_container_width=True, key=f"heat1_{sel}",
                 )
             with h2:
                 st.plotly_chart(
-                    _heatmap_figure(heat["lobe2"], grid_w_s, grid_f,
+                    _heatmap_figure(heat.lobe2, grid_w_s, grid_f,
                                     f"lobe2 @ t={tc2:.1f}s", W_star, f_star),
                     use_container_width=True, key=f"heat2_{sel}",
                 )
 
             st.markdown("**Correlation score**")
-            corr = params["correlation"]
-            t_arr = np.asarray(corr["t"], dtype=float)
+            corr = params.correlation
+            t_arr = np.asarray(corr.t, dtype=float)
             t_min = float(t_arr[0]); t_max = float(t_arr[-1])
             pad = max(3.0, 0.4 * (t_hi - t_lo))
             st.plotly_chart(

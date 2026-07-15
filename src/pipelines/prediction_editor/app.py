@@ -31,6 +31,10 @@ import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pyramidElevatorDist import DetailedRideSegment
 
 import matplotlib
 matplotlib.use("TkAgg")
@@ -89,7 +93,7 @@ class PredictionEditor(
         self._t0_ms: int = 0
         self._acc_t0_ms: float = 0.0
         self._baro_alt = None
-        self.predictions: list[dict] = []
+        self.predictions: list["DetailedRideSegment"] = []
 
         # --- Performance caches (avoid re-running the detector / reconstruction
         # on every click) ---

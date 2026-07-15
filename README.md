@@ -19,35 +19,87 @@ which stage, and where to look for deeper context.
 
 ```
 ElevatorVerticalDist/
-├── src/                      # all library code
+├── pyramidElevatorDist/      # THE pip-installable algorithm library (self-contained)
+├── src/                      # application layer: data I/O, pipelines/apps, evaluation
 ├── scripts/                  # one-shot runners (build reports, evaluations)
-├── docs/                     # LaTeX report + figures
-├── metadata/                 # experiment-level metadata artefacts
+├── tests/                    # pytest suite (tests/package/ = synthetic, package-only)
+├── docs/                     # LaTeX report + figures + reference PDFs
 ├── papers/                   # reference papers (elevator motion profiles, etc.)
-├── mistake/                  # scratch / dumps (ignore)
-├── requirements.txt
+├── pyproject.toml            # packaging config for pyramidElevatorDist (v0.2.0)
+├── requirements.txt          # package runtime deps (mirrors pyproject)
+├── requirements-ui.txt       # full dev environment (UIs, reports, tooling)
 ├── README.md                 # ← you are here
 └── CLAUDE.md                 # LLM onboarding notes (project idea + setup)
 ```
 
-Everything that ships is under `src/`. Scripts import from `src/`; nothing in
-the root is part of the library itself.
+**The dependency rule of this repo (one-way):** everything algorithmic lives
+in `pyramidElevatorDist/` and never imports `src.*`; everything in `src/`
+(data loading, UIs, evaluation harnesses, research tooling) imports FROM the
+package. `python -m build` produces a distributable wheel from the root
+`pyproject.toml`; `scripts/package_smoke_test.py` proves self-containment in
+a clean venv.
 
 ---
 
-## `src/` — the library
+## `pyramidElevatorDist/` — the algorithm library
+
+```
+pyramidElevatorDist/
+├── __init__.py            # public API (functions + typed models + schemas + exceptions)
+├── segmentor.py           # findSegments / findSegmentParameters / findSegmentsDetailed
+├── prediction/            # predictSegment / predictByParameters (wrapper = __init__.py)
+│   └── algorithms/        # Predictor dispatcher, configTypes + config.json,
+│                          #   barometer_only/, zupt_accel/ + calibration.json,
+│                          #   trapezoid_accel/ + calibration.json, common/types.py
+├── predection.py          # deprecated alias of .prediction (historical misspelling)
+├── signal.py              # reconstructedSignal / displaySeries / barometricAltitude
+├── _orchestration.py      # shared segment+predict core (ex src/pipelines/inprocess.py)
+├── exceptions.py          # PyramidElevatorDistError taxonomy (actionable messages)
+├── schemas.py             # FrameSchema + ACC/GYRO/PRS/… DataFrame schemas
+├── _validation.py         # wrapper-entry validation helpers
+├── types/                 # pydantic models: RideSegment, SegmentDetail, SegmentSpec,
+│                          #   TrapezoidParams, PredictionRow, PredictionResult, …
+├── utils/                 # pure numpy/scipy helpers (accelerometer_utils, conformal,
+│                          #   sensor_noise, signal_processing, trapezoid_template,
+│                          #   trapezoid_fast, resampling)
+├── physics/               # barometric.py (ISA inversion) + reconstruct_az/ (accel+gyro
+│                          #   world-frame a_z filters: Complementary, Mahony, Madgwick,
+│                          #   Valenti, ESKF)
+└── segmentation/
+    └── algorithms/        # Segmenter dispatcher, configTypes + config.json, metrics/,
+                           #   barometer_only/, template_match core (templates, matcher,
+                           #   check_grid_across_signal/, pure fit_elevator_parameters
+                           #   primitives)
+```
+
+The wrappers accept schema-validated DataFrames and return **typed pydantic
+models — never plain dicts**. Malformed input raises a specific
+`pyramidElevatorDist.exceptions` subclass whose message names the function,
+the parameter, the problem, and the fix. The per-algorithm `config.json` and
+committed conformal `calibration.json` files travel inside the wheel and are
+resolved via `Path(__file__).with_name(...)`.
+
+---
+
+## `src/` — the application layer
 
 ```
 src/
 ├── data/              # sensor I/O, ground truth, dataset cleanup, GT editor
-├── physics/           # pressure → altitude (ISA inversion)
-├── utils/             # reusable helpers (accelerometer, conformal, chip noise)
-├── segmentation/      # stage 1 — detect elevator rides in a session
-├── prediction/        # stage 2 — Δh per ride, with CI
-├── pipelines/         # end-to-end orchestration across both stages
+├── evaluation/
+│   ├── segmentation/  # stage-1 evaluation harness (ex src/segmentation/evaluate)
+│   └── prediction/    # stage-2 evaluation & reporting (ex src/prediction/evaluation)
+├── segmentation/      # research tooling only: offline template fitters,
+│   │                  #   label/plot scripts, labels/ data, run_detector.py CLI
+├── pipelines/         # end-to-end apps (streamlit wizard, Tk prediction editor,
+│                      #   boutique pipeline, pipeline-level evaluate/)
 ├── plotting/          # shared plotting helpers (experiment overviews)
 └── (archive)/         # old code kept for reference; not imported by anything
 ```
+
+The algorithm stages themselves (`Segmenter`, `Predictor`, `utils`,
+`physics`) live in the `pyramidElevatorDist` package — see the section
+above. `src/` imports them from the package.
 
 ### `src/data/` — sensor I/O and ground truth
 
@@ -66,12 +118,14 @@ src/
   docstrings; they're not part of the runtime path.
 - **`gt_editor.py`** — Tkinter GUI for hand-editing `gt.csv`.
 
-### `src/physics/`
+### `pyramidElevatorDist/physics/`
 
 - **`barometric.py`** — ISA pressure → altitude inversion (`pressure_to_altitude`).
   Used by the barometer-only segmenter and predictor.
+- **`reconstruct_az/`** — accel+gyro orientation-fusion filters producing the
+  world-frame vertical acceleration (`reconstruct_az`, `RECONSTRUCT_CHOICES`).
 
-### `src/utils/` — reusable, stage-agnostic helpers
+### `pyramidElevatorDist/utils/` — reusable, stage-agnostic helpers
 
 Plain-numpy utilities that segmentation, prediction, and dataset-cleanup
 share. If it has no dependency on either stage's data types, it lives here.
@@ -88,80 +142,84 @@ share. If it has no dependency on either stage's data types, it lives here.
   theoretical σ into a 90 %-coverage CI.
 - **`sensor_noise.py`** — phone-model → accelerometer-chip noise σ
   (`get_phone_accel_noise_sigma`, `resolve_phone_to_chip`).
+- **`trapezoid_template.py` / `trapezoid_fast.py`** — trapezoid kernel +
+  matched-filter primitives (single-template and FFT-batched bank).
+- **`resampling.py`** — gap-aware 50 Hz resampler
+  (`resample_sensor_with_gaps`; `src.data.loader` re-exports it).
 
-### `src/segmentation/` — stage 1
+### Segmentation — stage 1
 
 > See `src/segmentation/README.md` for the physics of elevator motion and
 > why we use a trapezoid pulse-pair matched filter.
 
+Algorithm core — `pyramidElevatorDist/segmentation/algorithms/`:
+
 ```
-segmentation/
-├── algorithms/
-│   ├── configTypes.py        # Pydantic configs: SEGMENT_ALGORITHM_CONFIG,
-│   │                         # SegmentAlgorithm enum, PressureFilterConfig,
-│   │                         # TemplateMatchConfig
-│   ├── config.json           # per-algorithm hyperparameters loaded by configTypes
-│   ├── segmenter.py          # public Segmenter class + .detect(data)
-│   │                         # dispatcher
-│   ├── metrics/              # IntervalPredictionMetrics, SegmentationMetrics
-│   ├── barometer_only/
-│   │   └── height_segmentation.py    # HeightSegmenter (pressure-filter)
-│   └── accelerometer_only/
-│       └── template_match/           # the trapezoid pulse-pair detector
-│           ├── templates.py          # per-experimenter template fit
-│           ├── matcher.py            # sliding-NCC detector (legacy entry point)
-│           ├── fit_elevator_parameters/  # offline template-parameter fitter
-│           └── check_grid_across_signal/
-│               ├── detect.py         # stage 1–4: R² + |A| peak-pick,
-│               │                     # same-sign NMS — THIS is the active
-│               │                     # detector. Accepts optional
-│               │                     # phone_model for chip-spec-aware
-│               │                     # amplitude floors.
-│               └── pair_filter.py    # stage 5–6: shared-shape joint fit,
-│                                     # greedy pair resolver
-│               # (Tk/matplotlib diagnostic UI moved to
-│               #  src/pipelines/prediction_editor/)
-└── evaluate/                 # generic, algorithm-agnostic evaluation harness
-    ├── evaluator.py          # sweep_hyperparameters + evaluate_algorithm
-    ├── plots.py              # CDFs (IoU, start/end residual, duration err)
-    └── __main__.py           # python -m src.segmentation.evaluate ...
+segmentation/algorithms/
+├── configTypes.py        # Pydantic configs: SEGMENT_ALGORITHM_CONFIG,
+│                         # SegmentAlgorithm enum, PressureFilterConfig,
+│                         # TemplateMatchConfig
+├── config.json           # per-algorithm hyperparameters loaded by configTypes
+├── segmenter.py          # public Segmenter class + .detect(data) dispatcher
+├── metrics/              # IntervalPredictionMetrics, SegmentationMetrics
+├── barometer_only/
+│   └── height_segmentation.py    # HeightSegmenter (pressure-filter)
+└── accelerometer_only/
+    └── template_match/           # the trapezoid pulse-pair detector
+        ├── templates.py          # per-experimenter template fit
+        ├── matcher.py            # sliding-NCC detector (legacy entry point)
+        ├── fit_elevator_parameters/common.py  # pure fit primitives
+        └── check_grid_across_signal/
+            ├── detect.py         # stage 1–4: R² + |A| peak-pick,
+            │                     # same-sign NMS — THIS is the active
+            │                     # detector. Accepts optional
+            │                     # phone_model for chip-spec-aware
+            │                     # amplitude floors.
+            └── pair_filter.py    # stage 5–6: shared-shape joint fit,
+                                  # greedy pair resolver
 ```
+
+Application side: `src/evaluation/segmentation/` (evaluator, plots,
+`python -m src.evaluation.segmentation ...` CLI) and `src/segmentation/`
+(offline template-parameter fitters, label building/plot scripts, the
+`labels/` data tree, and `run_detector.py` — the detector sanity CLI).
 
 **Public API**: `Segmenter(config).detect(data)` → DataFrame with
-`start_ci`, `end_ci`, `duration`, `type`, `probability_ci`. The `data`
-schema depends on the algorithm (see the docstring on `Segmenter.detect`).
+`start_ci`, `end_ci`, `duration`, `type`, `probability_ci` (exit-validated
+against `SEGMENTS_TABLE_SCHEMA`). The `data` schema depends on the
+algorithm (see the docstring on `Segmenter.detect`).
 
-### `src/prediction/` — stage 2
+### Prediction — stage 2
+
+Algorithm core — `pyramidElevatorDist/prediction/algorithms/`:
 
 ```
-prediction/
-├── algorithms/
-│   ├── configTypes.py        # PREDICT_ALGORITHM_CONFIG, PredictAlgorithm,
-│   │                         # BarometerHeightDiffConfig, ZuptAccelConfig,
-│   │                         # TrapezoidAccelConfig
-│   ├── config.json           # per-algorithm hyperparameters
-│   ├── predictor.py          # public Predictor class + .predict(data, pre,
-│   │                         # post, phone_model) dispatcher
-│   ├── common/
-│   │   └── types.py          # PredictionOutput, CalibrationSample
-│   ├── barometer_only/
-│   │   └── height_difference.py
-│   └── accelerometer_only/
-│       ├── zupt_accel/
-│       │   ├── estimator.py     # ZuptAccelEstimator
-│       │   ├── quality.py       # quality filter (gravity drift, peaks, ...)
-│       │   └── theoretical_ci.py  # σ_pos = σ_a · dt² · √(N³/12) noise model
-│       └── trapezoid_accel/
-│           ├── estimator.py     # TrapezoidAccelEstimator
-│           ├── pulse_pair.py    # shared-shape trapezoid pulse-pair fitter
-│           └── quality.py
-└── evaluation/               # prediction-specific evaluation & reporting
-    ├── runner.py             # per-experiment inference loop
-    ├── dataset.py            # iterator over GT-intervals + sensors
-    ├── metrics.py            # coverage, CI-width, abs-error statistics
-    ├── figures.py            # reliability, coverage, error scatter
-    └── report.py             # assembles a full evaluation report
+prediction/algorithms/
+├── configTypes.py        # PREDICT_ALGORITHM_CONFIG, PredictAlgorithm,
+│                         # BarometerHeightDiffConfig, ZuptAccelConfig,
+│                         # TrapezoidAccelConfig
+├── config.json           # per-algorithm hyperparameters
+├── predictor.py          # public Predictor class + .predict(data, pre,
+│                         # post, phone_model) dispatcher
+├── common/
+│   └── types.py          # PredictionOutput, CalibrationSample
+├── barometer_only/
+│   └── height_difference.py
+└── accelerometer_only/
+    ├── zupt_accel/
+    │   ├── estimator.py     # ZuptAccelEstimator (+ calibration.json)
+    │   ├── quality.py       # quality filter (gravity drift, peaks, ...)
+    │   └── theoretical_ci.py  # σ_pos = σ_a · dt² · √(N³/12) noise model
+    └── trapezoid_accel/
+        ├── estimator.py     # TrapezoidAccelEstimator (+ calibration.json)
+        ├── pulse_pair.py    # shared-shape trapezoid pulse-pair fitter
+        └── quality.py
 ```
+
+Application side: `src/evaluation/prediction/` — per-experiment inference
+loop (`runner.py`), GT dataset iterator (`dataset.py`), metrics, figures,
+report assembly, and the `python -m src.evaluation.prediction.evaluateOnData`
+CLI (with `--calibrate` to refresh the committed conformal calibrations).
 
 **Public API**: `Predictor(config).predict(data, pre, post, phone_model)` →
 `PredictionOutput` with `height_diff`, `ci_half_width`, `theoretical_sigma`,
@@ -194,10 +252,13 @@ no longer exist.
 
 ## `scripts/` — top-level runners
 
-- **`run_prediction_evaluation.py`** — run the full prediction evaluation
-  (trains conformal, runs on test split, writes report).
+- **`package_smoke_test.py`** — build the wheel and prove self-containment
+  in a fresh venv (all entry points on synthetic data, no `src` leak).
 - **`build_prediction_report_assets.py`** — build figures for the LaTeX
   report under `docs/latex/`.
+
+(The full prediction evaluation is
+`python -m src.evaluation.prediction.evaluateOnData`.)
 
 ---
 
@@ -216,8 +277,8 @@ of `config.json`.
 ### Dispatcher pattern
 
 Both stages have a single public dispatcher class:
-- `segmentation/algorithms/segmenter.py` → `Segmenter.detect(data)`
-- `prediction/algorithms/predictor.py` → `Predictor.predict(data, ...)`
+- `pyramidElevatorDist/segmentation/algorithms/segmenter.py` → `Segmenter.detect(data)`
+- `pyramidElevatorDist/prediction/algorithms/predictor.py` → `Predictor.predict(data, ...)`
 
 The dispatcher reads its config's `algorithm` enum and builds the right
 algorithm implementation. Callers never instantiate algorithm classes
@@ -229,7 +290,13 @@ Inside each stage, algorithms are grouped by the sensor modality they
 depend on: `barometer_only/` for pressure-based algorithms,
 `accelerometer_only/` for accelerometer-based ones. Anything that *isn't*
 specific to one algorithm — signal processing, gravity math, conformal
-calibration, phone-chip noise — lives in `src/utils/`.
+calibration, phone-chip noise — lives in `pyramidElevatorDist/utils/`.
+
+### One-way imports
+
+`pyramidElevatorDist` never imports `src.*` — enforced by the grep gate in
+the verification checklist and by `scripts/package_smoke_test.py`. Code in
+`src/` freely imports the package.
 
 ### Outputs are CI-valued
 
@@ -245,13 +312,17 @@ non-empty.
 
 | Need to… | Use |
 |---|---|
+| Detect rides / predict Δh (public API) | `pyramidElevatorDist.findSegments(acc)` / `predictSegment(acc, segment)` |
 | Load an experiment | `src.data.loader.getExperimentData(name)` |
 | List experiments | `src.data.loader.list_experiments(kind='train'/'test'/'all')` |
-| Segment a session | `src.segmentation.algorithms.Segmenter(config).detect(data)` |
-| Predict Δh of a ride | `src.prediction.algorithms.Predictor(config).predict(data, pre, post, phone_model)` |
-| Sweep segmentation hyperparams | `src.segmentation.evaluate.sweep_hyperparameters(...)` |
-| Evaluate a segmentation config | `src.segmentation.evaluate.evaluate_algorithm(...)` |
+| Segment a session (dispatcher) | `pyramidElevatorDist.segmentation.algorithms.Segmenter(config).detect(data)` |
+| Predict Δh of a ride (dispatcher) | `pyramidElevatorDist.prediction.algorithms.Predictor(config).predict(data, pre, post, phone_model)` |
+| Sweep segmentation hyperparams | `src.evaluation.segmentation.sweep_hyperparameters(...)` |
+| Evaluate a segmentation config | `src.evaluation.segmentation.evaluate_algorithm(...)` |
+| Run the prediction evaluation | `python -m src.evaluation.prediction.evaluateOnData` |
+| Run the detector sanity CLI | `python -m src.segmentation.run_detector --only <exp>` |
 | Run the end-to-end pipeline | `src.pipelines.boutique_pipeline` |
+| Build + verify the wheel | `python scripts/package_smoke_test.py` |
 
 ---
 
@@ -261,11 +332,11 @@ non-empty.
   and the full segmentation problem statement.
 - `src/segmentation/algorithms/accelerometer_only/template_match/README.md`
   — the template-match detector internals.
-- `src/segmentation/algorithms/accelerometer_only/template_match/check_grid_across_signal/README.md`
+- `pyramidElevatorDist/segmentation/algorithms/accelerometer_only/template_match/check_grid_across_signal/README.md`
   — the active detector's state-dict schema.
 - `src/data/README.md` — data schemas, folder layout, loader conventions.
 - `src/data/dataset_cleanup/README.md` — dataset curation workflow.
-- `src/segmentation/algorithms/metrics/METRICS.md` — metric definitions.
+- `pyramidElevatorDist/segmentation/algorithms/metrics/METRICS.md` — metric definitions.
 
 ---
 
@@ -293,7 +364,7 @@ For every segment we run both of
 and pick between them on joint R² with an Occam tiebreak in the
 overlap regime (`Δt_c / 2W < 1.15`). The joined regime has a
 constraint-aware height formula and σ — see
-[`trapezoid_accel/pulse_pair.py`](src/prediction/algorithms/accelerometer_only/trapezoid_accel/pulse_pair.py):
+[`trapezoid_accel/pulse_pair.py`](pyramidElevatorDist/prediction/algorithms/accelerometer_only/trapezoid_accel/pulse_pair.py):
 
 ```
 Δh = 2·s·A·W²·(1+f)

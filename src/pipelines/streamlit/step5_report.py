@@ -30,7 +30,12 @@ import pandas as pd
 import streamlit as st
 
 from pyramidElevatorDist import (
-    displaySeries, findSegmentParameters, reconstructedSignal,
+    CorrelationCurves,
+    PredictionRow,
+    RideSegment,
+    displaySeries,
+    findSegmentParameters,
+    reconstructedSignal,
 )
 
 from .common import (
@@ -318,13 +323,14 @@ def _build_main_signal_png(disp: pd.DataFrame, t0_ms: float,
 
 
 def _build_correlation_png(
-    correlation: dict | None, t_lo: float, t_hi: float, t0_ms: float,
+    correlation: CorrelationCurves | None,
+    t_lo: float, t_hi: float, t0_ms: float,
 ) -> bytes:
     """Correlation panel ±30 s around the segment — the two per-sign best-R²
     curves only (no threshold line, no peak-status dots; those needed detector
-    internals). ``correlation`` is ``findSegmentParameters(...)["correlation"]``.
+    internals). ``correlation`` is ``findSegmentParameters(...).correlation``.
     """
-    if not correlation:
+    if correlation is None:
         return b""
     try:
         import matplotlib
@@ -334,11 +340,11 @@ def _build_correlation_png(
     except Exception:
         return b""
 
-    t = np.asarray(correlation["t"], dtype=float)
+    t = np.asarray(correlation.t, dtype=float)
     if t.size == 0:
         return b""
-    pos_r2 = np.asarray(correlation["best_pos_r2"], dtype=float)
-    neg_r2 = np.asarray(correlation["best_neg_r2"], dtype=float)
+    pos_r2 = np.asarray(correlation.best_pos_r2, dtype=float)
+    neg_r2 = np.asarray(correlation.best_neg_r2, dtype=float)
     pos_plot = np.where(np.isfinite(pos_r2), pos_r2, np.nan)
     neg_plot = np.where(np.isfinite(neg_r2), neg_r2, np.nan)
 
@@ -669,7 +675,7 @@ def _summary_tiles(n_segments: int, n_accepted: int, total_dh: float,
     return outer
 
 
-def _overview_table(rows: list[dict], font: str, bold_font: str,
+def _overview_table(rows: list[PredictionRow], font: str, bold_font: str,
                     width_cm: float):
     from reportlab.lib import colors as rl_colors
     from reportlab.lib.units import cm
@@ -685,24 +691,24 @@ def _overview_table(rows: list[dict], font: str, bold_font: str,
     type_col_styles: list[tuple] = []
     accept_col_styles: list[tuple] = []
     for ridx, r in enumerate(rows, start=1):
-        yn = HEB["yes"] if r["accepted"] else HEB["no"]
-        rt_heb = HEB["up"] if r["type"] == "up" else HEB["down"]
+        yn = HEB["yes"] if r.accepted else HEB["no"]
+        rt_heb = HEB["up"] if r.type == "up" else HEB["down"]
         data.append([
             _rtl(yn),
-            f"{r['quality_score']:.1f}" if np.isfinite(r['quality_score']) else "—",
-            f"{r['ci_half_width']:.2f}" if np.isfinite(r['ci_half_width']) else "—",
-            f"{r['delta_height_m']:+.2f}" if np.isfinite(r['delta_height_m']) else "—",
-            f"{r['duration_s']:.1f}",
-            f"{r['end_s']:.1f}",
-            f"{r['start_s']:.1f}",
+            f"{r.quality_score:.1f}" if np.isfinite(r.quality_score) else "—",
+            f"{r.ci_half_width:.2f}" if np.isfinite(r.ci_half_width) else "—",
+            f"{r.delta_height_m:+.2f}" if np.isfinite(r.delta_height_m) else "—",
+            f"{r.duration_s:.1f}",
+            f"{r.end_s:.1f}",
+            f"{r.start_s:.1f}",
             _rtl(rt_heb),
-            str(r["segment"]),
+            str(r.segment),
         ])
         # Per-row colouring for the type & accepted cells.
-        type_color = _UP_COLOR if r["type"] == "up" else _DOWN_COLOR
+        type_color = _UP_COLOR if r.type == "up" else _DOWN_COLOR
         type_col_styles.append(("TEXTCOLOR", (7, ridx), (7, ridx),
                                 rl_colors.HexColor(type_color)))
-        accept_color = _OK_COLOR if r["accepted"] else _WARN_COLOR
+        accept_color = _OK_COLOR if r.accepted else _WARN_COLOR
         accept_col_styles.append(("TEXTCOLOR", (0, ridx), (0, ridx),
                                   rl_colors.HexColor(accept_color)))
 
@@ -744,7 +750,8 @@ def _overview_table(rows: list[dict], font: str, bold_font: str,
     return tbl
 
 
-def _segment_header(r: dict, font: str, bold_font: str, width_cm: float):
+def _segment_header(r: PredictionRow, font: str, bold_font: str,
+                    width_cm: float):
     """Coloured header strip for a per-segment page.
 
     Right-most cell is a type pill (עלייה / ירידה in matching colour).
@@ -755,14 +762,14 @@ def _segment_header(r: dict, font: str, bold_font: str, width_cm: float):
     from reportlab.lib.units import cm
     from reportlab.platypus import Paragraph, Table, TableStyle
 
-    rt_heb = HEB["up"] if r["type"] == "up" else HEB["down"]
-    type_color = _UP_COLOR if r["type"] == "up" else _DOWN_COLOR
+    rt_heb = HEB["up"] if r.type == "up" else HEB["down"]
+    type_color = _UP_COLOR if r.type == "up" else _DOWN_COLOR
 
     title_text = (
-        f"{HEB['segment_page']} #{r['segment']}"
+        f"{HEB['segment_page']} #{r.segment}"
     )
-    sub_text = f"{r['start_s']:.1f}–{r['end_s']:.1f} ש'   ·   "
-    sub_text += f"{HEB['duration']}: {r['duration_s']:.1f} ש'"
+    sub_text = f"{r.start_s:.1f}–{r.end_s:.1f} ש'   ·   "
+    sub_text += f"{HEB['duration']}: {r.duration_s:.1f} ש'"
 
     title_p = Paragraph(
         _rtl(title_text),
@@ -819,7 +826,7 @@ def _segment_header(r: dict, font: str, bold_font: str, width_cm: float):
     return outer
 
 
-def _segment_metric_cards(r: dict, font: str, bold_font: str,
+def _segment_metric_cards(r: PredictionRow, font: str, bold_font: str,
                           width_cm: float):
     """Four metric tiles: Δh, CI half-width, quality, accepted."""
     from reportlab.lib import colors as rl_colors
@@ -828,10 +835,10 @@ def _segment_metric_cards(r: dict, font: str, bold_font: str,
     from reportlab.lib.units import cm
     from reportlab.platypus import Paragraph, Table, TableStyle
 
-    dh = r["delta_height_m"]
-    ci = r["ci_half_width"]
-    q = r["quality_score"]
-    accepted = bool(r["accepted"])
+    dh = r.delta_height_m
+    ci = r.ci_half_width
+    q = r.quality_score
+    accepted = bool(r.accepted)
 
     dh_str = f"{dh:+.2f} מ'" if np.isfinite(dh) else "—"
     ci_str = f"±{ci:.2f} מ'" if np.isfinite(ci) else "—"
@@ -888,8 +895,9 @@ def _segment_metric_cards(r: dict, font: str, bold_font: str,
     return outer
 
 
-def _per_algo_metrics_table(rows_for_seg: list[tuple[str, dict | None]],
-                            font: str, bold_font: str, width_cm: float):
+def _per_algo_metrics_table(
+        rows_for_seg: list[tuple[str, PredictionRow | None]],
+        font: str, bold_font: str, width_cm: float):
     """Per-algorithm Δh / CI / quality / accepted table for one segment.
 
     Argument is a list of ``(label, row | None)`` pairs in display order
@@ -910,10 +918,10 @@ def _per_algo_metrics_table(rows_for_seg: list[tuple[str, dict | None]],
                 "—", "—", "—", "—", _rtl(label),
             ])
             continue
-        dh = r.get("delta_height_m", float("nan"))
-        ci = r.get("ci_half_width", float("nan"))
-        q = r.get("quality_score", float("nan"))
-        accepted = bool(r.get("accepted"))
+        dh = r.delta_height_m
+        ci = r.ci_half_width
+        q = r.quality_score
+        accepted = bool(r.accepted)
         yn = HEB["yes"] if accepted else HEB["no"]
         data.append([
             _rtl(yn),
@@ -1007,11 +1015,11 @@ def _build_pdf(
     loaded: LoadedSignal,
     disp: pd.DataFrame,
     t0_ms: float,
-    correlation: dict | None,
-    predictions: list[dict],
+    correlation: CorrelationCurves | None,
+    predictions: list[RideSegment],
     segments: pd.DataFrame,
-    rows: list[dict],
-    rows_by_algo: dict[str, list[dict]] | None = None,
+    rows: list[PredictionRow],
+    rows_by_algo: dict[str, list[PredictionRow]] | None = None,
     method: str = "none",
 ) -> bytes:
     from reportlab.lib import colors as rl_colors
@@ -1072,7 +1080,10 @@ def _build_pdf(
     story.append(_metadata_table(meta_items, font, bold_font, content_w_cm))
 
     # Summary KPIs.
-    df = pd.DataFrame(rows) if rows else pd.DataFrame()
+    df = (
+        pd.DataFrame([r.model_dump(exclude={"meta"}) for r in rows])
+        if rows else pd.DataFrame()
+    )
     total_dh = float(df["delta_height_m"].dropna().sum()) if not df.empty else 0.0
     n_accepted = int(df["accepted"].sum()) if not df.empty else 0
 
@@ -1105,24 +1116,24 @@ def _build_pdf(
     trap_rows = rows_by_algo.get("trap", [])
     zupt_rows = rows_by_algo.get("zupt", [])
 
-    def _row_for(rs: list[dict], seg_id: int) -> dict | None:
+    def _row_for(rs: list[PredictionRow], seg_id: int) -> PredictionRow | None:
         return next(
-            (x for x in rs if int(x.get("segment", -1)) == seg_id), None,
+            (x for x in rs if x.segment == seg_id), None,
         )
 
     for r in rows:
-        seg_id = int(r["segment"])
+        seg_id = r.segment
         trap_r = _row_for(trap_rows, seg_id) or r
         zupt_r = _row_for(zupt_rows, seg_id)
 
         story.append(PageBreak())
         story.append(_segment_header(r, font, bold_font, content_w_cm))
 
-        if r.get("reject_reason"):
+        if r.reject_reason:
             story.append(Spacer(1, 0.25 * cm))
             story.append(Paragraph(
                 _rtl(f"<b>{_esc(HEB['reject_reason'])}:</b> "
-                     f"{_esc(r['reject_reason'])}"),
+                     f"{_esc(r.reject_reason)}"),
                 ParagraphStyle(
                     "Reject", parent=body_style,
                     textColor=rl_colors.HexColor(_WARN_COLOR),
@@ -1133,7 +1144,7 @@ def _build_pdf(
         # Per-algorithm metrics — Δh / CI / quality / accepted side-by-side
         # so the report shows both estimators' verdicts, not just the
         # primary's.
-        per_algo_pairs: list[tuple[str, dict | None]] = [
+        per_algo_pairs: list[tuple[str, PredictionRow | None]] = [
             (HEB["trap_label"], trap_r),
             (HEB["zupt_label"], zupt_r),
         ]
@@ -1145,7 +1156,7 @@ def _build_pdf(
 
         story.append(Spacer(1, 0.4 * cm))
         corr_png = _build_correlation_png(
-            correlation, float(r["start_s"]), float(r["end_s"]), t0_ms,
+            correlation, float(r.start_s), float(r.end_s), t0_ms,
         )
         if corr_png:
             story.append(_section_heading(HEB["corr_heading"], bold_font))
@@ -1157,7 +1168,7 @@ def _build_pdf(
         # editor.py exposes in its Prediction tab. Both come straight from
         # the prediction stage's `meta`, so they show what each estimator
         # actually fitted, not the segmentation-stage match.
-        trap_meta = (trap_r or {}).get("meta") or {}
+        trap_meta = trap_r.meta if trap_r else {}
         trap_fit_png = _build_trap_fit_png(trap_meta)
         if trap_fit_png:
             story.append(Spacer(1, 0.3 * cm))
@@ -1176,7 +1187,7 @@ def _build_pdf(
                 _rtl(_esc(HEB["no_trap_fit"])), body_style,
             ))
 
-        zupt_meta = (zupt_r or {}).get("meta") or {}
+        zupt_meta = zupt_r.meta if zupt_r else {}
         zupt_pos_png = _build_zupt_pos_png(zupt_meta)
         if zupt_pos_png:
             story.append(Spacer(1, 0.25 * cm))
@@ -1248,17 +1259,19 @@ def _signatures_filename(loaded: LoadedSignal) -> str:
     return f"{stem}_{stamp}.csv"
 
 
-def _row_for_segment(rs: list[dict], seg_id: int) -> dict | None:
+def _row_for_segment(
+    rs: list[PredictionRow], seg_id: int,
+) -> PredictionRow | None:
     return next(
-        (x for x in rs if int(x.get("segment", -1)) == seg_id), None,
+        (x for x in rs if x.segment == seg_id), None,
     )
 
 
 def _build_signatures_csv(
     loaded: LoadedSignal,
     segments: pd.DataFrame,
-    predictions: list[dict],
-    rows_by_algo: dict[str, list[dict]],
+    predictions: list[RideSegment],
+    rows_by_algo: dict[str, list[PredictionRow]],
     overrides: dict[int, dict],
 ) -> bytes:
     """One row per segment, wide-format, with the session metadata
@@ -1298,20 +1311,22 @@ def _build_signatures_csv(
             continue
         seg_type = str(row.get("type", "")).lower()
         matching = find_matching_prediction(predictions, t_lo, t_hi)
-        l1 = (matching or {}).get("lobe1") or {}
-        l2 = (matching or {}).get("lobe2") or {}
+        l1 = matching.lobe1 if matching else None
+        l2 = matching.lobe2 if matching else None
 
         ov = overrides.get(pos) if overrides else None
-        trap_r = _row_for_segment(trap_rows, pos) or {}
-        zupt_r = _row_for_segment(zupt_rows, pos) or {}
+        trap_r = _row_for_segment(trap_rows, pos)
+        zupt_r = _row_for_segment(zupt_rows, pos)
         # Joint-fit shape comes from the predictor's actual params dict
         # so it reflects the override when one is active. Falls back to
         # the detector's lobe1 (the shared-shape detector matches lobe1
         # === lobe2 by construction).
-        trap_params = (trap_r.get("meta") or {}).get("params") or {}
-        joint_W = trap_params.get("W", l1.get("half_width_s"))
-        joint_f = trap_params.get("f", l1.get("frac_flat"))
-        joint_A_used = trap_params.get("A_used", abs(l1.get("a_peak", float("nan"))))
+        trap_params = (trap_r.meta if trap_r else {}).get("params") or {}
+        joint_W = trap_params.get("W", l1.half_width_s if l1 else None)
+        joint_f = trap_params.get("f", l1.frac_flat if l1 else None)
+        joint_A_used = trap_params.get(
+            "A_used", abs(l1.a_peak) if l1 else float("nan"),
+        )
 
         row_dict = {
             **base_metadata,
@@ -1321,37 +1336,37 @@ def _build_signatures_csv(
             "segment_end_s":        t_hi,
             "segment_duration_s":   t_hi - t_lo,
             # Detector's per-lobe fit (what the segmenter found).
-            "lobe1_t_c":            l1.get("t_c", ""),
-            "lobe1_W":              l1.get("half_width_s", ""),
-            "lobe1_f":              l1.get("frac_flat", ""),
-            "lobe1_A":              l1.get("a_peak", ""),
-            "lobe1_r2":             l1.get("r2_local", ""),
-            "lobe2_t_c":            l2.get("t_c", ""),
-            "lobe2_W":              l2.get("half_width_s", ""),
-            "lobe2_f":              l2.get("frac_flat", ""),
-            "lobe2_A":              l2.get("a_peak", ""),
-            "lobe2_r2":             l2.get("r2_local", ""),
+            "lobe1_t_c":            l1.t_c if l1 else "",
+            "lobe1_W":              l1.half_width_s if l1 else "",
+            "lobe1_f":              l1.frac_flat if l1 else "",
+            "lobe1_A":              l1.a_peak if l1 else "",
+            "lobe1_r2":             l1.r2_local if l1 else "",
+            "lobe2_t_c":            l2.t_c if l2 else "",
+            "lobe2_W":              l2.half_width_s if l2 else "",
+            "lobe2_f":              l2.frac_flat if l2 else "",
+            "lobe2_A":              l2.a_peak if l2 else "",
+            "lobe2_r2":             l2.r2_local if l2 else "",
             # Joint shape the predictor actually used (reflects override).
             "joint_W":              joint_W if joint_W is not None else "",
             "joint_f":              joint_f if joint_f is not None else "",
             "joint_abs_A":          joint_A_used if joint_A_used is not None else "",
-            "joint_r2":             (matching or {}).get("joint_r2_mean", ""),
+            "joint_r2":             matching.joint_r2_mean if matching else "",
             # Override status (empty if no override was applied).
             "override_active":      bool(ov),
             "override_W":           (ov or {}).get("W", ""),
             "override_f":           (ov or {}).get("f", ""),
             "override_abs_A":       (ov or {}).get("abs_A", ""),
             # Predictor outputs per algorithm.
-            "trap_delta_height_m":  trap_r.get("delta_height_m", ""),
-            "trap_ci_m":            trap_r.get("ci_half_width", ""),
-            "trap_quality":         trap_r.get("quality_score", ""),
-            "trap_accepted":        trap_r.get("accepted", ""),
-            "trap_reject_reason":   trap_r.get("reject_reason", ""),
-            "zupt_delta_height_m":  zupt_r.get("delta_height_m", ""),
-            "zupt_ci_m":            zupt_r.get("ci_half_width", ""),
-            "zupt_quality":         zupt_r.get("quality_score", ""),
-            "zupt_accepted":        zupt_r.get("accepted", ""),
-            "zupt_reject_reason":   zupt_r.get("reject_reason", ""),
+            "trap_delta_height_m":  trap_r.delta_height_m if trap_r else "",
+            "trap_ci_m":            trap_r.ci_half_width if trap_r else "",
+            "trap_quality":         trap_r.quality_score if trap_r else "",
+            "trap_accepted":        trap_r.accepted if trap_r else "",
+            "trap_reject_reason":   trap_r.reject_reason if trap_r else "",
+            "zupt_delta_height_m":  zupt_r.delta_height_m if zupt_r else "",
+            "zupt_ci_m":            zupt_r.ci_half_width if zupt_r else "",
+            "zupt_quality":         zupt_r.quality_score if zupt_r else "",
+            "zupt_accepted":        zupt_r.accepted if zupt_r else "",
+            "zupt_reject_reason":   zupt_r.reject_reason if zupt_r else "",
         }
         out_rows.append(row_dict)
 
@@ -1361,7 +1376,7 @@ def _build_signatures_csv(
 
 def _correlation_for_report(
     loaded: LoadedSignal, segments: pd.DataFrame,
-) -> dict | None:
+) -> CorrelationCurves | None:
     """The whole-signal correlation curves used by every segment page.
 
     These arrays are global (identical for every window), so we reuse a
@@ -1379,7 +1394,7 @@ def _correlation_for_report(
         rt = str(row.get("type", "up")).lower()
         params = cache.get(_seg_key(t_lo, t_hi, rt))
         if params is not None:
-            return params.get("correlation")
+            return params.correlation
     # Nothing cached — recompute for the first usable segment.
     for pos in range(len(segments)):
         row = segments.iloc[pos]
@@ -1392,7 +1407,7 @@ def _correlation_for_report(
             loaded.acc, t_lo, t_hi, ride_type=rt, resample=False,
         )
         if params is not None:
-            return params.get("correlation")
+            return params.correlation
     return None
 
 
