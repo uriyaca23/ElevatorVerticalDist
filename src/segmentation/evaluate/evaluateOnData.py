@@ -84,7 +84,7 @@ from src.data.loader import (
     load_experiment_index,
     resolve_experiments,
 )
-from src.physics.reconstruct_az import RECONSTRUCT_CHOICES
+from pyramidElevatorDist.physics.reconstruct_az import RECONSTRUCT_CHOICES
 from src.segmentation.algorithms.configTypes import (
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,

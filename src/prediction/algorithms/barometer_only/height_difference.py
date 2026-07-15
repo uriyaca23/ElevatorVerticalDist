@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from src.physics.barometric import pressure_to_altitude
+from pyramidElevatorDist.physics.barometric import pressure_to_altitude
 from src.prediction.algorithms.configTypes import BarometerHeightDiffConfig
 
 

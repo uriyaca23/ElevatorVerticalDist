@@ -18,8 +18,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.physics.reconstruct_az import RECONSTRUCTORS, SensorChannel, build
-from src.physics.reconstruct_az import _quaternion as quat
+from pyramidElevatorDist.physics.reconstruct_az import RECONSTRUCTORS, SensorChannel, build
+from pyramidElevatorDist.physics.reconstruct_az import _quaternion as quat
 
 G = 9.80665
 FS = 100.0
@@ -123,7 +123,7 @@ def test_missing_sensor_raises():
 
 def test_reconstruct_az_none_and_missing_gyro_are_identity():
     """The one-liner is a pass-through for 'none' or when gyro is absent."""
-    from src.physics.reconstruct_az import reconstruct_az
+    from pyramidElevatorDist.physics.reconstruct_az import reconstruct_az
     acc = pd.DataFrame({"timestamp_ms": [0, 10, 20], "x": [0.0, 0, 0],
                         "y": [0.0, 0, 0], "z": [G, G, G]})
     gyr = pd.DataFrame({"timestamp_ms": [0, 10, 20], "x": [0.0, 0, 0],
@@ -134,7 +134,7 @@ def test_reconstruct_az_none_and_missing_gyro_are_identity():
 
 def test_reconstruct_az_flat_phone_keeps_gravity_on_z():
     """A filtered call returns the flat-phone accel: gravity on +z, |g| kept."""
-    from src.physics.reconstruct_az import reconstruct_az, RECONSTRUCT_CHOICES
+    from pyramidElevatorDist.physics.reconstruct_az import reconstruct_az, RECONSTRUCT_CHOICES
     assert RECONSTRUCT_CHOICES == ["none", *RECONSTRUCTORS]
 
     az_true = _trapezoid_profile()

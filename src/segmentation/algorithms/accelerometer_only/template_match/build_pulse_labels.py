@@ -36,7 +36,7 @@ from src.data.loader import (  # noqa: E402
     getExperimentData,
     list_experiments,
 )
-from src.physics import calculate_velocity_from_accelerometer  # noqa: E402
+from pyramidElevatorDist.physics import calculate_velocity_from_accelerometer  # noqa: E402
 
 LABELS_ROOT = Path(__file__).with_name("labels") / "pulseShapes"
 UP_DIR = LABELS_ROOT / "up"

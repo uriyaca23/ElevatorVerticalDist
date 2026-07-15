@@ -45,8 +45,8 @@ from typing import Any, Iterable, Optional
 import pandas as pd
 
 from src.data.loader import resample_sensor_with_gaps
-from src.physics.barometric import pressure_to_altitude
-from src.physics.reconstruct_az import reconstruct_az
+from pyramidElevatorDist.physics.barometric import pressure_to_altitude
+from pyramidElevatorDist.physics.reconstruct_az import reconstruct_az
 from src.prediction.algorithms import (
     PREDICT_ALGORITHM_CONFIG, PredictAlgorithm, Predictor,
 )
@@ -309,7 +309,7 @@ def barometric_altitude(
 ) -> pd.DataFrame:
     """Whole-trace barometric altitude — the ground-truth reference signal.
 
-    ISA inversion of the pressure column (see ``src.physics.barometric``), the
+    ISA inversion of the pressure column (see ``pyramidElevatorDist.physics.barometric``), the
     same physics the barometer Δh estimator uses. Columns:
 
     * ``timestamp_ms``

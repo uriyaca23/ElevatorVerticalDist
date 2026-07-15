@@ -93,9 +93,9 @@ GT_COLUMNS = [
     "signalClearRecording", "height_diff_m",
 ]
 
-# Gap detection: any spacing between consecutive samples larger than
-# 1/THRESHOLD_FREQUENCY_HZ seconds is treated as a "no data" gap that splits
-# the recording into separate valid intervals. Below 1 Hz we effectively
-# have no signal.
-THRESHOLD_FREQUENCY_HZ = 1.0
-GAP_THRESHOLD_S = 1.0 / THRESHOLD_FREQUENCY_HZ
+# Gap-detection constants live with the resampler in the pyramidElevatorDist
+# package; re-exported here because loader callers import them from .constants.
+from pyramidElevatorDist.utils.resampling import (  # noqa: E402,F401
+    GAP_THRESHOLD_S,
+    THRESHOLD_FREQUENCY_HZ,
+)

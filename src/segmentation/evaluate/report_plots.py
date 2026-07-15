@@ -19,7 +19,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from src.segmentation.algorithms.metrics import IntervalPredictionMetrics
-from src.physics import calculate_velocity_from_accelerometer
+from pyramidElevatorDist.physics import calculate_velocity_from_accelerometer
 
 
 # Shared color palette so every figure in the report uses the same legend.

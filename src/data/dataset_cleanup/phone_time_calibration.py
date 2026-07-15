@@ -156,7 +156,7 @@ def _min_altitude_offset_ms(
         depth = float(np.median(h_s) - h_s[i])
         return int(t[i]), depth, float(np.std(h_s))
 
-    from src.physics.barometric import pressure_to_altitude  # noqa: F401
+    from pyramidElevatorDist.physics.barometric import pressure_to_altitude  # noqa: F401
     p_t_min, p_depth, p_std = _min_info(pixel_prs)
     q_t_min, q_depth, q_std = _min_info(phone_prs)
     offset_ms = int(p_t_min - q_t_min)
@@ -176,7 +176,7 @@ def _prs_altitude_series(prs: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     if "GT_height_m" in prs.columns:
         h = prs["GT_height_m"].to_numpy(dtype=float)
     else:
-        from src.physics.barometric import pressure_to_altitude
+        from pyramidElevatorDist.physics.barometric import pressure_to_altitude
         h = np.asarray(
             pressure_to_altitude(prs["pressure"].to_numpy(dtype=float)),
             dtype=float,

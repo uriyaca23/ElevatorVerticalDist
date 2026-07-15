@@ -1,6 +1,6 @@
 """General-purpose signal-processing helpers.
 
-Kept separate from :mod:`src.utils.accelerometer_utils` so callers with
+Kept separate from :mod:`pyramidElevatorDist.utils.accelerometer_utils` so callers with
 no accelerometer context can grab plain filter / spectral utilities
 without pulling in the projection stack.
 """

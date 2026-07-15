@@ -34,7 +34,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from src.data.loader import getExperimentData
-from src.physics.barometric import pressure_to_altitude
+from pyramidElevatorDist.physics.barometric import pressure_to_altitude
 from src.prediction.algorithms.configTypes import (
     PREDICT_ALGORITHM_CONFIG,
     PredictAlgorithm,

@@ -4,7 +4,7 @@ Five orientation-fusion algorithms recover the *real* vertical acceleration
 ``a_z`` (and ``a_x, a_y``) from a tilted, possibly rotating phone, by
 estimating device orientation, rotating the measured specific force into the
 world frame, and subtracting gravity. They share the
-:class:`~src.physics.reconstruct_az.base.AZReconstructor` interface and differ
+:class:`~pyramidElevatorDist.physics.reconstruct_az.base.AZReconstructor` interface and differ
 only in the fusion rule:
 
 * :class:`ComplementaryReconstructor` — gyro high-pass + accel low-pass.
@@ -17,7 +17,7 @@ Primary papers are in ``references/`` (see ``references/REFERENCES.md``).
 
 Usage::
 
-    from src.physics.reconstruct_az import build, SensorChannel
+    from pyramidElevatorDist.physics.reconstruct_az import build, SensorChannel
     algo = build("Madgwick")
     rec = algo.reconstruct({SensorChannel.ACC: sig.acc,
                             SensorChannel.GYR: sig.gyr})

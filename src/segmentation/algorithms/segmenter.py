@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from src.physics.reconstruct_az import reconstruct_az
+from pyramidElevatorDist.physics.reconstruct_az import reconstruct_az
 
 from .barometer_only import HeightSegmenter
 from .accelerometer_only.template_match.check_grid_across_signal.detect import (
@@ -86,7 +86,7 @@ class Segmenter:
     #
     # `phone_model` (optional): when non-empty, the ACC_TEMPLATE_MATCH path
     # tightens its amplitude floors using the phone's accelerometer noise σ
-    # (see `src.utils.sensor_noise` and the `noise_sigma_multiplier` knob on
+    # (see `pyramidElevatorDist.utils.sensor_noise` and the `noise_sigma_multiplier` knob on
     # `TemplateMatchConfig`). Ignored by the pressure filter.
     #
     # Output: a pandas DataFrame of detected elevator segments with columns:
@@ -103,7 +103,7 @@ class Segmenter:
     # `gyro` (optional): raw gyroscope (`timestamp_ms, x, y, z`, rad/s). When
     # `config.reconstruct != "none"` and gyro is present, the ACC_TEMPLATE_MATCH
     # path first replaces `data` with a virtually-flat-phone accelerometer (see
-    # `src.physics.reconstruct_az.reconstruct_az`); otherwise it is ignored.
+    # `pyramidElevatorDist.physics.reconstruct_az.reconstruct_az`); otherwise it is ignored.
     def detect_raw(
         self,
         data: pd.DataFrame,

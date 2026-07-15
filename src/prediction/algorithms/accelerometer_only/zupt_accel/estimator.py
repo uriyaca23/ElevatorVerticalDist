@@ -17,14 +17,14 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from src.utils.accelerometer_utils import (
+from pyramidElevatorDist.utils.accelerometer_utils import (
     estimate_gravity_stationary,
     vertical_accel_projected,
     zupt_integrate,
 )
-from src.utils.signal_processing import butter_lowpass
-from src.utils.conformal import ConformalCalibrator
-from src.utils.sensor_noise import get_phone_accel_noise_sigma
+from pyramidElevatorDist.utils.signal_processing import butter_lowpass
+from pyramidElevatorDist.utils.conformal import ConformalCalibrator
+from pyramidElevatorDist.utils.sensor_noise import get_phone_accel_noise_sigma
 from ...common.types import CalibrationSample, PredictionOutput
 from ...configTypes import ZuptAccelConfig
 from .quality import assess as quality_assess

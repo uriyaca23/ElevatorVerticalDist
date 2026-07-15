@@ -92,7 +92,7 @@ from src.data.loader import (  # noqa: E402
 )
 from src.data.loadFromDB import LoadedSignal  # noqa: E402
 from src.data.load_data import enrich_loaded  # noqa: E402
-from src.utils.accelerometer_utils import vertical_accel_magnitude  # noqa: E402
+from pyramidElevatorDist.utils.accelerometer_utils import vertical_accel_magnitude  # noqa: E402
 from src.segmentation.algorithms.configTypes import (  # noqa: E402
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,
@@ -117,7 +117,7 @@ from src.prediction.algorithms.configTypes import (  # noqa: E402
 )
 from src.prediction.evaluation.dataset import load_all_segments  # noqa: E402
 from src.prediction.evaluation.runner import run_predictions  # noqa: E402
-from src.utils.conformal import ConformalCalibrator  # noqa: E402
+from pyramidElevatorDist.utils.conformal import ConformalCalibrator  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

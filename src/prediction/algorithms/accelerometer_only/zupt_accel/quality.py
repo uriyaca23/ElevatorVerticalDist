@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from src.utils.accelerometer_utils import estimate_gravity_stationary
+from pyramidElevatorDist.utils.accelerometer_utils import estimate_gravity_stationary
 
 
 @dataclass

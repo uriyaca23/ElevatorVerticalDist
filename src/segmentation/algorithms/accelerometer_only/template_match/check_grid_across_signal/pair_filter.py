@@ -26,7 +26,7 @@ import numpy as np
 from ..fit_elevator_parameters.common import (
     LobeFit, trapezoid_kernel,
 )
-from src.utils.trapezoid_fast import (
+from pyramidElevatorDist.utils.trapezoid_fast import (
     build_template_bank, gather_inner_at_peaks, score_pair_at_peaks,
 )
 

@@ -16,7 +16,7 @@ Bare-numpy helpers used across segmentation and prediction stages:
 * :func:`lowpass` — ride-band low-pass (cutoff = 0.3 Hz) to suppress
   walking-cadence leakage while preserving ride-scale dynamics. For a
   general-purpose Butterworth filter, see
-  :func:`src.utils.signal_processing.butter_lowpass`.
+  :func:`pyramidElevatorDist.utils.signal_processing.butter_lowpass`.
 """
 
 from __future__ import annotations

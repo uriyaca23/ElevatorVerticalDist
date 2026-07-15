@@ -2,7 +2,7 @@
 
 Two stacked panels on one full recording show how raw barometric pressure
 (hPa) becomes a metric altitude trace (m) via the ISA tropospheric
-inversion implemented in :mod:`src.physics.barometric`. The figure is
+inversion implemented in :mod:`pyramidElevatorDist.physics.barometric`. The figure is
 referenced from Appendix~B (Dataset construction) as
 ``fig:app-barometer-extraction``.
 
@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from src.physics.barometric import P0_HPA, pressure_to_altitude
+from pyramidElevatorDist.physics.barometric import P0_HPA, pressure_to_altitude
 
 REPO = Path(__file__).resolve().parents[2]
 OUT_DIR = REPO / "paper_phd/figures"

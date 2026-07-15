@@ -91,10 +91,10 @@ from typing import Optional
 
 import numpy as np
 
-# Stage-agnostic matched-filter primitives live in ``src.utils``. We
+# Stage-agnostic matched-filter primitives live in ``pyramidElevatorDist.utils``. We
 # re-export them here so ``estimator.py`` (and any other downstream
 # caller) can keep importing ``trapezoid_kernel`` etc. from this module.
-from src.utils.trapezoid_template import (
+from pyramidElevatorDist.utils.trapezoid_template import (
     TemplateScan,
     match_one_template,
     search_shared_shape_pair,

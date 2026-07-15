@@ -19,7 +19,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.utils.accelerometer_utils import (
+from pyramidElevatorDist.utils.accelerometer_utils import (
     compute_a_vert, compute_velocity, lowpass,
 )
 from src.segmentation.algorithms.metrics import ci_center

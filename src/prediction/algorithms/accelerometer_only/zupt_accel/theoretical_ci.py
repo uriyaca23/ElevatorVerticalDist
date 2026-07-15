@@ -10,7 +10,7 @@ per-segment σ used to feed the conformal calibrator:
 
    where N is the number of samples in the active-motion window and
    σ_a is the accelerometer white-noise σ at the sampling rate
-   (from the sensor datasheet, see :mod:`src.utils.sensor_noise`). The
+   (from the sensor datasheet, see :mod:`pyramidElevatorDist.utils.sensor_noise`). The
    ``/12`` factor credits the linear drift correction for knocking
    out one degree of freedom.
 

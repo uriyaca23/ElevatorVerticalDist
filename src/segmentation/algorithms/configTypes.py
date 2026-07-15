@@ -111,7 +111,7 @@ class SEGMENT_ALGORITHM_CONFIG(BaseModel):
     # Optional accel+gyro orientation reconstruction applied to the raw
     # accelerometer as the first step of ``Segmenter.detect`` (ACC template
     # match only). ``"none"`` = today's behavior; other values are keys of
-    # ``src.physics.reconstruct_az.RECONSTRUCTORS`` (Complementary, Mahony,
+    # ``pyramidElevatorDist.physics.reconstruct_az.RECONSTRUCTORS`` (Complementary, Mahony,
     # Madgwick, Valenti, ESKF). See ``docs/latex/algorithm_report.tex``.
     reconstruct: str = "none"
     # Optional input-cadence normalization. When set (e.g. ``50``), the

@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from src.physics.reconstruct_az import RECONSTRUCT_CHOICES
+from pyramidElevatorDist.physics.reconstruct_az import RECONSTRUCT_CHOICES
 
 # Thin façade: the resample → reconstruct → vertical-accel computation lives in
 # the shared boutique core; here we only pick the cadence policy and forward.

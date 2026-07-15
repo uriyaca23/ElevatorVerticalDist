@@ -68,8 +68,8 @@ from src.data.loader.pipeline import (
 )
 from src.data.loadFromDB import LoadedSignal, PhoneType, loadDataFromS3
 from src.data.load_data import enrich_loaded
-from src.physics import calculate_velocity_from_accelerometer, pressure_to_altitude
-from src.utils.accelerometer_utils import vertical_accel_magnitude
+from pyramidElevatorDist.physics import calculate_velocity_from_accelerometer, pressure_to_altitude
+from pyramidElevatorDist.utils.accelerometer_utils import vertical_accel_magnitude
 from src.segmentation.algorithms import (
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,

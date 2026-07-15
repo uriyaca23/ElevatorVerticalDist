@@ -39,15 +39,15 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from src.data.loader import getExperimentData, list_experiments  # noqa: E402
-from src.physics import calculate_velocity_from_accelerometer  # noqa: E402
-from src.utils.accelerometer_utils import (  # noqa: E402
+from pyramidElevatorDist.physics import calculate_velocity_from_accelerometer  # noqa: E402
+from pyramidElevatorDist.utils.accelerometer_utils import (  # noqa: E402
     estimate_gravity_stationary,
     vertical_accel_projected,
 )
 # Stage-agnostic matched-filter primitives — re-exported so the existing
 # ``from ..fit_elevator_parameters.common import trapezoid_kernel,
 # match_one_template, TemplateScan`` call sites keep working unchanged.
-from src.utils.trapezoid_template import (  # noqa: E402, F401
+from pyramidElevatorDist.utils.trapezoid_template import (  # noqa: E402, F401
     TemplateScan,
     match_one_template,
     trapezoid_kernel,

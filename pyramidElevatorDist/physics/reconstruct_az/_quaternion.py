@@ -1,6 +1,6 @@
 """Minimal Hamilton-quaternion helpers for the orientation filters.
 
-Private to :mod:`src.physics.reconstruct_az`. Quaternions are stored as
+Private to :mod:`pyramidElevatorDist.physics.reconstruct_az`. Quaternions are stored as
 ``[w, x, y, z]`` numpy arrays and follow the **Hamilton** convention. A
 quaternion ``q`` here is the *body-to-world* orientation: rotating a
 body-frame vector by ``q`` expresses it in the world (Earth) frame,

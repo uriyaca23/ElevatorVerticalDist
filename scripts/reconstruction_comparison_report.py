@@ -44,7 +44,7 @@ import numpy as np
 import pandas as pd
 
 from src.data.loader import add_selection_args, resolve_experiments
-from src.physics.reconstruct_az import RECONSTRUCTORS, SensorChannel, build
+from pyramidElevatorDist.physics.reconstruct_az import RECONSTRUCTORS, SensorChannel, build
 from src.prediction.algorithms import (
     PREDICT_ALGORITHM_CONFIG,
     PredictAlgorithm,
@@ -60,7 +60,7 @@ from src.segmentation.algorithms.configTypes import (
 )
 from src.segmentation.evaluate import evaluator
 from src.segmentation.evaluate.evaluateOnData import _aggregate_filtered
-from src.utils.accelerometer_utils import compute_a_vert
+from pyramidElevatorDist.utils.accelerometer_utils import compute_a_vert
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT = REPO_ROOT / "docs" / "latex" / "figures" / "reconstruct_az"

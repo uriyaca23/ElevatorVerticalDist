@@ -53,7 +53,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src.utils.trapezoid_template import search_shared_shape_pair
+from pyramidElevatorDist.utils.trapezoid_template import search_shared_shape_pair
 
 # See ``basic_grid.py`` for why we load ``common.py`` by file path.
 _HERE = Path(__file__).resolve().parent

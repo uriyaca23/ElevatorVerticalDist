@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.physics import pressure_to_altitude
+from pyramidElevatorDist.physics import pressure_to_altitude
 
 from .constants import DATA_ROOT, SENSOR_COLUMNS
 

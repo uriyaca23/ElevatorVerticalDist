@@ -13,7 +13,7 @@ from typing import Optional
 
 import pandas as pd
 
-from src.physics.reconstruct_az import reconstruct_az
+from pyramidElevatorDist.physics.reconstruct_az import reconstruct_az
 
 from .barometer_only import predict_height_difference_from_barometer
 from .common import CalibrationSample, PredictionOutput

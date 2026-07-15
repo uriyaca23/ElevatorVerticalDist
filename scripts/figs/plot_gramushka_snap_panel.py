@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from src.physics.barometric import P0_HPA, pressure_to_altitude
+from pyramidElevatorDist.physics.barometric import P0_HPA, pressure_to_altitude
 from src.segmentation.algorithms.barometer_only.height_segmentation import (
     HeightSegmenter,
 )

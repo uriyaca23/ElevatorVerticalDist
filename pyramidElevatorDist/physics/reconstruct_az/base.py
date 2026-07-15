@@ -48,7 +48,7 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
-from src.utils.accelerometer_utils import estimate_gravity_stationary
+from pyramidElevatorDist.utils.accelerometer_utils import estimate_gravity_stationary
 
 from . import _quaternion as quat
 

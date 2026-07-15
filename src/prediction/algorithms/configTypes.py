@@ -239,7 +239,7 @@ class PREDICT_ALGORITHM_CONFIG(BaseModel):
     # Optional accel+gyro orientation reconstruction applied to the raw
     # accelerometer as the first step of ``Predictor.predict`` (accel
     # algorithms only). ``"none"`` = today's behavior; other values are keys
-    # of ``src.physics.reconstruct_az.RECONSTRUCTORS`` (Complementary, Mahony,
+    # of ``pyramidElevatorDist.physics.reconstruct_az.RECONSTRUCTORS`` (Complementary, Mahony,
     # Madgwick, Valenti, ESKF). See ``docs/latex/algorithm_report.tex``.
     reconstruct: str = "none"
     # Optional input-cadence normalization. When set (e.g. ``50``), the

@@ -12,8 +12,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from src.physics import calculate_velocity_from_accelerometer
-from src.utils.accelerometer_utils import compute_a_vert
+from pyramidElevatorDist.physics import calculate_velocity_from_accelerometer
+from pyramidElevatorDist.utils.accelerometer_utils import compute_a_vert
 from src.segmentation.algorithms.accelerometer_only.template_match.templates import (
     Templates, load_templates,
 )

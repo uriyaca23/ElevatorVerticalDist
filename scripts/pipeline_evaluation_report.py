@@ -50,7 +50,7 @@ matplotlib.use("Agg")  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 
 from src.data.loader import getExperimentData, list_experiments  # noqa: E402
-from src.physics.barometric import pressure_to_altitude  # noqa: E402
+from pyramidElevatorDist.physics.barometric import pressure_to_altitude  # noqa: E402
 from src.segmentation.algorithms.configTypes import (  # noqa: E402
     SEGMENT_ALGORITHM_CONFIG, SegmentAlgorithm,
 )

@@ -31,7 +31,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-from src.utils.sensor_noise import get_phone_accel_noise_sigma
+from pyramidElevatorDist.utils.sensor_noise import get_phone_accel_noise_sigma
 
 from ..fit_elevator_parameters.common import (
     SMOOTH_SEC,
@@ -85,7 +85,7 @@ class DetectConfig:
       ``max(min_peak_abs_a, multiplier · σ_a)`` (and analogously for the
       pair floor), where ``σ_a`` is the phone's accelerometer white-noise
       σ at the session's sampling rate (see
-      :mod:`src.utils.sensor_noise`). A multiplier of ~6 is a standard
+      :mod:`pyramidElevatorDist.utils.sensor_noise`). A multiplier of ~6 is a standard
       "well above noise" gate. Hard-coded floors win when the phone is
       unknown or noisier than expected — this is a tightening knob, not
       a loosening one.

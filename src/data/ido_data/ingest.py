@@ -40,7 +40,7 @@ from src.data.loader import (
     STRUCTURED_DATA_DIR,
     saveExperimentData,
 )
-from src.physics import pressure_to_altitude
+from pyramidElevatorDist.physics import pressure_to_altitude
 
 
 logger = logging.getLogger(__name__)

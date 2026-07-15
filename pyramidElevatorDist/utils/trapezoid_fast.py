@@ -81,7 +81,7 @@ def build_template_bank(
     """Pre-compute the (W, F) trapezoid template bank for sample step ``dt``.
 
     Mirrors the ``K = max(3, round(2*W/dt)) | 1`` (force odd) kernel-size
-    convention of :func:`src.utils.trapezoid_template.match_one_template`.
+    convention of :func:`pyramidElevatorDist.utils.trapezoid_template.match_one_template`.
     """
     grid_W = np.ascontiguousarray(grid_W, dtype=np.float64)
     grid_F = np.ascontiguousarray(grid_F, dtype=np.float64)

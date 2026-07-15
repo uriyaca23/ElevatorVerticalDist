@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from src.physics import calculate_velocity_from_accelerometer
+from pyramidElevatorDist.physics import calculate_velocity_from_accelerometer
 
 TYPE_COLORS: dict[str, str] = {
     "up": "#27ae60",

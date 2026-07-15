@@ -1,6 +1,6 @@
 """Pedagogical walkthrough figure for the Mahony orientation filter.
 
-Drives the *shipped* :class:`~src.physics.reconstruct_az.MahonyReconstructor`
+Drives the *shipped* :class:`~pyramidElevatorDist.physics.reconstruct_az.MahonyReconstructor`
 on one controlled rotating-elevator example with **known ground truth**, logs
 the per-sample internal state (learned gyro bias, correction error ``e``, trust
 weight ``w``, tracked orientation), and renders the six-panel figure consumed by
@@ -33,9 +33,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from src.physics.reconstruct_az import SensorChannel, build
-from src.physics.reconstruct_az import _quaternion as quat
-from src.physics.reconstruct_az.mahony import MahonyReconstructor
+from pyramidElevatorDist.physics.reconstruct_az import SensorChannel, build
+from pyramidElevatorDist.physics.reconstruct_az import _quaternion as quat
+from pyramidElevatorDist.physics.reconstruct_az.mahony import MahonyReconstructor
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT = REPO_ROOT / "docs" / "latex" / "figures" / "gyro" / "mahony_walkthrough.png"
