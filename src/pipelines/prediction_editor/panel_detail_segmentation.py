@@ -213,40 +213,40 @@ class DetailSegmentationMixin:
             self._detail_placeholder("Load an experiment first.")
             return
         # Detail was precomputed at load (one detector pass) — instant lookup.
-        idx = int(pred["index"])
+        idx = pred.index
         params = self._detail_cache.get(idx)
         if params is None and idx not in self._detail_cache:
             # Rare fallback: compute on demand and memoize.
             params = findSegmentParameters(
-                self.acc, float(pred["t_start_s"]), float(pred["t_end_s"]),
-                str(pred["ride_type"]), resample=True,
+                self.acc, float(pred.t_start_s), float(pred.t_end_s),
+                str(pred.ride_type), resample=True,
             )
             self._detail_cache[idx] = params
         if params is None:
             self._detail_placeholder("No trapezoid fit for this interval.")
             return
-        lobe1 = params["lobe1"]
-        lobe2 = params["lobe2"]
-        W_star = float(lobe1["half_width_s"])
-        f_star = float(lobe1["frac_flat"])
+        lobe1 = params.lobe1
+        lobe2 = params.lobe2
+        W_star = float(lobe1.half_width_s)
+        f_star = float(lobe1.frac_flat)
         title = (
-            f"pred #{int(pred['index']):02d} {params['ride_type']} — "
-            f"joint R²={float(params['joint_r2_mean']):.3f}  "
-            f"|A|={abs(float(lobe1['a_peak'])):.2f}  "
+            f"pred #{pred.index:02d} {params.ride_type} — "
+            f"joint R²={float(params.joint_r2_mean):.3f}  "
+            f"|A|={abs(float(lobe1.a_peak)):.2f}  "
             f"W={W_star:.2f}s  f={f_star:.2f}"
         )
         verdict = (
-            f"prediction #{int(pred['index']):02d} — accepted pair.\n"
-            f"  lobe1 t={float(lobe1['t_c']):.1f}s  "
-            f"A={float(lobe1['a_peak']):+.2f}  "
-            f"R²={float(lobe1['r2_local']):.3f}\n"
-            f"  lobe2 t={float(lobe2['t_c']):.1f}s  "
-            f"A={float(lobe2['a_peak']):+.2f}  "
-            f"R²={float(lobe2['r2_local']):.3f}\n"
+            f"prediction #{pred.index:02d} — accepted pair.\n"
+            f"  lobe1 t={float(lobe1.t_c):.1f}s  "
+            f"A={float(lobe1.a_peak):+.2f}  "
+            f"R²={float(lobe1.r2_local):.3f}\n"
+            f"  lobe2 t={float(lobe2.t_c):.1f}s  "
+            f"A={float(lobe2.a_peak):+.2f}  "
+            f"R²={float(lobe2.r2_local):.3f}\n"
             f"  shared W={W_star:.2f}s  f={f_star:.2f}  "
-            f"|A|={abs(float(lobe1['a_peak'])):.2f}\n"
-            f"  joint mean R²={float(params['joint_r2_mean']):.3f}  "
-            f"heatmap_energy={float(params.get('heatmap_energy', float('nan'))):.3f}"
+            f"|A|={abs(float(lobe1.a_peak)):.2f}\n"
+            f"  joint mean R²={float(params.joint_r2_mean):.3f}  "
+            f"heatmap_energy={float(params.heatmap_energy):.3f}"
         )
         self._render_segmentation_detail(params, title, verdict)
 
@@ -272,10 +272,10 @@ class DetailSegmentationMixin:
                 f"window [{t_lo:.1f}, {t_hi:.1f}]s."
             )
             return
-        lobe1 = params["lobe1"]
-        lobe2 = params["lobe2"]
-        W_star = float(lobe1["half_width_s"])
-        f_star = float(lobe1["frac_flat"])
+        lobe1 = params.lobe1
+        lobe2 = params.lobe2
+        W_star = float(lobe1.half_width_s)
+        f_star = float(lobe1.frac_flat)
         title = (
             f"GT #{gt_index:02d} {ride_type}  t=[{t_lo:.1f}, {t_hi:.1f}]s  "
             f"({'matched by detector' if matched else 'NOT matched'})"
@@ -284,13 +284,13 @@ class DetailSegmentationMixin:
             f"GT #{gt_index:02d} {ride_type}  window=[{t_lo:.1f}, {t_hi:.1f}]s  "
             f"(duration={t_hi - t_lo:.1f}s)\n"
             f"{'matched by detector.' if matched else 'NOT matched by detector.'}\n"
-            f"  fitted trapezoid: joint R²={float(params['joint_r2_mean']):.3f}  "
-            f"|A|={abs(float(lobe1['a_peak'])):.2f}  "
+            f"  fitted trapezoid: joint R²={float(params.joint_r2_mean):.3f}  "
+            f"|A|={abs(float(lobe1.a_peak)):.2f}  "
             f"W={W_star:.2f}s  f={f_star:.2f}\n"
-            f"  lobe1 t={float(lobe1['t_c']):.1f}s  A={float(lobe1['a_peak']):+.2f}  "
-            f"R²={float(lobe1['r2_local']):.3f}\n"
-            f"  lobe2 t={float(lobe2['t_c']):.1f}s  A={float(lobe2['a_peak']):+.2f}  "
-            f"R²={float(lobe2['r2_local']):.3f}"
+            f"  lobe1 t={float(lobe1.t_c):.1f}s  A={float(lobe1.a_peak):+.2f}  "
+            f"R²={float(lobe1.r2_local):.3f}\n"
+            f"  lobe2 t={float(lobe2.t_c):.1f}s  A={float(lobe2.a_peak):+.2f}  "
+            f"R²={float(lobe2.r2_local):.3f}"
         )
         self._render_segmentation_detail(
             params, title, verdict, gt_span=(float(t_lo), float(t_hi)),

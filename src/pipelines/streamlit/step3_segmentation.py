@@ -18,6 +18,8 @@ import streamlit as st
 
 from pyramidElevatorDist import (
     RECONSTRUCT_CHOICES,
+    CorrelationCurves,
+    RideSegment,
     displaySeries,
     findSegmentParameters,
     findSegments,

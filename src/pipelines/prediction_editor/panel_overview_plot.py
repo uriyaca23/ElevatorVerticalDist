@@ -152,12 +152,12 @@ class OverviewPlotMixin:
                     a.axvspan(s, e, color=TYPE_COLORS.get(rt, "#cccccc"),
                               alpha=0.15, zorder=0)
             for p in self.predictions:
-                col = PRED_COLORS[p["ride_type"]]
-                a.axvspan(p["t_start_s"], p["t_end_s"], color=col,
+                col = PRED_COLORS[p.ride_type]
+                a.axvspan(p.t_start_s, p.t_end_s, color=col,
                           alpha=0.18, hatch="//", zorder=1)
-                a.axvline(p["t_start_s"], color=col, lw=0.9, ls="--",
+                a.axvline(p.t_start_s, color=col, lw=0.9, ls="--",
                           alpha=0.7, zorder=2)
-                a.axvline(p["t_end_s"], color=col, lw=0.9, ls="--",
+                a.axvline(p.t_end_s, color=col, lw=0.9, ls="--",
                           alpha=0.7, zorder=2)
 
         # Time axis label only on the bottom panel (they share x).

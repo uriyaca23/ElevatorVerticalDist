@@ -1,11 +1,10 @@
 # Runtime dependencies for the pyramidElevatorDist PACKAGE LOGIC only
-# (segmentation + prediction). This mirrors exactly what the pip wheel
-# declares (see packaging/build_wheel.py) — nothing here pulls in the UI,
-# reports, data/video loaders, or dev tooling.
+# (segmentation + prediction). Mirrors [project.dependencies] in the root
+# pyproject.toml —
+# nothing here pulls in the UI, reports, data loaders, or dev tooling.
 #
 # For everything the full project needs, use requirements-ui.txt.
 numpy>=1.24
 pandas>=2.0
 scipy>=1.10
 pydantic>=2.0
-matplotlib>=3.7

@@ -55,7 +55,7 @@ class GtTableMixin:
 
     def _gt_matched_by_prediction(self, t_lo: float, t_hi: float) -> bool:
         for p in self.predictions:
-            if p["t_start_s"] <= t_hi and p["t_end_s"] >= t_lo:
+            if p.t_start_s <= t_hi and p.t_end_s >= t_lo:
                 return True
         return False
 

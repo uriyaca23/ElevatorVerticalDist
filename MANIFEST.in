@@ -1,0 +1,12 @@
+# sdist contents — the package only; keep docs/, paper_phd/, src/, tuning/
+# and the rest of the research repo out of the distribution.
+recursive-include pyramidElevatorDist *.py *.json
+include README.md
+include pyproject.toml
+prune src
+prune docs
+prune scripts
+prune tests
+prune tuning
+prune paper_phd
+prune papers

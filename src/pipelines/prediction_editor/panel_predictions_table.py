@@ -43,24 +43,24 @@ class PredictionsTableMixin:
         for item in self.tree_pred.get_children():
             self.tree_pred.delete(item)
         for p in self.predictions:
-            l1 = p.get("lobe1") or {}
-            abs_A = abs(float(l1.get("a_peak") or 0.0))
-            W = float(l1.get("half_width_s") or 0.0)
-            f = float(l1.get("frac_flat") or 0.0)
+            l1 = p.lobe1
+            abs_A = abs(float(l1.a_peak))
+            W = float(l1.half_width_s)
+            f = float(l1.frac_flat)
             self.tree_pred.insert(
-                "", tk.END, iid=str(p["index"]),
+                "", tk.END, iid=str(p.index),
                 values=(
-                    p["index"],
-                    f"{p['t_start_s']:.1f}",
-                    f"{p['t_end_s']:.1f}",
-                    f"{p['duration_s']:.1f}",
-                    p["ride_type"],
-                    f"{p['joint_r2_mean']:.3f}",
+                    p.index,
+                    f"{p.t_start_s:.1f}",
+                    f"{p.t_end_s:.1f}",
+                    f"{p.duration_s:.1f}",
+                    p.ride_type,
+                    f"{p.joint_r2_mean:.3f}",
                     f"{abs_A:.2f}",
                     f"{W:.2f}",
                     f"{f:.2f}",
                 ),
-                tags=(p["ride_type"],),
+                tags=(p.ride_type,),
             )
 
     def _on_pred_select(self, _event=None) -> None:
@@ -72,11 +72,11 @@ class PredictionsTableMixin:
         except ValueError:
             return
         match = next(
-            (p for p in self.predictions if int(p["index"]) == idx), None,
+            (p for p in self.predictions if p.index == idx), None,
         )
         if match is None:
             return
-        self._highlight_on_plot(match["t_start_s"], match["t_end_s"])
+        self._highlight_on_plot(match.t_start_s, match.t_end_s)
         self._last_sel = ("pred", (idx,))
         self._render_detail_for_prediction(match)
 
@@ -89,10 +89,10 @@ class PredictionsTableMixin:
         except ValueError:
             return
         match = next(
-            (p for p in self.predictions if int(p["index"]) == idx), None,
+            (p for p in self.predictions if p.index == idx), None,
         )
         if match is None:
             return
         self._focus_zoom_to_seconds(
-            float(match["t_start_s"]), float(match["t_end_s"]), pad_s=15.0,
+            float(match.t_start_s), float(match.t_end_s), pad_s=15.0,
         )

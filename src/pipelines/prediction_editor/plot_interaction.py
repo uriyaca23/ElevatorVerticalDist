@@ -96,13 +96,13 @@ class PlotInteractionMixin:
         is_dbl = bool(getattr(event, "dblclick", False))
 
         for p in self.predictions:
-            if p["t_start_s"] <= x <= p["t_end_s"]:
+            if p.t_start_s <= x <= p.t_end_s:
                 if is_dbl:
                     self._focus_zoom_to_seconds(
-                        float(p["t_start_s"]), float(p["t_end_s"]), pad_s=15.0,
+                        float(p.t_start_s), float(p.t_end_s), pad_s=15.0,
                     )
                     return
-                iid = str(p["index"])
+                iid = str(p.index)
                 if iid in self.tree_pred.get_children():
                     self.tree_pred.selection_set(iid)
                     self.tree_pred.see(iid)

@@ -1,20 +1,17 @@
-# DEV / editable config ONLY — `pip install -e .` for working in this repo.
-#
-# This install is NOT self-contained: the `pyramidElevatorDist` façade imports the
-# live `src/` tree (which is also the working tree for the Streamlit/Tk apps, the
-# evaluate pipelines, scripts, and tests). Do NOT build a distributable wheel from
-# this file — a wheel built here would ship the façade without its implementation.
-#
-# The SELF-CONTAINED, uploadable wheel is produced by:
-#     venv/bin/python packaging/build_wheel.py
-# which vendors the exact src.* runtime closure into pyramidElevatorDist/_impl/.
+# Packaging config for pyramidElevatorDist — the self-contained algorithm
+# library (segmentation + prediction). The package tree under
+# pyramidElevatorDist/ has no dependency on src/ (application layer), so a
+# wheel built here is distributable as-is:
+#     venv/bin/python -m build
+# Clean-room verification (fresh venv, no repo on sys.path):
+#     venv/bin/python scripts/package_smoke_test.py
 [build-system]
 requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyramidElevatorDist"
-version = "0.1.0"
+version = "0.2.0"
 description = "Estimate elevator vertical travel from phone accelerometer signals."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,17 +20,21 @@ dependencies = [
     "pandas>=2.0",
     "scipy>=1.10",
     "pydantic>=2.0",
-    "matplotlib>=3.7",
 ]
 
 [project.optional-dependencies]
 test = ["pytest>=7.0"]
 
-# Editable dev install exposes only the façade package; `src` stays importable
-# from the repo root as it is today.
+# Only the package ships; `src` (data/pipelines/evaluation) stays repo-only
+# and imports FROM the package, never the other way around.
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["pyramidElevatorDist*"]
+
+# The per-algorithm config.json + committed conformal calibration.json must
+# travel inside the wheel (loaded via Path(__file__).with_name(...)).
+[tool.setuptools.package-data]
+"*" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

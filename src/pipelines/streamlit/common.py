@@ -13,10 +13,18 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta, timezone
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
 import streamlit as st
+
+from pyramidElevatorDist import (
+    LobeFit,
+    PredictionRow,
+    RideSegment,
+    SegmentDetail,
+)
 
 # Unified loader entry point lives in src/data/load_data.py so non-UI
 # tools (gt_editor, segmentation/editor) can import the same helpers
@@ -457,8 +465,8 @@ def valid_segments(df: pd.DataFrame | None) -> pd.DataFrame:
 
 
 def find_matching_prediction(
-    predictions: list[dict], t_lo: float, t_hi: float,
-) -> dict | None:
+    predictions: list[RideSegment], t_lo: float, t_hi: float,
+) -> RideSegment | None:
     """Best-overlap detector prediction for a user-edited segment.
 
     Returns ``None`` if there's no overlap — happens when the user
@@ -468,8 +476,8 @@ def find_matching_prediction(
     best = None
     best_overlap = 0.0
     for p in predictions:
-        s = float(p["t_start_s"])
-        e = float(p["t_end_s"])
+        s = float(p.t_start_s)
+        e = float(p.t_end_s)
         overlap = max(0.0, min(e, t_hi) - max(s, t_lo))
         if overlap > best_overlap:
             best_overlap = overlap
@@ -500,7 +508,24 @@ def _trap_item(key: str, val: str) -> str:
     )
 
 
-def render_trapezoid_params(prediction: dict | None) -> None:
+class TrapezoidShapeView(NamedTuple):
+    """Lobe-pair shape container shared by the trapezoid-param renderers.
+
+    Structural stand-in for a detector ``RideSegment`` / ``SegmentDetail``
+    wherever only the lobe pair (plus the joint-fit scalars) matters —
+    returned by :func:`effective_trapezoid_params` and by step 4's
+    predictor-fit adapter, and consumed by :func:`render_trapezoid_params`.
+    """
+    lobe1: LobeFit
+    lobe2: LobeFit
+    joint_r2_mean: float = float("nan")
+    heatmap_energy: float = float("nan")
+    override_mode: str | None = None
+
+
+def render_trapezoid_params(
+    prediction: RideSegment | SegmentDetail | TrapezoidShapeView | None,
+) -> None:
     """Three cards: lobe 1, lobe 2, and the joint fit.
 
     Per-lobe (``half_width_s`` ``W``, ``frac_flat`` ``f``, ``a_peak``
@@ -515,12 +540,12 @@ def render_trapezoid_params(prediction: dict | None) -> None:
                    "parameters unavailable.")
         return
 
-    def _vals(lobe: dict) -> tuple[str, str, str, str, str, str]:
-        t_c = float(lobe.get("t_c", float("nan")))
-        A = float(lobe.get("a_peak", float("nan")))
-        W = float(lobe.get("half_width_s", float("nan")))
-        f = float(lobe.get("frac_flat", float("nan")))
-        r2 = float(lobe.get("r2_local", float("nan")))
+    def _vals(lobe: LobeFit) -> tuple[str, str, str, str, str, str]:
+        t_c = float(lobe.t_c)
+        A = float(lobe.a_peak)
+        W = float(lobe.half_width_s)
+        f = float(lobe.frac_flat)
+        r2 = float(lobe.r2_local)
         return (
             f"{t_c:.2f} s"      if np.isfinite(t_c) else "—",
             f"{A:+.2f}"          if np.isfinite(A)  else "—",
@@ -530,17 +555,17 @@ def render_trapezoid_params(prediction: dict | None) -> None:
             f"{abs(A):.2f}"      if np.isfinite(A)  else "—",
         )
 
-    l1 = prediction.get("lobe1") or {}
-    l2 = prediction.get("lobe2") or {}
+    l1 = prediction.lobe1
+    l2 = prediction.lobe2
     tc1, A1, W1, f1, r2_1, _ = _vals(l1)
     tc2, A2, W2, f2, r2_2, _ = _vals(l2)
 
-    W_star = float(l1.get("half_width_s", float("nan")))
-    f_star = float(l1.get("frac_flat",    float("nan")))
-    a1_val = float(l1.get("a_peak",       float("nan")))
+    W_star = float(l1.half_width_s)
+    f_star = float(l1.frac_flat)
+    a1_val = float(l1.a_peak)
     A_star = abs(a1_val) if np.isfinite(a1_val) else float("nan")
-    joint_r2 = float(prediction.get("joint_r2_mean",   float("nan")))
-    heat_e   = float(prediction.get("heatmap_energy", float("nan")))
+    joint_r2 = float(prediction.joint_r2_mean)
+    heat_e   = float(prediction.heatmap_energy)
 
     def _card(cls: str, title: str, items: list[tuple[str, str]]) -> str:
         inner = "".join(_trap_item(k, v) for k, v in items)
@@ -589,12 +614,13 @@ def _segment_label(i: int, row: pd.Series, has_override: bool = False) -> str:
 
 
 def effective_trapezoid_params(
-    prediction: dict | None, override: dict | None,
-) -> dict | None:
+    prediction: RideSegment | SegmentDetail | TrapezoidShapeView | None,
+    override: dict | None,
+) -> TrapezoidShapeView | None:
     """Return the per-lobe trapezoid params with an optional shape override.
 
-    The returned dict matches the detector's ``prediction`` structure
-    (``lobe1`` / ``lobe2`` with ``t_c``, ``half_width_s``, ``frac_flat``,
+    The returned :class:`TrapezoidShapeView` exposes the detector's
+    ``lobe1`` / ``lobe2`` (with ``t_c``, ``half_width_s``, ``frac_flat``,
     ``a_peak``, ``r2_local``) so existing renderers consume it unchanged.
 
     With ``override`` ``None`` this is a thin copy of ``prediction``. With
@@ -604,35 +630,32 @@ def effective_trapezoid_params(
     """
     if prediction is None:
         return None
-    l1 = dict(prediction.get("lobe1") or {})
-    l2 = dict(prediction.get("lobe2") or {})
+    l1 = prediction.lobe1
+    l2 = prediction.lobe2
     if not override:
-        return {"lobe1": l1, "lobe2": l2, "override_mode": None}
+        return TrapezoidShapeView(lobe1=l1, lobe2=l2, override_mode=None)
     try:
         W = float(override["W"])
         f = float(override["f"])
         abs_A = float(override["abs_A"])
     except (KeyError, TypeError, ValueError):
-        return {"lobe1": l1, "lobe2": l2, "override_mode": None}
+        return TrapezoidShapeView(lobe1=l1, lobe2=l2, override_mode=None)
 
-    def _sign(lobe: dict, default: float) -> float:
-        a = lobe.get("a_peak")
-        try:
-            v = float(a)
-        except (TypeError, ValueError):
-            v = default
-        return 1.0 if v >= 0 else -1.0
+    def _sign(lobe: LobeFit) -> float:
+        return 1.0 if float(lobe.a_peak) >= 0 else -1.0
 
-    sign1 = _sign(l1, 1.0)
-    sign2 = _sign(l2, -1.0)
-    l1["half_width_s"] = W; l1["frac_flat"] = f
-    l1["a_peak"] = sign1 * abs_A
-    l2["half_width_s"] = W; l2["frac_flat"] = f
-    l2["a_peak"] = sign2 * abs_A
-    return {
-        "lobe1": l1, "lobe2": l2,
-        "override_mode": str(override.get("mode", "manual")),
-    }
+    sign1 = _sign(l1)
+    sign2 = _sign(l2)
+    l1 = l1.model_copy(update={
+        "half_width_s": W, "frac_flat": f, "a_peak": sign1 * abs_A,
+    })
+    l2 = l2.model_copy(update={
+        "half_width_s": W, "frac_flat": f, "a_peak": sign2 * abs_A,
+    })
+    return TrapezoidShapeView(
+        lobe1=l1, lobe2=l2,
+        override_mode=str(override.get("mode", "manual")),
+    )
 
 
 def _default_new_segment_bounds(
@@ -842,7 +865,9 @@ def render_segment_sidebar(segments_df: pd.DataFrame, sel: int | None) -> None:
         st.rerun()
 
 
-def render_predict_segment_sidebar(rows: list[dict], selected: int) -> None:
+def render_predict_segment_sidebar(
+    rows: list[PredictionRow], selected: int,
+) -> None:
     """Prediction-step sidebar — same arrow-key-navigable list as the
     segmentation step, minus the edit / delete / add controls.
     Prediction is read-only w.r.t. the segment layout.
@@ -852,19 +877,19 @@ def render_predict_segment_sidebar(rows: list[dict], selected: int) -> None:
         "Click a row or focus the list and use ↑ / ↓ arrow keys."
     )
 
-    options = [int(r["segment"]) for r in rows]
-    by_id = {int(r["segment"]): r for r in rows}
+    options = [r.segment for r in rows]
+    by_id = {r.segment: r for r in rows}
     overrides = st.session_state.get("lobe_overrides", {}) or {}
 
     def _label(seg_id: int) -> str:
         r = by_id[seg_id]
-        dh = r["delta_height_m"]
+        dh = r.delta_height_m
         dh_str = f"Δh={dh:+.2f}m" if np.isfinite(dh) else "Δh=—"
         # ✱ marks segments with a manual trapezoid override staged for
         # this prediction. Two-space pad keeps un-overridden rows aligned.
         star = "✱ " if seg_id in overrides else "  "
-        return (f"#{r['segment']:<2} {star}{r['type']:<4}  "
-                f"{r['start_s']:5.1f}–{r['end_s']:5.1f}s  {dh_str}")
+        return (f"#{r.segment:<2} {star}{r.type:<4}  "
+                f"{r.start_s:5.1f}–{r.end_s:5.1f}s  {dh_str}")
 
     new_sel = st.sidebar.radio(
         "Segments", options=options,

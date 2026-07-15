@@ -176,16 +176,20 @@ class ExperimentBarMixin:
             # the detector each time.
             self.predictions = findSegmentsDetailed(acc, resample=True)
             self._detail_cache = {
-                int(p["index"]): p.get("detail") for p in self.predictions
+                p.index: p.detail for p in self.predictions
             }
         except Exception as e:  # noqa: BLE001
             messagebox.showerror("Detector failed", f"{type(e).__name__}: {e}")
             self.predictions = []
 
         # Barometric altitude (ground-truth reference) for the overview graph.
-        # Empty frame when the experiment has no pressure stream.
+        # ``None`` when the experiment has no pressure stream (the package
+        # raises EmptyInputError on an empty frame, so guard before calling).
         try:
-            self._baro_alt = barometricAltitude(self.prs)
+            self._baro_alt = (
+                barometricAltitude(self.prs)
+                if self.prs is not None and len(self.prs) else None
+            )
         except Exception:  # noqa: BLE001
             self._baro_alt = None
 
