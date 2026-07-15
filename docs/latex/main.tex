@@ -5319,4 +5319,130 @@ mostly-upright split.}
 \label{tab:gyro-cal}
 \end{table}
 
+\clearpage
+\section{Walkthrough: the Mahony filter step by step}
+\label{sec:mahony-walkthrough}
+
+This section traces one run of the Mahony filter (\S\ref{sec:gyro-mahony}) end to
+end: the two sensor streams that enter, the orientation and bias that leave, and
+the fixed operation sequence each sample runs. Figure~\ref{fig:mahony-iter} is
+the per-sample dataflow; Figure~\ref{fig:mahony-walk} shows every internal
+quantity on a controlled rotating ride.
+
+\paragraph{What we do.} We turn a tilted, rotating phone's raw inertial stream
+into the real vertical acceleration $a_z$. The phone's own $z$-axis is not
+world-vertical, so we track the device orientation $q(t)$ every sample, rotate
+the measured acceleration into the world frame, and subtract gravity. The
+gyroscope tracks orientation change accurately but drifts; the accelerometer
+fixes the gravity direction over the long term but is corrupted by the ride's own
+motion. Mahony fuses the two with a proportional--integral correction on $SO(3)$.
+
+\paragraph{Input.} Two body-frame streams, resampled onto the accelerometer clock
+at rate $f_s$ (\S\ref{sec:gyro}):
+\begin{itemize}\itemsep1pt
+  \item accelerometer $\mathbf a_k\in\mathbb R^3$ (m/s$^2$) --- specific force. At
+        rest it reads $+g$ along the phone's sensed up; it carries gravity plus
+        the ride's linear acceleration.
+  \item gyroscope $\omega_k\in\mathbb R^3$ (rad/s) --- angular rate about the
+        phone's own axes.
+\end{itemize}
+Two scalars seed the run: the initial orientation $q_0$ from the opening
+stationary window, and the gravity magnitude $g$.
+
+\paragraph{Output.} The per-sample body$\to$world orientation $q_k$ and gyro-bias
+estimate $b_k$. Rotating $\mathbf a_k$ by $q_k$ and removing gravity yields $a_z$,
+the signed vertical acceleration the height predictors consume.
+
+\paragraph{The iteration.} The filter is a single loop over samples. It carries
+two state variables between iterations --- the orientation $q$ and the bias
+estimate $b$ --- and updates both each sample through the fixed sequence of
+Figure~\ref{fig:mahony-iter}:
+\begin{enumerate}\itemsep2pt
+  \item \textbf{Predict} where gravity should point from the current orientation:
+        $\hat v=R(q_k)^{\!\top}\hat z$, the world up-axis in body coordinates.
+  \item \textbf{Measure} where gravity actually points:
+        $\hat a=\mathbf a_k/|\mathbf a_k|$.
+  \item \textbf{Form the error} as a cross product $e=(\hat a\times\hat v)\,w$
+        (Eq.~\ref{eq:mahony-e}). Its axis is the rotation aligning prediction with
+        measurement and $\|e\|\approx\sin(\text{tilt error})$. The trust gate $w$
+        (Eq.~\ref{eq:trust}) scales it, so the correction vanishes when
+        $|\mathbf a|\neq g$.
+  \item \textbf{Update the bias} by integrating the error:
+        $b_{k+1}=b_k-k_I\,e\,\Delta t$ (Eq.~\ref{eq:mahony-b}).
+  \item \textbf{Correct the rate}: $\omega'=\omega_k-b_{k+1}+k_P\,e$
+        (Eq.~\ref{eq:mahony-q}) --- subtract the learned bias, then steer toward
+        gravity by $k_P e$.
+  \item \textbf{Integrate} the corrected rate into the orientation:
+        $q_{k+1}=q_k\otimes\exp(\tfrac12\omega'\Delta t)$, renormalised
+        (Eq.~\ref{eq:mahony-disc}).
+\end{enumerate}
+
+\begin{figure}[H]
+  \centering
+  \resizebox{\textwidth}{!}{%
+  \begin{tikzpicture}[font=\small,>=Latex,
+    io/.style={align=center},
+    b/.style={draw,rounded corners,align=center,fill=blue!4,inner sep=6pt,
+              minimum height=13mm},
+    node distance=10mm]
+    \node[io] (in) {\textbf{sample }$k$\\[2pt] state $q_k,\,b_k$\\ gyro $\omega_k$\\ accel $\mathbf a_k$};
+    \node[b,right=of in] (e) {(1--3) gravity error\\[3pt]
+        $\hat a=\dfrac{\mathbf a_k}{|\mathbf a_k|},\quad \hat v=R(q_k)^{\!\top}\hat z$\\[4pt]
+        $e=(\hat a\times\hat v)\,w$};
+    \node[b,right=of e] (pi) {(4--5) PI correction\\[3pt]
+        $b_{k+1}=b_k-k_I\,e\,\Delta t$\\[3pt]
+        $\omega'=\omega_k-b_{k+1}+k_P\,e$};
+    \node[b,right=of pi] (int) {(6) integrate\\[3pt]
+        $q_{k+1}=q_k\otimes$\\[2pt] $\exp(\tfrac12\,\omega'\Delta t)$};
+    \node[io,right=of int] (out) {\textbf{output}\\[2pt] $q_{k+1}$\\ $b_{k+1}$};
+    \draw[->] (in)--(e);
+    \draw[->] (e)--node[above]{$e,\,w$}(pi);
+    \draw[->] (pi)--node[above]{$\omega'$}(int);
+    \draw[->] (int)--(out);
+    \draw[->,dashed] (out.south) -- ++(0,-1.4cm) -|
+        node[pos=0.5,below,font=\footnotesize]{state $q,b$ carried to sample $k{+}1$}
+        (in.south);
+  \end{tikzpicture}}
+  \caption{One iteration of the Mahony loop. Two state variables --- orientation
+  $q$ and bias $b$ --- persist across samples (dashed feedback). Each sample
+  predicts gravity from $q$, compares it with the accelerometer to form the gated
+  error $e$, integrates $e$ into the bias, corrects the gyro rate, and integrates
+  that back into $q$.}
+  \label{fig:mahony-iter}
+\end{figure}
+
+\paragraph{What each iteration's output means.} Every sample emits an updated
+$(q_{k+1},b_{k+1})$. The orientation $q_{k+1}$ is the phone's current attitude:
+panel~(5) of Figure~\ref{fig:mahony-walk} shows the tilt it encodes tracking the
+true tilt to within a degree. The bias $b_{k+1}$ is the running estimate of the
+gyro's constant offset; panel~(4) shows all three axes climbing to the injected
+true bias (dashed) within a few seconds, after which the gyro stays de-biased for
+the rest of the ride. The intermediate error $e$ and gate $w$ explain how. Panel~(2) is the
+gravity-direction error the correction nulls; panel~(3) shows $w$ collapsing
+during the two acceleration pulses (shaded), which freezes the accelerometer
+correction exactly when ride motion would otherwise read as tilt.
+Panel~(6) is the payoff: Mahony's $a_z$ recovers the true trapezoid, while the
+fixed-frame projection, which ignores the $30^\circ$ rotation, leaks gravity and
+distorts both pulses.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{gyro/mahony_walkthrough.png}
+  \caption{\textbf{The Mahony filter on a controlled rotating up-ride}, generated
+  by \texttt{scripts/make\_mahony\_walkthrough.py}. A phone at $16^\circ$ tilt
+  rotates smoothly to $32^\circ$ while riding an elevator whose true vertical
+  acceleration is a two-lobe trapezoid (accelerate, cruise, decelerate); we
+  inject a constant gyro bias. \textbf{(1)} the two inputs: $|\mathbf a|$
+  leaves $g$ only inside the pulses (shaded), $|\omega|$ rises with the hand
+  rotation. \textbf{(2)} the angle between measured and predicted gravity, whose
+  sine is $\|e\|$. \textbf{(3)} the trust gate $w$, dropping to $\approx0.8$ in
+  each pulse. \textbf{(4)} the learned bias converging to the injected truth
+  (dashed). \textbf{(5)} the estimated tilt tracking the true tilt. \textbf{(6)}
+  the recovered $a_z$: Mahony (green) matches the truth (dashed); the fixed-frame
+  baseline (grey) does not. The shipped \texttt{MahonyReconstructor} produces
+  every curve, and the script asserts its instrumented trace matches
+  bit-for-bit.}
+  \label{fig:mahony-walk}
+\end{figure}
+
 \end{document}

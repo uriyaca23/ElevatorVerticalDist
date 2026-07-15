@@ -88,7 +88,6 @@ class PredictionEditor(
         self.prs = None
         self._t0_ms: int = 0
         self._acc_t0_ms: float = 0.0
-        self._sig_base = None
         self._baro_alt = None
         self.predictions: list[dict] = []
 

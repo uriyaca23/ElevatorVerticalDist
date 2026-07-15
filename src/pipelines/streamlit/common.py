@@ -251,7 +251,7 @@ def init_state() -> None:
         "pending_new_segment": False,
         # Gyro orientation-reconstruction method for the display signal and
         # the ZUPT Δh (segmentation is magnitude-invariant, so it is unaffected).
-        "reconstruct":        "none",
+        "reconstruct":        "Mahony",
         # Presentation caches populated in step 3 and read by step 5, so the
         # report never re-derives anything from stage internals:
         #   display_signal — the whole-trace reconstructedSignal DataFrame.

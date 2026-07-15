@@ -18,6 +18,7 @@ import streamlit as st
 
 from pyramidElevatorDist import (
     RECONSTRUCT_CHOICES,
+    displaySeries,
     findSegmentParameters,
     findSegments,
     reconstructedSignal,
@@ -201,17 +202,22 @@ def _main_signal_figure(
     disp: pd.DataFrame, t0_ms: float,
     segments_df: pd.DataFrame, selected_idx: int | None,
     valid_intervals: list[tuple[int, int]] | None = None,
+    has_gyro: bool = False, method: str = "none",
 ) -> go.Figure:
-    """Overview: reconstructed vertical accel with the segments overlaid."""
+    """Overview: reconstructed a_z with the segments overlaid.
+
+    Shows the gyro-reconstructed vertical acceleration when a gyro is
+    present, else falls back to ``|a| − g`` (see :func:`displaySeries`).
+    """
     ts = np.asarray(disp["timestamp_ms"], dtype=float)
-    a_vert = np.asarray(disp["a_vert"], dtype=float)
+    a_vert, y_label, _ = displaySeries(disp, has_gyro, method)
     t = (ts - t0_ms) / 1000.0 if ts.size else ts
     dt = to_datetime_array(t, t0_ms)
 
     cd_full = time_customdata(t)
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=dt, y=a_vert, mode="lines", name="a_vert",
+        x=dt, y=a_vert, mode="lines", name=y_label,
         line=dict(color="#233044", width=1),
         customdata=cd_full,
         hovertemplate=hover_time_template("a=%{y:.2f} m/s²"),
@@ -241,7 +247,7 @@ def _main_signal_figure(
         )
     fig.update_layout(
         height=360, margin=dict(l=10, r=10, t=30, b=30),
-        xaxis_title="time", yaxis_title="a_vert (m/s²)",
+        xaxis_title="time", yaxis_title=f"{y_label} (m/s²)",
         xaxis=dict(type="date"),
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
@@ -354,13 +360,15 @@ def _render_reconstruction_selector(loaded: LoadedSignal) -> str:
         "Reconstruction (gyro)", RECONSTRUCT_CHOICES,
         key="reconstruct",
         help="Gyro orientation reconstruction for the displayed vertical "
-             "acceleration and the ZUPT Δh. Segmentation matches on |a|−g "
-             "and is unaffected, so the segments never change.",
+             "acceleration and the ZUPT Δh. With a gyro and a method "
+             "selected the plots show the reconstructed a_z; otherwise they "
+             "fall back to |a|−g. Segmentation matches on |a|−g and is "
+             "unaffected, so the segments never change.",
     )
     if getattr(loaded, "gyr", None) is None and choice != "none":
         st.sidebar.caption(
-            ":orange[No gyroscope in this recording — "
-            "reconstruction has no effect.]"
+            ":orange[No gyroscope in this recording — reconstruction has no "
+            "effect; plots show |a|−g.]"
         )
     return choice
 
@@ -425,6 +433,8 @@ def render() -> None:
         _main_signal_figure(
             disp, t0_ms, segments_df, sel,
             valid_intervals=loaded.valid_intervals,
+            has_gyro=loaded.gyr is not None and not loaded.gyr.empty,
+            method=method,
         ),
         use_container_width=True, key="seg_main_fig",
     )

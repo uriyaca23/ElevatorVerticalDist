@@ -10,6 +10,7 @@ clean, documented frame, so the UI stays presentation-only.
 """
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from src.physics.reconstruct_az import RECONSTRUCT_CHOICES
@@ -22,7 +23,16 @@ from src.pipelines.inprocess import (
     signal as _signal,
 )
 
-__all__ = ["reconstructedSignal", "barometricAltitude", "RECONSTRUCT_CHOICES"]
+__all__ = [
+    "reconstructedSignal",
+    "barometricAltitude",
+    "displaySeries",
+    "RECONSTRUCT_CHOICES",
+]
+
+#: Human labels for the two vertical-acceleration display modes.
+AZ_LABEL_RECONSTRUCTED = "a_z reconstructed"
+AZ_LABEL_FALLBACK = "|a|-g"
 
 
 def reconstructedSignal(
@@ -62,6 +72,49 @@ def reconstructedSignal(
         acc, gyro=gyro, reconstruct=reconstruct,
         resample_hz=(RESAMPLE_TARGET_HZ if resample else None),
     )
+
+
+def displaySeries(
+    sig: pd.DataFrame,
+    has_gyro: bool = False,
+    reconstruct: str = "none",
+) -> tuple[np.ndarray, str, bool]:
+    """Pick the vertical-acceleration trace to display, with its label.
+
+    The UI shows the gyro-reconstructed vertical acceleration (``a_vert`` —
+    the signed, world-frame a_z) whenever a reconstruction is actually
+    *active*: a gyro stream is present **and** ``reconstruct != "none"``.
+    Without a gyro (or with ``reconstruct == "none"``) there is nothing to
+    reconstruct, so it falls back to the rotation-invariant ``|a| − g``
+    residual the detector matches on. The plain fixed-gravity projection is
+    intentionally never surfaced — the display is always either the
+    reconstructed a_z or ``|a| − g``.
+
+    Parameters
+    ----------
+    sig:
+        A frame from :func:`reconstructedSignal` (columns ``a_vert``,
+        ``a_mag_g``). ``None`` / empty is tolerated.
+    has_gyro:
+        Whether the experiment actually has a gyroscope stream.
+    reconstruct:
+        The selected reconstruction method (``"none"`` or a filter name).
+
+    Returns
+    -------
+    (values, label, reconstructed):
+        ``values`` — the chosen column as a float ndarray (empty when
+        ``sig`` is empty); ``label`` — ``"a_z reconstructed"`` or
+        ``"|a|-g"``; ``reconstructed`` — which branch was taken, so callers
+        can drop ``|a| − g``-domain overlays (e.g. lobe amplitude markers)
+        when the signed a_z is on screen.
+    """
+    reconstructed = bool(has_gyro) and reconstruct not in (None, "none")
+    col = "a_vert" if reconstructed else "a_mag_g"
+    label = AZ_LABEL_RECONSTRUCTED if reconstructed else AZ_LABEL_FALLBACK
+    if sig is None or len(sig) == 0 or col not in getattr(sig, "columns", []):
+        return np.empty(0, dtype=float), label, reconstructed
+    return sig[col].to_numpy(dtype=float), label, reconstructed
 
 
 def barometricAltitude(

@@ -11,8 +11,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from pyramidElevatorDist import (
-    findSegmentsDetailed, reconstructedSignal, barometricAltitude,
-    RECONSTRUCT_CHOICES,
+    findSegmentsDetailed, barometricAltitude, RECONSTRUCT_CHOICES,
 )
 
 from src.data.loader import (
@@ -182,13 +181,6 @@ class ExperimentBarMixin:
         except Exception as e:  # noqa: BLE001
             messagebox.showerror("Detector failed", f"{type(e).__name__}: {e}")
             self.predictions = []
-
-        # Reconstruction-invariant display series cached once for the detail
-        # panels (|a|-g does not change with the orientation reconstruction).
-        try:
-            self._sig_base = reconstructedSignal(acc, resample=True)
-        except Exception:  # noqa: BLE001
-            self._sig_base = None
 
         # Barometric altitude (ground-truth reference) for the overview graph.
         # Empty frame when the experiment has no pressure stream.

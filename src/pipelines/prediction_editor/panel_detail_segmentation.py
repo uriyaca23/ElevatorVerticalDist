@@ -3,8 +3,11 @@
 Everything shown here is read from
 :func:`pyramidElevatorDist.findSegmentParameters` — the per-lobe R² heatmaps,
 the per-sign correlation curves and the fitted lobe centres. The signal
-strip plots the ``|a|-g`` residual from
-:func:`pyramidElevatorDist.reconstructedSignal`. No detector internals.
+strip plots whatever :func:`pyramidElevatorDist.displaySeries` selects: the
+signed reconstructed a_z when a gyro + method are active, else the ``|a|-g``
+residual the detector matches on. The trapezoid lobe amplitude markers live
+in the ``|a|-g`` domain, so they are only drawn in the ``|a|-g`` fallback.
+No detector internals.
 """
 from __future__ import annotations
 
@@ -14,7 +17,7 @@ import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
-from pyramidElevatorDist import findSegmentParameters
+from pyramidElevatorDist import displaySeries, findSegmentParameters
 
 from .widgets_common import (
     PRED_COLORS, TYPE_COLORS, make_tick_formatter, set_verdict,
@@ -113,15 +116,23 @@ class DetailSegmentationMixin:
         ax.legend(fontsize=7, loc="lower right", framealpha=0.85)
 
     def _slice_base_signal(self, t_lo: float, t_hi: float):
-        """Return ``(t_s, a_mag_g)`` for the cached display series inside the
-        window, both as numpy arrays (empty when unavailable)."""
-        sig = self._sig_base
-        if sig is None or sig.empty:
-            return np.array([]), np.array([])
+        """Return ``(t_s, a, label, reconstructed)`` for the display series
+        inside the window. The series follows the active reconstruction (the
+        same method the overview draws): the signed reconstructed a_z when a
+        gyro + method are selected, else the ``|a|-g`` fallback. Time / values
+        are numpy arrays, empty when unavailable."""
+        method = (
+            self.reconstruct_var.get()
+            if hasattr(self, "reconstruct_var") else "none"
+        )
+        has_gyro = self.gyro is not None and not self.gyro.empty
+        sig = self._display_signal(method)
+        y, label, reconstructed = displaySeries(sig, has_gyro, method)
+        if sig is None or sig.empty or not y.size:
+            return np.array([]), np.array([]), label, reconstructed
         ts = (sig["timestamp_ms"].to_numpy(dtype=float) - self._t0_ms) / 1000.0
-        a = sig["a_mag_g"].to_numpy(dtype=float)
         m = (ts >= t_lo) & (ts <= t_hi)
-        return ts[m], a[m]
+        return ts[m], y[m], label, reconstructed
 
     # ---------- Shared render ----------
 
@@ -162,8 +173,10 @@ class DetailSegmentationMixin:
                            mark_W=W_star, mark_f=f_star)
 
         pad = self._current_pad_s()
-        t_arr, a_arr = self._slice_base_signal(t_lo - pad, t_hi + pad)
-        ax_sig.plot(t_arr, a_arr, color="#2c3e50", lw=0.7, label="|a|-g")
+        t_arr, a_arr, y_label, reconstructed = self._slice_base_signal(
+            t_lo - pad, t_hi + pad,
+        )
+        ax_sig.plot(t_arr, a_arr, color="#2c3e50", lw=0.7, label=y_label)
         ax_sig.axhline(0, color="gray", lw=0.4, ls="--", alpha=0.5)
         if gt_span is not None:
             ax_sig.axvspan(gt_span[0], gt_span[1],
@@ -171,8 +184,12 @@ class DetailSegmentationMixin:
                            alpha=0.22, zorder=0)
         for L in (lobe1, lobe2):
             t_c = float(L["t_c"])
-            A = float(L["a_peak"])
-            ax_sig.scatter([t_c], [A], color="#c0392b", s=26, zorder=5)
+            # The lobe amplitude (a_peak) is a |a|-g-domain quantity, so only
+            # mark it when the |a|-g fallback is on screen; the time marker is
+            # domain-agnostic and always drawn.
+            if not reconstructed:
+                ax_sig.scatter([t_c], [float(L["a_peak"])],
+                               color="#c0392b", s=26, zorder=5)
             ax_sig.axvline(t_c, color="#c0392b", lw=0.6, ls=":", alpha=0.7)
         pred_col = PRED_COLORS.get(ride_type, "#888888")
         ax_sig.axvline(float(params["t_start_s"]), color=pred_col,
@@ -180,7 +197,7 @@ class DetailSegmentationMixin:
         ax_sig.axvline(float(params["t_end_s"]), color=pred_col,
                        lw=1.0, ls="--", alpha=0.8)
         self._apply_acc_time_axis(ax_sig)
-        ax_sig.set_ylabel("|a|-g (m/s²)")
+        ax_sig.set_ylabel(f"{y_label} (m/s²)")
         ax_sig.grid(True, alpha=0.25)
         ax_sig.legend(fontsize=8, loc="upper right")
         ax_sig.set_title(title, fontsize=9)

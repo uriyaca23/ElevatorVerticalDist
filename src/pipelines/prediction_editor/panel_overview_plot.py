@@ -1,9 +1,10 @@
 """Left timeline: the whole-trace vertical-accel overview plot.
 
-The signal comes straight from :func:`pyramidElevatorDist.reconstructedSignal`
-(``a_vert`` after the chosen orientation reconstruction, plus ``|a|-g`` for
-context). GT bands and detector prediction spans are overlaid; this file
-owns no signal processing.
+The signal comes straight from :func:`pyramidElevatorDist.reconstructedSignal`;
+:func:`pyramidElevatorDist.displaySeries` then picks the trace to draw — the
+gyro-reconstructed a_z when a gyro + method are active, else the ``|a|-g``
+fallback. GT bands and detector prediction spans are overlaid; this file owns
+no signal processing.
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from matplotlib.backends.backend_tkagg import (
 )
 from matplotlib.figure import Figure
 
-from pyramidElevatorDist import reconstructedSignal
+from pyramidElevatorDist import displaySeries, reconstructedSignal
 
 from .widgets_common import (
     HIGHLIGHT_COLOR, PRED_COLORS, TYPE_COLORS, make_tick_formatter,
@@ -112,17 +113,17 @@ class OverviewPlotMixin:
             ax_alt = None
 
         # --- acceleration panel ---
-        if sig is not None and not sig.empty:
+        has_gyro = self.gyro is not None and not self.gyro.empty
+        y_vals, y_label, _ = displaySeries(sig, has_gyro, method)
+        if sig is not None and not sig.empty and y_vals.size:
             ts = (sig["timestamp_ms"].to_numpy(dtype=float) - self._t0_ms) / 1000.0
-            tx, av = self._decimate(ts, sig["a_vert"].to_numpy(dtype=float))
-            _, am = self._decimate(ts, sig["a_mag_g"].to_numpy(dtype=float))
-            ax.plot(tx, av, color="#2c3e50", lw=0.6, label="a_vert")
-            ax.plot(tx, am, color="#e67e22", lw=0.6, alpha=0.5, label="|a|-g")
+            tx, av = self._decimate(ts, y_vals)
+            ax.plot(tx, av, color="#2c3e50", lw=0.6, label=y_label)
             ax.axhline(0, color="gray", lw=0.4, ls="--", alpha=0.5)
-        ax.set_ylabel("a_vert (m/s²)")
+        ax.set_ylabel(f"{y_label} (m/s²)")
         ax.legend(loc="upper right", fontsize=7, frameon=False)
         ax.grid(True, alpha=0.3)
-        ax.set_title(f"a_vert  (reconstruct = {method})", fontsize=9, loc="left")
+        ax.set_title(f"{y_label}  (reconstruct = {method})", fontsize=9, loc="left")
 
         # --- barometric altitude (ground-truth) panel ---
         if ax_alt is not None:

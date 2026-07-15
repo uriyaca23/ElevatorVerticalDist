@@ -14,6 +14,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from pyramidElevatorDist import (
+    displaySeries,
     predictByParameters,
     predictSegment,
     reconstructedSignal,
@@ -183,14 +184,15 @@ def _run_predictions(
 def _prediction_main_figure(
     disp: pd.DataFrame, t0_ms: float, rows: list[dict], selected: int | None,
     valid_intervals: list[tuple[int, int]] | None = None,
+    has_gyro: bool = False, method: str = "none",
 ) -> go.Figure:
     ts = np.asarray(disp["timestamp_ms"], dtype=float)
-    a_vert = np.asarray(disp["a_vert"], dtype=float)
+    a_vert, y_label, _ = displaySeries(disp, has_gyro, method)
     t = (ts - t0_ms) / 1000.0 if ts.size else ts
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=to_datetime_array(t, t0_ms), y=a_vert,
-        mode="lines", name="a_vert",
+        mode="lines", name=y_label,
         line=dict(color="#233044", width=1),
         customdata=time_customdata(t),
         hovertemplate=hover_time_template("a=%{y:.2f} m/s²"),
@@ -217,7 +219,7 @@ def _prediction_main_figure(
     fig.update_layout(
         height=330, margin=dict(l=10, r=10, t=20, b=30),
         xaxis=dict(title="time", type="date"),
-        yaxis_title="a_vert (m/s²)",
+        yaxis_title=f"{y_label} (m/s²)",
         hovermode="x unified", plot_bgcolor="#fafbfc",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
     )
@@ -756,6 +758,8 @@ def render() -> None:
     st.plotly_chart(
         _prediction_main_figure(
             disp, t0_ms, rows, selected, valid_intervals=loaded.valid_intervals,
+            has_gyro=loaded.gyr is not None and not loaded.gyr.empty,
+            method=method,
         ),
         use_container_width=True, key="pred_main_fig",
     )

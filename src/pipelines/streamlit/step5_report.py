@@ -29,7 +29,9 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from pyramidElevatorDist import findSegmentParameters, reconstructedSignal
+from pyramidElevatorDist import (
+    displaySeries, findSegmentParameters, reconstructedSignal,
+)
 
 from .common import (
     LoadedSignal,
@@ -274,7 +276,9 @@ def _style_axes(ax) -> None:
 
 def _build_main_signal_png(disp: pd.DataFrame, t0_ms: float,
                            segments: pd.DataFrame,
-                           selected: int | None = None) -> bytes:
+                           selected: int | None = None,
+                           has_gyro: bool = False,
+                           method: str = "none") -> bytes:
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -283,12 +287,12 @@ def _build_main_signal_png(disp: pd.DataFrame, t0_ms: float,
     except Exception:
         return b""
     ts = np.asarray(disp["timestamp_ms"], dtype=float)
-    a_vert = np.asarray(disp["a_vert"], dtype=float)
+    a_vert, y_label, _ = displaySeries(disp, has_gyro, method)
     t = (ts - t0_ms) / 1000.0 if ts.size else ts
     dt = to_datetime_array(t, t0_ms)
     fig, ax = plt.subplots(figsize=(8.0, 2.9), dpi=180)
     fig.patch.set_facecolor("white")
-    ax.plot(dt, a_vert, color="#233044", lw=0.6, alpha=0.85, label="a_vert")
+    ax.plot(dt, a_vert, color="#233044", lw=0.6, alpha=0.85, label=y_label)
     for i, row in segments.iterrows():
         try:
             s = float(row["start_s"]); e = float(row["end_s"])
@@ -302,7 +306,7 @@ def _build_main_signal_png(disp: pd.DataFrame, t0_ms: float,
     locator = AutoDateLocator()
     ax.xaxis.set_major_locator(locator)
     ax.xaxis.set_major_formatter(AutoDateFormatter(locator))
-    ax.set_xlabel("time"); ax.set_ylabel("a_vert (m/s²)")
+    ax.set_xlabel("time"); ax.set_ylabel(f"{y_label} (m/s²)")
     ax.legend(loc="upper right", fontsize=7, frameon=False, ncol=2)
     _style_axes(ax)
     fig.autofmt_xdate()
@@ -1008,6 +1012,7 @@ def _build_pdf(
     segments: pd.DataFrame,
     rows: list[dict],
     rows_by_algo: dict[str, list[dict]] | None = None,
+    method: str = "none",
 ) -> bytes:
     from reportlab.lib import colors as rl_colors
     from reportlab.lib.enums import TA_RIGHT
@@ -1078,7 +1083,11 @@ def _build_pdf(
     ))
 
     # Overview signal.
-    main_png = _build_main_signal_png(disp, t0_ms, segments, selected=None)
+    main_png = _build_main_signal_png(
+        disp, t0_ms, segments, selected=None,
+        has_gyro=loaded.gyr is not None and not loaded.gyr.empty,
+        method=method,
+    )
     if main_png:
         story.append(Spacer(1, 0.4 * cm))
         story.append(Image(io.BytesIO(main_png),
@@ -1427,7 +1436,7 @@ def render() -> None:
     try:
         pdf_bytes = _build_pdf(
             loaded, disp, t0_ms, correlation, predictions, segments, rows,
-            rows_by_algo,
+            rows_by_algo, method=method,
         )
     except Exception as e:
         st.error(f"PDF build failed: {type(e).__name__}: {e}")

@@ -30,7 +30,9 @@ from .segmentor import (
     findSegments, findSegmentParameters, findSegmentsDetailed,
 )
 from .predection import predictSegment, predictByParameters
-from .signal import reconstructedSignal, barometricAltitude, RECONSTRUCT_CHOICES
+from .signal import (
+    reconstructedSignal, displaySeries, barometricAltitude, RECONSTRUCT_CHOICES,
+)
 
 __version__ = "0.1.0"
 
@@ -41,6 +43,7 @@ __all__ = [
     "predictSegment",
     "predictByParameters",
     "reconstructedSignal",
+    "displaySeries",
     "barometricAltitude",
     "RECONSTRUCT_CHOICES",
 ]
