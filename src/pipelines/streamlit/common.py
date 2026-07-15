@@ -253,7 +253,7 @@ def init_state() -> None:
         "segments_df":        None,
         "selected_segment":   0,
         "prediction_rows":    None,   # primary-algo rows (Trapezoid)
-        "prediction_rows_by_algo": None,  # {algo_id: list[dict]}
+        "prediction_rows_by_algo": None,  # {algo_id: list[PredictionRow]}
         "predict_selected":   None,
         "data_input_mode":    None,   # "phone" | "file" | None (= picker)
         "pending_new_segment": False,
