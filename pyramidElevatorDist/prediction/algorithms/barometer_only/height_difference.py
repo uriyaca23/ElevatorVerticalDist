@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from pyramidElevatorDist.physics.barometric import pressure_to_altitude
-from src.prediction.algorithms.configTypes import BarometerHeightDiffConfig
+from pyramidElevatorDist.prediction.algorithms.configTypes import BarometerHeightDiffConfig
 
 
 def predict_height_difference_from_barometer(

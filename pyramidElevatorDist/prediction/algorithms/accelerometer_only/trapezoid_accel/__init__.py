@@ -20,7 +20,7 @@ mathematical content and :class:`~.estimator.TrapezoidAccelEstimator`
 for the public interface.
 """
 
-from src.prediction.algorithms.configTypes import TrapezoidAccelConfig
+from pyramidElevatorDist.prediction.algorithms.configTypes import TrapezoidAccelConfig
 from .estimator import TrapezoidAccelEstimator
 
 __all__ = ["TrapezoidAccelConfig", "TrapezoidAccelEstimator"]

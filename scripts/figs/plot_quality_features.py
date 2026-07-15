@@ -47,13 +47,13 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from src.prediction.algorithms.accelerometer_only.zupt_accel.estimator import (  # noqa: E402
+from pyramidElevatorDist.prediction.algorithms.accelerometer_only.zupt_accel.estimator import (  # noqa: E402
     ZuptAccelEstimator,
 )
-from src.prediction.algorithms.accelerometer_only.trapezoid_accel.estimator import (  # noqa: E402
+from pyramidElevatorDist.prediction.algorithms.accelerometer_only.trapezoid_accel.estimator import (  # noqa: E402
     TrapezoidAccelEstimator,
 )
-from src.prediction.algorithms.accelerometer_only.trapezoid_accel.pulse_pair import (  # noqa: E402
+from pyramidElevatorDist.prediction.algorithms.accelerometer_only.trapezoid_accel.pulse_pair import (  # noqa: E402
     trapezoid_kernel,
 )
 from src.prediction.evaluation.dataset import load_all_segments  # noqa: E402

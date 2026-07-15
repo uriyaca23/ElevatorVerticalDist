@@ -33,10 +33,10 @@ from src.data.loader import list_experiments  # noqa: E402
 from src.segmentation.algorithms.configTypes import (  # noqa: E402
     SEGMENT_ALGORITHM_CONFIG, SegmentAlgorithm,
 )
-from src.prediction.algorithms.configTypes import (  # noqa: E402
+from pyramidElevatorDist.prediction.algorithms.configTypes import (  # noqa: E402
     PREDICT_ALGORITHM_CONFIG, PredictAlgorithm,
 )
-from src.prediction.algorithms.predictor import Predictor  # noqa: E402
+from pyramidElevatorDist.prediction.algorithms.predictor import Predictor  # noqa: E402
 
 # Reuse the heavy lifting from the existing pipeline report.
 from pipeline_evaluation_report import (  # type: ignore  # noqa: E402

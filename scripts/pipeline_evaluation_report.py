@@ -62,10 +62,10 @@ from src.segmentation.evaluate.evaluator import (  # noqa: E402
     _prepare_segmenter_input, _gt_to_interval_dicts,
     _segments_to_interval_dicts, _phone_model_from_metadata,
 )
-from src.prediction.algorithms.configTypes import (  # noqa: E402
+from pyramidElevatorDist.prediction.algorithms.configTypes import (  # noqa: E402
     PREDICT_ALGORITHM_CONFIG, PredictAlgorithm,
 )
-from src.prediction.algorithms.predictor import Predictor  # noqa: E402
+from pyramidElevatorDist.prediction.algorithms.predictor import Predictor  # noqa: E402
 
 
 OUT_ROOT = REPO_ROOT / "docs" / "latex" / "figures" / "pipeline"

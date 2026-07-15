@@ -31,12 +31,11 @@ from .configTypes import (
 def _resample_to(frame: Optional[pd.DataFrame], hz: int) -> Optional[pd.DataFrame]:
     """Normalize a timestamped window onto a uniform ``hz`` grid (gap-aware,
     time-correct). Returns the input unchanged when it is unusable
-    (``None`` / <2 rows / no ``timestamp_ms``). Lazy import breaks the
-    loader<->prediction module cycle."""
+    (``None`` / <2 rows / no ``timestamp_ms``)."""
     if (frame is None or "timestamp_ms" not in getattr(frame, "columns", [])
             or len(frame) < 2):
         return frame
-    from src.data.loader import resample_sensor_with_gaps
+    from pyramidElevatorDist.utils.resampling import resample_sensor_with_gaps
     resampled, _intervals = resample_sensor_with_gaps(frame, target_hz=hz)
     return resampled
 

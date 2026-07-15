@@ -45,7 +45,7 @@ import pandas as pd
 
 from src.data.loader import add_selection_args, resolve_experiments
 from pyramidElevatorDist.physics.reconstruct_az import RECONSTRUCTORS, SensorChannel, build
-from src.prediction.algorithms import (
+from pyramidElevatorDist.prediction.algorithms import (
     PREDICT_ALGORITHM_CONFIG,
     PredictAlgorithm,
     Predictor,

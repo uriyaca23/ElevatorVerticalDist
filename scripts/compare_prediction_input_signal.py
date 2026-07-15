@@ -29,7 +29,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from src.data.loader import list_experiments  # noqa: E402
-from src.prediction.algorithms import (  # noqa: E402
+from pyramidElevatorDist.prediction.algorithms import (  # noqa: E402
     PREDICT_ALGORITHM_CONFIG,
     PredictAlgorithm,
     Predictor,

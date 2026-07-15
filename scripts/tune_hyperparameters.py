@@ -45,7 +45,7 @@ What you get out of it
    improvement vs the current defaults.
 3. Updated ``config.json`` files (backed up first; skipped under --dry-run):
      - src/segmentation/algorithms/config.json   (key: acc_template_match)
-     - src/prediction/algorithms/config.json      (keys: zupt_accel, trapezoid_accel)
+     - pyramidElevatorDist/prediction/algorithms/config.json      (keys: zupt_accel, trapezoid_accel)
    These are the live source of truth — every Segmenter()/Predictor() reads
    them via load_params(), so the new values take effect on the next run.
 4. Refit conformal calibration for the winning prediction configs:
@@ -103,16 +103,16 @@ from src.segmentation.algorithms.configTypes import (  # noqa: E402
 from src.segmentation.algorithms.segmenter import Segmenter  # noqa: E402
 from src.segmentation.algorithms.metrics import IntervalPredictionMetrics  # noqa: E402
 
-from src.prediction.algorithms import (  # noqa: E402
+from pyramidElevatorDist.prediction.algorithms import (  # noqa: E402
     PREDICT_ALGORITHM_CONFIG,
     PredictAlgorithm,
     Predictor,
     ZuptAccelConfig,
 )
-from src.prediction.algorithms.accelerometer_only.trapezoid_accel import (  # noqa: E402
+from pyramidElevatorDist.prediction.algorithms.accelerometer_only.trapezoid_accel import (  # noqa: E402
     TrapezoidAccelConfig,
 )
-from src.prediction.algorithms.configTypes import (  # noqa: E402
+from pyramidElevatorDist.prediction.algorithms.configTypes import (  # noqa: E402
     DEFAULT_CONFIG_PATH as PRED_CONFIG_PATH,
 )
 from src.prediction.evaluation.dataset import load_all_segments  # noqa: E402

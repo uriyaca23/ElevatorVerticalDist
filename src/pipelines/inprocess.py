@@ -47,7 +47,7 @@ import pandas as pd
 from src.data.loader import resample_sensor_with_gaps
 from pyramidElevatorDist.physics.barometric import pressure_to_altitude
 from pyramidElevatorDist.physics.reconstruct_az import reconstruct_az
-from src.prediction.algorithms import (
+from pyramidElevatorDist.prediction.algorithms import (
     PREDICT_ALGORITHM_CONFIG, PredictAlgorithm, Predictor,
 )
 from src.segmentation.algorithms.configTypes import (

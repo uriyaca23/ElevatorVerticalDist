@@ -28,7 +28,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from src.prediction.algorithms import (
+from pyramidElevatorDist.prediction.algorithms import (
     PREDICT_ALGORITHM_CONFIG, PredictAlgorithm, Predictor,
 )
 from src.prediction.evaluation.dataset import build_segment_records

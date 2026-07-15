@@ -35,11 +35,11 @@ import pandas as pd  # noqa: E402
 
 from src.data.loader import getExperimentData
 from pyramidElevatorDist.physics.barometric import pressure_to_altitude
-from src.prediction.algorithms.configTypes import (
+from pyramidElevatorDist.prediction.algorithms.configTypes import (
     PREDICT_ALGORITHM_CONFIG,
     PredictAlgorithm,
 )
-from src.prediction.algorithms.predictor import Predictor
+from pyramidElevatorDist.prediction.algorithms.predictor import Predictor
 from src.segmentation.algorithms.configTypes import (
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,

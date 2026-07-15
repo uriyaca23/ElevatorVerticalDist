@@ -84,7 +84,7 @@ from src.data.loader import (
     load_experiment_index,
     resolve_experiments,
 )
-from src.prediction.algorithms.configTypes import (
+from pyramidElevatorDist.prediction.algorithms.configTypes import (
     PREDICT_ALGORITHM_CONFIG,
     PredictAlgorithm,
 )

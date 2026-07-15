@@ -4,7 +4,7 @@ Stage-agnostic numerics: works on bare numpy arrays, no segmentation /
 prediction types. Used by both stages — segmentation's template-match
 detector (``src/segmentation/.../template_match/``) and prediction's
 trapezoid-pulse-pair Δh estimator
-(``src/prediction/algorithms/accelerometer_only/trapezoid_accel/``).
+(``pyramidElevatorDist/prediction/algorithms/accelerometer_only/trapezoid_accel/``).
 
 Contents:
 

@@ -8,7 +8,7 @@ scatter, …) plus the cross-algorithm comparison CDF.
 
 Conformal calibration lives with each algorithm as a committed
 ``calibration.json`` next to its code
-(``src/prediction/algorithms/accelerometer_only/<algo>/calibration.json``)
+(``pyramidElevatorDist/prediction/algorithms/accelerometer_only/<algo>/calibration.json``)
 and is auto-loaded whenever a ``Predictor`` is built — so every run
 here, and every other consumer (the pipeline evaluator, the analysis
 scripts), is calibrated by default with no wiring. Pass ``--calibrate``
@@ -93,7 +93,7 @@ from src.data.loader import (
     resolve_experiments,
 )
 from pyramidElevatorDist.physics.reconstruct_az import RECONSTRUCT_CHOICES
-from src.prediction.algorithms import (
+from pyramidElevatorDist.prediction.algorithms import (
     PREDICT_ALGORITHM_CONFIG,
     PredictAlgorithm,
     Predictor,

@@ -126,8 +126,8 @@ def make_worst_figure(df: pd.DataFrame, split: str, records, est,
 
 def main():
     from src.prediction.evaluation.dataset import load_all_segments
-    from src.prediction.algorithms.configTypes import TrapezoidAccelConfig
-    from src.prediction.algorithms.accelerometer_only.trapezoid_accel.estimator import TrapezoidAccelEstimator
+    from pyramidElevatorDist.prediction.algorithms.configTypes import TrapezoidAccelConfig
+    from pyramidElevatorDist.prediction.algorithms.accelerometer_only.trapezoid_accel.estimator import TrapezoidAccelEstimator
 
     print("loading all segments ...")
     segs = load_all_segments()

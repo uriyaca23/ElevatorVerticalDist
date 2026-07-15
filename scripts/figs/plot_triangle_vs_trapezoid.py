@@ -95,8 +95,8 @@ def main():
     PAPER_OUT.mkdir(parents=True, exist_ok=True)
 
     from src.prediction.evaluation.dataset import load_all_segments
-    from src.prediction.algorithms.configTypes import TrapezoidAccelConfig
-    from src.prediction.algorithms.accelerometer_only.trapezoid_accel.estimator import TrapezoidAccelEstimator
+    from pyramidElevatorDist.prediction.algorithms.configTypes import TrapezoidAccelConfig
+    from pyramidElevatorDist.prediction.algorithms.accelerometer_only.trapezoid_accel.estimator import TrapezoidAccelEstimator
 
     print("loading segments ...")
     segs = load_all_segments()
