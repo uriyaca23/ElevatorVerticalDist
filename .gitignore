@@ -47,6 +47,13 @@ elevator_export.zip
 # External public dataset (USC-HAD, ~44 MB, kept locally, not pushed)
 src/data/USC-HAD/
 
+# Heavy sensor data moved to iCloud Drive (data research/ElevatorVerticalDist/).
+# See src/data/CLAUDE.md. Kept out of the repo; restore locally as needed.
+src/data/rawData/
+src/data/structuredData/
+src/data/(archive)/
+src/data/gramushka/
+
 # Local evaluator runs (figures + per-run CSVs + metrics dumps)
 elevator_reports/
 
