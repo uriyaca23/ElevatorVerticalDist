@@ -14,10 +14,10 @@ import pandas as pd
 
 from pyramidElevatorDist.physics import calculate_velocity_from_accelerometer
 from pyramidElevatorDist.utils.accelerometer_utils import compute_a_vert
-from src.segmentation.algorithms.accelerometer_only.template_match.templates import (
+from pyramidElevatorDist.segmentation.algorithms.accelerometer_only.template_match.templates import (
     Templates, load_templates,
 )
-from src.segmentation.algorithms.configTypes import TemplateMatchConfig
+from pyramidElevatorDist.segmentation.algorithms.configTypes import TemplateMatchConfig
 
 OUTPUT_COLUMNS = ["start_ci", "end_ci", "duration", "type", "probability_ci"]
 

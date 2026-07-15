@@ -10,7 +10,7 @@ all callers see one shape:
 
 Lives under ``src/data/`` (not under ``src/pipelines/streamlit/``) so
 non-UI tools — ``src/data/gt_editor.py`` and
-``src/segmentation/algorithms/editor.py`` — can import the helpers
+``pyramidElevatorDist/segmentation/algorithms/editor.py`` — can import the helpers
 without reaching across the layering boundary.
 """
 from __future__ import annotations

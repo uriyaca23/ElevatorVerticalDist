@@ -323,7 +323,7 @@ def _segments_to_full_gt(
 def _derive_gt_from_prs(prs: pd.DataFrame) -> pd.DataFrame:
     # Lazy-import the segmenter so that merely importing `pipeline` doesn't pull
     # in the accelerometer/quality stack (useful for tools that only need I/O).
-    from src.segmentation.algorithms import (
+    from pyramidElevatorDist.segmentation.algorithms import (
         SEGMENT_ALGORITHM_CONFIG, SegmentAlgorithm, Segmenter,
     )
 

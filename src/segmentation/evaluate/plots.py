@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src.segmentation.algorithms.metrics import IntervalPredictionMetrics
+from pyramidElevatorDist.segmentation.algorithms.metrics import IntervalPredictionMetrics
 
 
 def _cdf_plot(

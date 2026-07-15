@@ -19,14 +19,12 @@ the editor UI and :func:`diagnose_window` can reuse it for inspection.
 All tunables live in :class:`DetectConfig`. Callers pass a config
 instance rather than mutating module globals.
 
-CLI (prints per-experiment counts, writes nothing):
-    venv/bin/python src/.../check_grid_across_signal/detect.py
-    venv/bin/python src/.../check_grid_across_signal/detect.py --only <exp>
+CLI (prints per-experiment counts, writes nothing — lives in the
+application repo, not in this package):
+    venv/bin/python -m src.segmentation.run_detector [--only <exp>]
 """
 from __future__ import annotations
 
-import argparse
-import sys
 from dataclasses import dataclass, replace
 
 import numpy as np
@@ -37,7 +35,6 @@ from ..fit_elevator_parameters.common import (
     SMOOTH_SEC,
     match_one_template, trapezoid_kernel,
     _estimate_fs_hz, _vertical_accel, _a_mag_minus_g, _smooth,
-    getExperimentData, list_experiments,
 )
 from . import pair_filter
 
@@ -681,40 +678,3 @@ def diagnose_window(
         "pair": pair_info,
         "verdict_lines": lines,
     }
-
-
-# --------------------------------------------------------------------------
-# CLI — sanity check; prints gt/pred counts per experiment, writes nothing
-# --------------------------------------------------------------------------
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--only", help="process a single experiment by name")
-    args = parser.parse_args()
-
-    names = [args.only] if args.only else list_experiments(kind="train")
-    print(f"running detector on {len(names)} experiments")
-    total_gt = 0
-    total_pred = 0
-    for n in names:
-        try:
-            sensors, gt, _meta = getExperimentData(n)
-        except Exception as exc:
-            print(f"[error] {n}: {type(exc).__name__}: {exc}")
-            continue
-        preds, _state = predict_intervals(sensors.get("ACC"))
-        n_gt = int(gt["type"].isin(("up", "down")).sum()) if gt is not None else 0
-        total_gt += n_gt
-        total_pred += len(preds)
-        print(f"[ok]    {n}: gt={n_gt}  pred={len(preds)}")
-
-    if names:
-        print(
-            f"\n{len(names)} experiments — "
-            f"GT total {total_gt}, predicted total {total_pred} "
-            f"(pred/gt = {total_pred / max(total_gt, 1):.2f})"
-        )
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

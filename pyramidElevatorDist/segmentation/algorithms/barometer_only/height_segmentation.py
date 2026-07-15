@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from src.segmentation.algorithms.configTypes import PressureFilterConfig
+from pyramidElevatorDist.segmentation.algorithms.configTypes import PressureFilterConfig
 
 
 class HeightSegmenter:

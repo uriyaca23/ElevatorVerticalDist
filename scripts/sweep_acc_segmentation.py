@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.data.loader import list_experiments
-from src.segmentation.algorithms.configTypes import (
+from pyramidElevatorDist.segmentation.algorithms.configTypes import (
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,
 )
@@ -32,7 +32,7 @@ from src.segmentation.evaluate.evaluator import (
     _pool_intervals,
     _run_on_experiments,
 )
-from src.segmentation.algorithms.metrics import IntervalPredictionMetrics
+from pyramidElevatorDist.segmentation.algorithms.metrics import IntervalPredictionMetrics
 
 
 OUT_DIR = ROOT / "elevator_reports" / "seg_acc_sweep"

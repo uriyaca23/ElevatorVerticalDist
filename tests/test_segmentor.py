@@ -6,7 +6,7 @@ import numpy as np
 from src.pipelines.inprocess import segment as _core_segment
 
 from pyramidElevatorDist.segmentor import findSegments, findSegmentParameters
-from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E501
+from pyramidElevatorDist.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E501
     detect as _detect,
 )
 

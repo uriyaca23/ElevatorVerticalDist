@@ -30,7 +30,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from src.data.loader import list_experiments  # noqa: E402
-from src.segmentation.algorithms.configTypes import (  # noqa: E402
+from pyramidElevatorDist.segmentation.algorithms.configTypes import (  # noqa: E402
     SEGMENT_ALGORITHM_CONFIG, SegmentAlgorithm,
 )
 from pyramidElevatorDist.prediction.algorithms.configTypes import (  # noqa: E402

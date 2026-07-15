@@ -30,12 +30,12 @@ import numpy as np
 import pandas as pd
 
 from src.data.loader import getExperimentData, resolve_experiments
-from src.segmentation.algorithms.configTypes import (
+from pyramidElevatorDist.segmentation.algorithms.configTypes import (
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,
 )
-from src.segmentation.algorithms.segmenter import Segmenter
-from src.segmentation.algorithms.metrics import IntervalPredictionMetrics
+from pyramidElevatorDist.segmentation.algorithms.segmenter import Segmenter
+from pyramidElevatorDist.segmentation.algorithms.metrics import IntervalPredictionMetrics
 
 from . import plots
 

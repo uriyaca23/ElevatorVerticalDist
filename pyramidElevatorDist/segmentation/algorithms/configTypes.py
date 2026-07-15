@@ -35,7 +35,7 @@ class TemplateMatchConfig(BaseModel):
     """Hyperparameters for the trapezoid-pulse-pair grid detector.
 
     Mirrors the fields of
-    ``src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal.detect.DetectConfig``
+    ``pyramidElevatorDist.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal.detect.DetectConfig``
     one-to-one. The Segmenter dispatches through that detector; this
     model is the public, Pydantic-validated face of the dataclass so
     ``config.json`` / ``SEGMENT_ALGORITHM_CONFIG.overrides`` work the

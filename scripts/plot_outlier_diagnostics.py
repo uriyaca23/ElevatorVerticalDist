@@ -34,10 +34,10 @@ if str(_REPO_ROOT) not in sys.path:
 
 from src.data.gt_editor import TYPE_COLORS  # noqa: E402
 from src.data.loader import RAW_DATA_ROOT, getExperimentData  # noqa: E402
-from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E402
+from pyramidElevatorDist.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E402
     detect as _detect,
 )
-from src.segmentation.algorithms.accelerometer_only.template_match.fit_elevator_parameters.common import (  # noqa: E402
+from pyramidElevatorDist.segmentation.algorithms.accelerometer_only.template_match.fit_elevator_parameters.common import (  # noqa: E402
     trapezoid_kernel,
 )
 

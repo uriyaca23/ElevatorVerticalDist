@@ -30,14 +30,14 @@ import numpy as np
 import pandas as pd
 
 from src.data.loader import list_experiments, getExperimentData
-from src.segmentation.algorithms.metrics import IntervalPredictionMetrics
-from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (
+from pyramidElevatorDist.segmentation.algorithms.metrics import IntervalPredictionMetrics
+from pyramidElevatorDist.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (
     detect, pair_filter,
 )
-from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal.detect import (
+from pyramidElevatorDist.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal.detect import (
     DetectConfig,
 )
-from src.segmentation.algorithms.accelerometer_only.template_match.fit_elevator_parameters.common import (
+from pyramidElevatorDist.segmentation.algorithms.accelerometer_only.template_match.fit_elevator_parameters.common import (
     LobeFit,
 )
 from dataclasses import asdict as dc_asdict

@@ -1,7 +1,7 @@
 """Generate ``paper_phd/figures/edge_detection.png``.
 
 Three stacked panels show how the barometer interval detector — see
-``src/segmentation/algorithms/barometer_only/height_segmentation.py`` —
+``pyramidElevatorDist/segmentation/algorithms/barometer_only/height_segmentation.py`` —
 turns an altitude trace into discrete ``up``/``down``/``outside``
 intervals. The figure is referenced from Appendix~B (Dataset
 construction) as ``fig:app-edge-detection``.
@@ -30,10 +30,10 @@ import numpy as np
 import pandas as pd
 
 from pyramidElevatorDist.physics.barometric import P0_HPA, pressure_to_altitude
-from src.segmentation.algorithms.barometer_only.height_segmentation import (
+from pyramidElevatorDist.segmentation.algorithms.barometer_only.height_segmentation import (
     HeightSegmenter,
 )
-from src.segmentation.algorithms.configTypes import PressureFilterConfig
+from pyramidElevatorDist.segmentation.algorithms.configTypes import PressureFilterConfig
 
 REPO = Path(__file__).resolve().parents[2]
 OUT_DIR = REPO / "paper_phd/figures"

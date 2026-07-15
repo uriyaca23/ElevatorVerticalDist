@@ -70,12 +70,12 @@ from src.data.loadFromDB import LoadedSignal, PhoneType, loadDataFromS3
 from src.data.load_data import enrich_loaded
 from pyramidElevatorDist.physics import calculate_velocity_from_accelerometer, pressure_to_altitude
 from pyramidElevatorDist.utils.accelerometer_utils import vertical_accel_magnitude
-from src.segmentation.algorithms import (
+from pyramidElevatorDist.segmentation.algorithms import (
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,
     Segmenter,
 )
-from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E501
+from pyramidElevatorDist.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E501
     detect as _seg_detect,
 )
 
@@ -1597,7 +1597,7 @@ class GtEditor(tk.Tk):
     def _run_segmenter_suggestions(self) -> list[dict]:
         """Run the matched-filter detector on the loaded experiment.
 
-        Mirrors ``src/segmentation/algorithms/editor.py`` end-to-end so
+        Mirrors ``pyramidElevatorDist/segmentation/algorithms/editor.py`` end-to-end so
         the two tools surface the same hits on the same experiment:
 
         * ACC is run through ``enrich_loaded(resample=True)`` (50 Hz

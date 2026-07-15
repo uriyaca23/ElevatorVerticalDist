@@ -44,7 +44,7 @@ What you get out of it
 2. A console summary: the winning config per stage/algorithm and the
    improvement vs the current defaults.
 3. Updated ``config.json`` files (backed up first; skipped under --dry-run):
-     - src/segmentation/algorithms/config.json   (key: acc_template_match)
+     - pyramidElevatorDist/segmentation/algorithms/config.json   (key: acc_template_match)
      - pyramidElevatorDist/prediction/algorithms/config.json      (keys: zupt_accel, trapezoid_accel)
    These are the live source of truth — every Segmenter()/Predictor() reads
    them via load_params(), so the new values take effect on the next run.
@@ -93,15 +93,15 @@ from src.data.loader import (  # noqa: E402
 from src.data.loadFromDB import LoadedSignal  # noqa: E402
 from src.data.load_data import enrich_loaded  # noqa: E402
 from pyramidElevatorDist.utils.accelerometer_utils import vertical_accel_magnitude  # noqa: E402
-from src.segmentation.algorithms.configTypes import (  # noqa: E402
+from pyramidElevatorDist.segmentation.algorithms.configTypes import (  # noqa: E402
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,
 )
-from src.segmentation.algorithms.configTypes import (  # noqa: E402
+from pyramidElevatorDist.segmentation.algorithms.configTypes import (  # noqa: E402
     DEFAULT_CONFIG_PATH as SEG_CONFIG_PATH,
 )
-from src.segmentation.algorithms.segmenter import Segmenter  # noqa: E402
-from src.segmentation.algorithms.metrics import IntervalPredictionMetrics  # noqa: E402
+from pyramidElevatorDist.segmentation.algorithms.segmenter import Segmenter  # noqa: E402
+from pyramidElevatorDist.segmentation.algorithms.metrics import IntervalPredictionMetrics  # noqa: E402
 
 from pyramidElevatorDist.prediction.algorithms import (  # noqa: E402
     PREDICT_ALGORITHM_CONFIG,

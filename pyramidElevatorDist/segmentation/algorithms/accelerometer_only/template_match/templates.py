@@ -22,7 +22,7 @@ import pandas as pd
 from pyramidElevatorDist.utils.accelerometer_utils import (
     compute_a_vert, compute_velocity, lowpass,
 )
-from src.segmentation.algorithms.metrics import ci_center
+from pyramidElevatorDist.segmentation.algorithms.metrics import ci_center
 
 
 @dataclass

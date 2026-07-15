@@ -88,7 +88,7 @@ from pyramidElevatorDist.prediction.algorithms.configTypes import (
     PREDICT_ALGORITHM_CONFIG,
     PredictAlgorithm,
 )
-from src.segmentation.algorithms.configTypes import (
+from pyramidElevatorDist.segmentation.algorithms.configTypes import (
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,
 )

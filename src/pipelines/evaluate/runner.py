@@ -40,16 +40,16 @@ from pyramidElevatorDist.prediction.algorithms.configTypes import (
     PredictAlgorithm,
 )
 from pyramidElevatorDist.prediction.algorithms.predictor import Predictor
-from src.segmentation.algorithms.configTypes import (
+from pyramidElevatorDist.segmentation.algorithms.configTypes import (
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,
 )
-from src.segmentation.algorithms.metrics.metrics import (
+from pyramidElevatorDist.segmentation.algorithms.metrics.metrics import (
     DEFAULT_MIN_OVERLAP_FRAC,
     DEFAULT_MIN_OVERLAP_S,
     _intervals_match,
 )
-from src.segmentation.algorithms.segmenter import Segmenter
+from pyramidElevatorDist.segmentation.algorithms.segmenter import Segmenter
 from src.segmentation.evaluate.evaluator import (
     _gt_to_interval_dicts,
     _phone_model_from_metadata,

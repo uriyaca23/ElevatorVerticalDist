@@ -28,8 +28,8 @@ from .parsing import (
 def _annotate_prs_with_gt(prs: pd.DataFrame) -> pd.DataFrame:
     """Add a `gt_label` column ('idle' / 'up' / 'down') to the PRS frame using
     the barometer-based segment detector."""
-    from src.segmentation.algorithms.configTypes import PressureFilterConfig
-    from src.segmentation.algorithms.barometer_only.height_segmentation import (
+    from pyramidElevatorDist.segmentation.algorithms.configTypes import PressureFilterConfig
+    from pyramidElevatorDist.segmentation.algorithms.barometer_only.height_segmentation import (
         HeightSegmenter,
     )
 

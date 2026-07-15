@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from src.segmentation.algorithms.metrics import IntervalPredictionMetrics
+from pyramidElevatorDist.segmentation.algorithms.metrics import IntervalPredictionMetrics
 from pyramidElevatorDist.physics import calculate_velocity_from_accelerometer
 
 
@@ -307,7 +307,7 @@ def _classify_match(
     (>=1 s OR >=30 % of the shorter interval), keeping per-ride labels
     aligned with the aggregate failure-mode counts.
     """
-    from src.segmentation.algorithms.metrics.metrics import (
+    from pyramidElevatorDist.segmentation.algorithms.metrics.metrics import (
         DEFAULT_MIN_OVERLAP_FRAC, DEFAULT_MIN_OVERLAP_S, _intervals_match,
     )
     gt_to: list[list[int]] = [[] for _ in gt_rides]

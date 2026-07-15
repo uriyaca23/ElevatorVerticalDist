@@ -54,7 +54,7 @@ from src.prediction.evaluation.dataset import build_segment_records
 from src.prediction.evaluation.figures import fig_compare_algorithms
 from src.prediction.evaluation.metrics import compute_metrics
 from src.prediction.evaluation.runner import collect_predictions, run_predictions
-from src.segmentation.algorithms.configTypes import (
+from pyramidElevatorDist.segmentation.algorithms.configTypes import (
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,
 )

@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 from src.data.loader import resolve_experiments
-from src.segmentation.algorithms.configTypes import (
+from pyramidElevatorDist.segmentation.algorithms.configTypes import (
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,
 )

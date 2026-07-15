@@ -85,11 +85,11 @@ from src.data.loader import (
     resolve_experiments,
 )
 from pyramidElevatorDist.physics.reconstruct_az import RECONSTRUCT_CHOICES
-from src.segmentation.algorithms.configTypes import (
+from pyramidElevatorDist.segmentation.algorithms.configTypes import (
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,
 )
-from src.segmentation.algorithms.metrics import IntervalPredictionMetrics
+from pyramidElevatorDist.segmentation.algorithms.metrics import IntervalPredictionMetrics
 
 from . import evaluator, plots as live_plots, report_plots
 

@@ -36,13 +36,13 @@ if str(REPO) not in sys.path:
 from src.data.loader import (  # noqa: E402
     RAW_DATA_ROOT, getExperimentData, resolve_experiments,
 )
-from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E402
+from pyramidElevatorDist.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E402
     detect as _detect,
 )
-from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E402
+from pyramidElevatorDist.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E402
     pair_filter as _pair,
 )
-from src.segmentation.algorithms.accelerometer_only.template_match.fit_elevator_parameters.common import (  # noqa: E402
+from pyramidElevatorDist.segmentation.algorithms.accelerometer_only.template_match.fit_elevator_parameters.common import (  # noqa: E402
     trapezoid_kernel,
 )
 

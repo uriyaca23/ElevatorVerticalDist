@@ -50,14 +50,14 @@ from pyramidElevatorDist.physics.reconstruct_az import reconstruct_az
 from pyramidElevatorDist.prediction.algorithms import (
     PREDICT_ALGORITHM_CONFIG, PredictAlgorithm, Predictor,
 )
-from src.segmentation.algorithms.configTypes import (
+from pyramidElevatorDist.segmentation.algorithms.configTypes import (
     SEGMENT_ALGORITHM_CONFIG, SegmentAlgorithm, TemplateMatchConfig,
 )
-from src.segmentation.algorithms.segmenter import Segmenter
-from src.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E501
+from pyramidElevatorDist.segmentation.algorithms.segmenter import Segmenter
+from pyramidElevatorDist.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E501
     detect as _detect,
 )
-from src.segmentation.algorithms.accelerometer_only.template_match.fit_elevator_parameters.common import (  # noqa: E501
+from pyramidElevatorDist.segmentation.algorithms.accelerometer_only.template_match.fit_elevator_parameters.common import (  # noqa: E501
     _a_mag_minus_g, _estimate_fs_hz, _vertical_accel,
 )
 

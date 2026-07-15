@@ -23,10 +23,10 @@ import numpy as np
 import pandas as pd
 
 from pyramidElevatorDist.physics.barometric import P0_HPA, pressure_to_altitude
-from src.segmentation.algorithms.barometer_only.height_segmentation import (
+from pyramidElevatorDist.segmentation.algorithms.barometer_only.height_segmentation import (
     HeightSegmenter,
 )
-from src.segmentation.algorithms.configTypes import PressureFilterConfig
+from pyramidElevatorDist.segmentation.algorithms.configTypes import PressureFilterConfig
 
 REPO = Path(__file__).resolve().parents[2]
 OUT_DIR = REPO / "paper_phd/figures"

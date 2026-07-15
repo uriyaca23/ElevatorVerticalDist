@@ -51,11 +51,11 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 from src.data.loader import getExperimentData, list_experiments  # noqa: E402
 from pyramidElevatorDist.physics.barometric import pressure_to_altitude  # noqa: E402
-from src.segmentation.algorithms.configTypes import (  # noqa: E402
+from pyramidElevatorDist.segmentation.algorithms.configTypes import (  # noqa: E402
     SEGMENT_ALGORITHM_CONFIG, SegmentAlgorithm,
 )
-from src.segmentation.algorithms.segmenter import Segmenter  # noqa: E402
-from src.segmentation.algorithms.metrics.metrics import (  # noqa: E402
+from pyramidElevatorDist.segmentation.algorithms.segmenter import Segmenter  # noqa: E402
+from pyramidElevatorDist.segmentation.algorithms.metrics.metrics import (  # noqa: E402
     DEFAULT_MIN_OVERLAP_FRAC, DEFAULT_MIN_OVERLAP_S, _intervals_match,
 )
 from src.segmentation.evaluate.evaluator import (  # noqa: E402
