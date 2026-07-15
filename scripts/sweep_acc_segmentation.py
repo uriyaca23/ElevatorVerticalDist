@@ -28,7 +28,7 @@ from pyramidElevatorDist.segmentation.algorithms.configTypes import (
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,
 )
-from src.segmentation.evaluate.evaluator import (
+from src.evaluation.segmentation.evaluator import (
     _pool_intervals,
     _run_on_experiments,
 )

@@ -94,7 +94,7 @@ clean_predicted_altitude_acc.png
 * **Refit the predictor's conformal calibrator.** It expects an
   existing `calibration_*.json` and bails to the algorithm's default
   multiplier when the file is missing. To refit, run
-  `python -m src.prediction.evaluation.evaluateOnData` first and point
+  `python -m src.evaluation.prediction.evaluateOnData` first and point
   `--calibration-path` at the resulting `train/calibration_trapezoid.json`.
 * **LaTeX macro / table emission.** That stays in
   `scripts/pipeline_evaluation_report.py` (which writes into

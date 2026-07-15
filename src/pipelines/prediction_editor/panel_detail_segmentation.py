@@ -49,7 +49,7 @@ class DetailSegmentationMixin:
         if kind == "pred":
             (idx,) = payload
             match = next(
-                (p for p in self.predictions if int(p["index"]) == idx), None,
+                (p for p in self.predictions if p.index == idx), None,
             )
             if match is not None:
                 self._render_detail_for_prediction(match)
@@ -100,9 +100,9 @@ class DetailSegmentationMixin:
 
     def _draw_correlation(self, ax, correlation, t_lo: float, t_hi: float) -> None:
         """Per-sign best-R² traces over time (no threshold line, no dots)."""
-        t = np.asarray(correlation["t"], dtype=float)
-        pos = np.asarray(correlation["best_pos_r2"], dtype=float)
-        neg = np.asarray(correlation["best_neg_r2"], dtype=float)
+        t = np.asarray(correlation.t, dtype=float)
+        pos = np.asarray(correlation.best_pos_r2, dtype=float)
+        neg = np.asarray(correlation.best_neg_r2, dtype=float)
         mask = (t >= t_lo) & (t <= t_hi)
         ax.plot(t[mask], np.where(np.isfinite(pos), pos, np.nan)[mask],
                 color="#2980b9", lw=0.9, label="max R² (+)")
@@ -140,16 +140,16 @@ class DetailSegmentationMixin:
         self, params: dict, title: str, verdict: str,
         *, gt_span: tuple[float, float] | None = None,
     ) -> None:
-        heatmaps = params["heatmaps"]
-        correlation = params["correlation"]
-        lobe1 = params["lobe1"]
-        lobe2 = params["lobe2"]
-        ride_type = str(params.get("ride_type", "up"))
-        grid_w_s = heatmaps["grid_w_s"]
-        grid_f = heatmaps["grid_f"]
+        heatmaps = params.heatmaps
+        correlation = params.correlation
+        lobe1 = params.lobe1
+        lobe2 = params.lobe2
+        ride_type = str(params.ride_type)
+        grid_w_s = heatmaps.grid_w_s
+        grid_f = heatmaps.grid_f
 
-        t_lo = float(params["t_start_s"])
-        t_hi = float(params["t_end_s"])
+        t_lo = float(params.t_start_s)
+        t_hi = float(params.t_end_s)
         if gt_span is not None:
             t_lo = min(t_lo, float(gt_span[0]))
             t_hi = max(t_hi, float(gt_span[1]))
@@ -163,13 +163,13 @@ class DetailSegmentationMixin:
         ax_sig = self.detail_fig.add_subplot(gs[1, :])
         ax_rt = self.detail_fig.add_subplot(gs[2, :])
 
-        W_star = float(lobe1["half_width_s"])
-        f_star = float(lobe1["frac_flat"])
-        self._draw_heatmap(ax_h1, heatmaps["lobe1"], grid_w_s, grid_f,
-                           f"lobe1 @ t={float(lobe1['t_c']):.1f}s",
+        W_star = float(lobe1.half_width_s)
+        f_star = float(lobe1.frac_flat)
+        self._draw_heatmap(ax_h1, heatmaps.lobe1, grid_w_s, grid_f,
+                           f"lobe1 @ t={float(lobe1.t_c):.1f}s",
                            mark_W=W_star, mark_f=f_star)
-        self._draw_heatmap(ax_h2, heatmaps["lobe2"], grid_w_s, grid_f,
-                           f"lobe2 @ t={float(lobe2['t_c']):.1f}s",
+        self._draw_heatmap(ax_h2, heatmaps.lobe2, grid_w_s, grid_f,
+                           f"lobe2 @ t={float(lobe2.t_c):.1f}s",
                            mark_W=W_star, mark_f=f_star)
 
         pad = self._current_pad_s()
@@ -183,18 +183,18 @@ class DetailSegmentationMixin:
                            color=TYPE_COLORS.get(ride_type, "#cccccc"),
                            alpha=0.22, zorder=0)
         for L in (lobe1, lobe2):
-            t_c = float(L["t_c"])
+            t_c = float(L.t_c)
             # The lobe amplitude (a_peak) is a |a|-g-domain quantity, so only
             # mark it when the |a|-g fallback is on screen; the time marker is
             # domain-agnostic and always drawn.
             if not reconstructed:
-                ax_sig.scatter([t_c], [float(L["a_peak"])],
+                ax_sig.scatter([t_c], [float(L.a_peak)],
                                color="#c0392b", s=26, zorder=5)
             ax_sig.axvline(t_c, color="#c0392b", lw=0.6, ls=":", alpha=0.7)
         pred_col = PRED_COLORS.get(ride_type, "#888888")
-        ax_sig.axvline(float(params["t_start_s"]), color=pred_col,
+        ax_sig.axvline(float(params.t_start_s), color=pred_col,
                        lw=1.0, ls="--", alpha=0.8)
-        ax_sig.axvline(float(params["t_end_s"]), color=pred_col,
+        ax_sig.axvline(float(params.t_end_s), color=pred_col,
                        lw=1.0, ls="--", alpha=0.8)
         self._apply_acc_time_axis(ax_sig)
         ax_sig.set_ylabel(f"{y_label} (m/s²)")

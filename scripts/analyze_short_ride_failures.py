@@ -31,7 +31,7 @@ if str(_REPO_ROOT) not in sys.path:
 from pyramidElevatorDist.prediction.algorithms import (
     PREDICT_ALGORITHM_CONFIG, PredictAlgorithm, Predictor,
 )
-from src.prediction.evaluation.dataset import build_segment_records
+from src.evaluation.prediction.dataset import build_segment_records
 
 OUT = _REPO_ROOT / "run_report" / "short_ride_analysis"
 

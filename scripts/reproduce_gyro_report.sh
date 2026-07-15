@@ -39,9 +39,9 @@ trap 'echo ">> scratch was $WORK"' EXIT
 
 # --- 1. baseline (none) calibration --------------------------------------
 echo ">> [1/6] baseline calibration: refit on TRAIN, score TEST"
-$PY -m src.prediction.evaluation.evaluateOnData --kind train --calibrate \
+$PY -m src.evaluation.prediction.evaluateOnData --kind train --calibrate \
     --out-root "$WORK" --run-name base_train
-$PY -m src.prediction.evaluation.evaluateOnData --kind test \
+$PY -m src.evaluation.prediction.evaluateOnData --kind test \
     --out-root "$WORK" --run-name base_test
 cp "$Z" "$WORK/z.none"; cp "$T" "$WORK/t.none"   # canonical none-calibration
 
@@ -51,9 +51,9 @@ $PY scripts/reconstruction_comparison_report.py --kind all
 
 # --- 3. Mahony calibrated, held-out test ---------------------------------
 echo ">> [3/6] Mahony: refit calibration on TRAIN, score held-out TEST"
-$PY -m src.prediction.evaluation.evaluateOnData --kind train --reconstruct Mahony \
+$PY -m src.evaluation.prediction.evaluateOnData --kind train --reconstruct Mahony \
     --calibrate --out-root "$WORK" --run-name mah_train
-$PY -m src.prediction.evaluation.evaluateOnData --kind test --reconstruct Mahony \
+$PY -m src.evaluation.prediction.evaluateOnData --kind test --reconstruct Mahony \
     --out-root "$WORK" --run-name mah_test
 cp "$WORK/z.none" "$Z"; cp "$WORK/t.none" "$T"   # restore baseline calibration
 

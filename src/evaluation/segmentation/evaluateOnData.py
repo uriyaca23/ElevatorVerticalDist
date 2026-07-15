@@ -18,41 +18,41 @@ GT ride cannot be attributed to a noise class. ``--kind`` / ``--source``
 Typical usage::
 
     # 1. Defaults: every source, train+test
-    venv/bin/python -m src.segmentation.evaluate.evaluateOnData
+    venv/bin/python -m src.evaluation.segmentation.evaluateOnData
 
     # 2. One source only
-    venv/bin/python -m src.segmentation.evaluate.evaluateOnData \\
+    venv/bin/python -m src.evaluation.segmentation.evaluateOnData \\
         --source experiment
 
     # 3. Two sources (Ido + real-world, skip lab experiments)
-    venv/bin/python -m src.segmentation.evaluate.evaluateOnData \\
+    venv/bin/python -m src.evaluation.segmentation.evaluateOnData \\
         --source ido --source real_world
 
     # 4. Train only / test only
-    venv/bin/python -m src.segmentation.evaluate.evaluateOnData --kind train
-    venv/bin/python -m src.segmentation.evaluate.evaluateOnData --kind test
+    venv/bin/python -m src.evaluation.segmentation.evaluateOnData --kind train
+    venv/bin/python -m src.evaluation.segmentation.evaluateOnData --kind test
 
     # 5. Test split, Ido source
-    venv/bin/python -m src.segmentation.evaluate.evaluateOnData \\
+    venv/bin/python -m src.evaluation.segmentation.evaluateOnData \\
         --kind test --source ido
 
     # 6. Drop a known-bad experiment
-    venv/bin/python -m src.segmentation.evaluate.evaluateOnData \\
+    venv/bin/python -m src.evaluation.segmentation.evaluateOnData \\
         --source experiment \\
         --exclude UriyaCohenEliya_BarIlan2Herzelia_Pixel10_24-3-2026
 
     # 7. Whitelist a couple of experiments
-    venv/bin/python -m src.segmentation.evaluate.evaluateOnData \\
+    venv/bin/python -m src.evaluation.segmentation.evaluateOnData \\
         --include eyalyakir_milleniumHotel_SamsungSM-A235F_15-04-2026_exp1 \\
                   UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp1
 
     # 8. Custom output root + stable run name (no timestamp)
-    venv/bin/python -m src.segmentation.evaluate.evaluateOnData \\
+    venv/bin/python -m src.evaluation.segmentation.evaluateOnData \\
         --source experiment \\
         --out-root /tmp/seg_eval --run-name source_experiment_only
 
     # 9. Run a different detector (e.g. the pressure-filter fallback)
-    venv/bin/python -m src.segmentation.evaluate.evaluateOnData \\
+    venv/bin/python -m src.evaluation.segmentation.evaluateOnData \\
         --algorithm pressure_filter
 
 Each invocation writes a self-describing directory

@@ -1,12 +1,12 @@
 """CLI wrapper.
 
 Single config:
-    venv/bin/python -m src.segmentation.evaluate \\
+    venv/bin/python -m src.evaluation.segmentation \\
         --algorithm pressure_filter \\
         --out-dir elevator_reports/seg_eval
 
 Grid sweep (grid supplied as JSON):
-    venv/bin/python -m src.segmentation.evaluate \\
+    venv/bin/python -m src.evaluation.segmentation \\
         --algorithm pressure_filter --sweep grid.json \\
         --out-csv elevator_reports/seg_sweep.csv
 """

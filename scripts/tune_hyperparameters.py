@@ -115,8 +115,8 @@ from pyramidElevatorDist.prediction.algorithms.accelerometer_only.trapezoid_acce
 from pyramidElevatorDist.prediction.algorithms.configTypes import (  # noqa: E402
     DEFAULT_CONFIG_PATH as PRED_CONFIG_PATH,
 )
-from src.prediction.evaluation.dataset import load_all_segments  # noqa: E402
-from src.prediction.evaluation.runner import run_predictions  # noqa: E402
+from src.evaluation.prediction.dataset import load_all_segments  # noqa: E402
+from src.evaluation.prediction.runner import run_predictions  # noqa: E402
 from pyramidElevatorDist.utils.conformal import ConformalCalibrator  # noqa: E402
 
 
@@ -615,7 +615,7 @@ def refit_prediction_calibration(
     )
     predictor = Predictor(cfg)
     preds = run_predictions(predictor, records)
-    from src.prediction.evaluation.runner import to_calibration_samples
+    from src.evaluation.prediction.runner import to_calibration_samples
     calib = predictor.calibrate(to_calibration_samples(preds))
     out = out_dir / f"calibration_{algo_key}.json"
     predictor.save_calibration(out)

@@ -103,19 +103,15 @@ class DetailPredictionMixin:
             return
         (idx,) = self._last_sel[1]
         match = next(
-            (p for p in self.predictions if int(p["index"]) == idx), None,
+            (p for p in self.predictions if p.index == idx), None,
         )
         if match is None:
             self.status_var.set("Override cleared.")
             return
-        l1 = match.get("lobe1") or {}
-        try:
-            W = float(l1.get("half_width_s", self._override_W.get()))
-            f = float(l1.get("frac_flat", self._override_f.get()))
-            A = abs(float(l1.get("a_peak", self._override_A.get())))
-        except (TypeError, ValueError):
-            self.status_var.set("Override cleared.")
-            return
+        l1 = match.lobe1
+        W = float(l1.half_width_s)
+        f = float(l1.frac_flat)
+        A = abs(float(l1.a_peak))
         self._override_W.set(round(W, 3))
         self._override_f.set(round(f, 3))
         self._override_A.set(round(A, 3))
@@ -146,15 +142,15 @@ class DetailPredictionMixin:
         if kind == "pred":
             (idx,) = payload
             match = next(
-                (p for p in self.predictions if int(p["index"]) == idx), None,
+                (p for p in self.predictions if p.index == idx), None,
             )
             if match is None:
                 return None
             return (
-                float(match["t_start_s"]),
-                float(match["t_end_s"]),
-                str(match["ride_type"]),
-                f"pred #{idx:02d} ({match['ride_type']})",
+                float(match.t_start_s),
+                float(match.t_end_s),
+                str(match.ride_type),
+                f"pred #{idx:02d} ({match.ride_type})",
             )
         if kind == "gt":
             t_s, t_e, rt, gi = payload
@@ -211,25 +207,25 @@ class DetailPredictionMixin:
 
     def _format_predictions(self, result: dict, label: str) -> str:
         # Ground-truth (barometer) Δh, when a pressure stream was supplied.
-        baro = result.get("baro")
+        baro = result.baro
         gt = None
         if baro is not None:
-            g = float(baro.get("delta_height_m", float("nan")))
+            g = float(baro.delta_height_m)
             gt = g if math.isfinite(g) else None
 
         lines = [f"Δh estimators — {label}:"]
         for aid, name in _ALGO_ROWS:
-            row = result.get(aid)
+            row = result.row(aid)
             if row is None:
                 lines.append(f"  {name:22s} — not run")
                 continue
-            dh = float(row.get("delta_height_m", float("nan")))
-            ci = float(row.get("ci_half_width", float("nan")))
-            q = float(row.get("quality_score", float("nan")))
+            dh = float(row.delta_height_m)
+            ci = float(row.ci_half_width)
+            q = float(row.quality_score)
             ci_str = f"±{ci:.2f}m" if math.isfinite(ci) else "±inf"
             verdict = (
-                "OK" if row.get("accepted")
-                else f"REJECT ({row.get('reject_reason') or 'no reason'})"
+                "OK" if row.accepted
+                else f"REJECT ({row.reject_reason or 'no reason'})"
             )
             err_str = (f"   err={dh - gt:+.2f}m"
                        if gt is not None and math.isfinite(dh) else "")
@@ -242,7 +238,7 @@ class DetailPredictionMixin:
                          f"[ground truth]")
         elif baro is not None:
             lines.append(f"  {'barometer (GT)':22s} — "
-                         f"{baro.get('reject_reason') or 'no pressure'}")
+                         f"{baro.reject_reason or 'no pressure'}")
         return "\n".join(lines)
 
     # ---------- Table ----------
@@ -268,7 +264,7 @@ class DetailPredictionMixin:
             return format(v, fmt) if math.isfinite(v) else "—"
 
         for aid, name in _ALGO_ROWS:
-            row = result.get(aid)
+            row = result.row(aid)
             if row is None:
                 self.pred_table.insert(
                     "", "end", iid=aid,
@@ -276,12 +272,12 @@ class DetailPredictionMixin:
                     tags=("error",),
                 )
                 continue
-            dh = float(row.get("delta_height_m", float("nan")))
-            ci = float(row.get("ci_half_width", float("nan")))
-            q = float(row.get("quality_score", float("nan")))
-            accepted = bool(row.get("accepted"))
-            reason = str(row.get("reject_reason") or "")
-            ov_meta = (row.get("meta") or {}).get("trapezoid_override")
+            dh = float(row.delta_height_m)
+            ci = float(row.ci_half_width)
+            q = float(row.quality_score)
+            accepted = bool(row.accepted)
+            reason = str(row.reject_reason or "")
+            ov_meta = row.meta.get("trapezoid_override")
             verdict = "OK" if accepted else "REJECT"
             if ov_meta:
                 verdict = f"{verdict} (override)"
@@ -295,10 +291,10 @@ class DetailPredictionMixin:
             )
 
         # Ground-truth (barometer) reference row, when pressure is available.
-        baro = result.get("baro")
+        baro = result.baro
         if baro is not None:
-            dh = float(baro.get("delta_height_m", float("nan")))
-            reason = str(baro.get("reject_reason") or "")
+            dh = float(baro.delta_height_m)
+            reason = str(baro.reject_reason or "")
             self.pred_table.insert(
                 "", "end", iid="baro",
                 values=("barometer (GT)", _fmt(dh, "+.2f"), "—", "—",
@@ -330,19 +326,19 @@ class DetailPredictionMixin:
         ax.xaxis.label.set_fontsize(8)
         ax.set_ylabel("a (m/s²)", fontsize=8)
 
-        row = result.get("trap")
+        row = result.trap
         if row is None:
             ax.text(0.5, 0.5, "trapezoid estimator not run",
                     transform=ax.transAxes, ha="center", va="center",
                     fontsize=9, color="#888", style="italic")
             return
-        meta = row.get("meta") or {}
+        meta = row.meta
         t_sec = meta.get("t_sec")
         a_smooth = meta.get("a_smooth")
         a_template = meta.get("a_template")
         params = meta.get("params") or {}
         if t_sec is None or a_smooth is None or a_template is None:
-            reason = str(row.get("reject_reason") or "")
+            reason = str(row.reject_reason or "")
             msg = ("no trapezoid template returned"
                    if not reason else f"no template — {reason}")
             ax.text(0.5, 0.5, msg, transform=ax.transAxes, ha="center",
@@ -390,16 +386,16 @@ class DetailPredictionMixin:
         ax.set_xlabel("sample index", fontsize=8)
         ax.set_ylabel("pos (m)", fontsize=8)
 
-        row = result.get("zupt")
+        row = result.zupt
         if row is None:
             ax.text(0.5, 0.5, "ZUPT estimator not run", transform=ax.transAxes,
                     ha="center", va="center", fontsize=9, color="#888",
                     style="italic")
             return
-        meta = row.get("meta") or {}
+        meta = row.meta
         pos = meta.get("pos_curve")
         if pos is None:
-            reason = str(row.get("reject_reason") or "")
+            reason = str(row.reject_reason or "")
             msg = ("no ZUPT trajectory returned"
                    if not reason else f"no trajectory — {reason}")
             ax.text(0.5, 0.5, msg, transform=ax.transAxes, ha="center",
@@ -417,7 +413,7 @@ class DetailPredictionMixin:
         ax.axhline(0.0, color="gray", lw=0.4, ls="--", alpha=0.5)
 
         info_bits = []
-        dh = float(row.get("delta_height_m", float("nan")))
+        dh = float(row.delta_height_m)
         if math.isfinite(dh):
             info_bits.append(f"final Δh={dh:+.2f} m")
         n_active = meta.get("n_active")

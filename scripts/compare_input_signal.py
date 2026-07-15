@@ -29,7 +29,7 @@ from pyramidElevatorDist.segmentation.algorithms.configTypes import (  # noqa: E
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,
 )
-from src.segmentation.evaluate.evaluator import evaluate_algorithm  # noqa: E402
+from src.evaluation.segmentation.evaluator import evaluate_algorithm  # noqa: E402
 
 
 def _run(signal: str, experiments: list[str]):

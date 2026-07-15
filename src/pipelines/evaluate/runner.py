@@ -50,7 +50,7 @@ from pyramidElevatorDist.segmentation.algorithms.metrics.metrics import (
     _intervals_match,
 )
 from pyramidElevatorDist.segmentation.algorithms.segmenter import Segmenter
-from src.segmentation.evaluate.evaluator import (
+from src.evaluation.segmentation.evaluator import (
     _gt_to_interval_dicts,
     _phone_model_from_metadata,
     _prepare_segmenter_input,

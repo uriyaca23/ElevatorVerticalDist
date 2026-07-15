@@ -34,9 +34,9 @@ from pyramidElevatorDist.prediction.algorithms import (  # noqa: E402
     PredictAlgorithm,
     Predictor,
 )
-from src.prediction.evaluation.dataset import build_segment_records  # noqa: E402
-from src.prediction.evaluation.metrics import compute_metrics  # noqa: E402
-from src.prediction.evaluation.runner import (  # noqa: E402
+from src.evaluation.prediction.dataset import build_segment_records  # noqa: E402
+from src.evaluation.prediction.metrics import compute_metrics  # noqa: E402
+from src.evaluation.prediction.runner import (  # noqa: E402
     collect_predictions,
     run_predictions,
     to_calibration_samples,

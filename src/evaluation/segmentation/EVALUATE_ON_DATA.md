@@ -12,7 +12,7 @@ run was configured) into a timestamped folder.
 
 ```bash
 # from repo root, with venv activated
-venv/bin/python -m src.segmentation.evaluate.evaluateOnData
+venv/bin/python -m src.evaluation.segmentation.evaluateOnData
 ```
 
 Output lands under
@@ -98,7 +98,7 @@ constraint_reject_reasons.png
 * **Hyperparameter sweeps.** The `seg_sweep/sweep_*.png` figures in
   `main.tex` come from a separate driver. Use the existing sweep entry
   point (`scripts/sweep_acc_segmentation.py`) or
-  `python -m src.segmentation.evaluate --sweep grid.json` for those.
+  `python -m src.evaluation.segmentation --sweep grid.json` for those.
 * **LaTeX macro / table emission.** That stays in
   `scripts/segmentation_evaluation_report.py` (which writes into
   `docs/latex/figures/seg_eval/`). `evaluateOnData.py` is the
@@ -109,18 +109,18 @@ constraint_reject_reasons.png
 
 ```bash
 # Train-only run (skip the held-out Beit Yitzchaki test set):
-venv/bin/python -m src.segmentation.evaluate.evaluateOnData --kind train
+venv/bin/python -m src.evaluation.segmentation.evaluateOnData --kind train
 
 # Evaluate on every controlled-experiment recording, ignoring the three
 # damped-phone outliers:
-venv/bin/python -m src.segmentation.evaluate.evaluateOnData \
+venv/bin/python -m src.evaluation.segmentation.evaluateOnData \
     --source experiment \
     --exclude UriyaCohenEliya_BarIlan2Herzelia_Pixel10_24-3-2026 \
               UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp2 \
               eyalyakir_milleniumHotel_SamsungSM-A235F_15-04-2026_exp1
 
 # Run on a single experiment for debugging:
-venv/bin/python -m src.segmentation.evaluate.evaluateOnData \
+venv/bin/python -m src.evaluation.segmentation.evaluateOnData \
     --include eyalyakir_milleniumHotel_SamsungSM-A235F_15-04-2026_exp1 \
     --cleaned-exclude
 ```

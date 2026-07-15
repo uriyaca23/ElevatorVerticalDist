@@ -94,7 +94,7 @@ def main():
     TRAPEZOIDS_OUT.mkdir(parents=True, exist_ok=True)
     PAPER_OUT.mkdir(parents=True, exist_ok=True)
 
-    from src.prediction.evaluation.dataset import load_all_segments
+    from src.evaluation.prediction.dataset import load_all_segments
     from pyramidElevatorDist.prediction.algorithms.configTypes import TrapezoidAccelConfig
     from pyramidElevatorDist.prediction.algorithms.accelerometer_only.trapezoid_accel.estimator import TrapezoidAccelEstimator
 

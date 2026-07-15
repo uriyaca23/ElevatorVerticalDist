@@ -50,16 +50,16 @@ from pyramidElevatorDist.prediction.algorithms import (
     PredictAlgorithm,
     Predictor,
 )
-from src.prediction.evaluation.dataset import build_segment_records
-from src.prediction.evaluation.figures import fig_compare_algorithms
-from src.prediction.evaluation.metrics import compute_metrics
-from src.prediction.evaluation.runner import collect_predictions, run_predictions
+from src.evaluation.prediction.dataset import build_segment_records
+from src.evaluation.prediction.figures import fig_compare_algorithms
+from src.evaluation.prediction.metrics import compute_metrics
+from src.evaluation.prediction.runner import collect_predictions, run_predictions
 from pyramidElevatorDist.segmentation.algorithms.configTypes import (
     SEGMENT_ALGORITHM_CONFIG,
     SegmentAlgorithm,
 )
-from src.segmentation.evaluate import evaluator
-from src.segmentation.evaluate.evaluateOnData import _aggregate_filtered
+from src.evaluation.segmentation import evaluator
+from src.evaluation.segmentation.evaluateOnData import _aggregate_filtered
 from pyramidElevatorDist.utils.accelerometer_utils import compute_a_vert
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

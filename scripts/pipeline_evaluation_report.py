@@ -58,7 +58,7 @@ from pyramidElevatorDist.segmentation.algorithms.segmenter import Segmenter  # n
 from pyramidElevatorDist.segmentation.algorithms.metrics.metrics import (  # noqa: E402
     DEFAULT_MIN_OVERLAP_FRAC, DEFAULT_MIN_OVERLAP_S, _intervals_match,
 )
-from src.segmentation.evaluate.evaluator import (  # noqa: E402
+from src.evaluation.segmentation.evaluator import (  # noqa: E402
     _prepare_segmenter_input, _gt_to_interval_dicts,
     _segments_to_interval_dicts, _phone_model_from_metadata,
 )
@@ -69,7 +69,7 @@ from pyramidElevatorDist.prediction.algorithms.predictor import Predictor  # noq
 
 
 OUT_ROOT = REPO_ROOT / "docs" / "latex" / "figures" / "pipeline"
-PRE_MS  = 3000   # mirrors src/prediction/evaluation/dataset.py default
+PRE_MS  = 3000   # mirrors src/evaluation/prediction/dataset.py default
 POST_MS = 3000
 
 

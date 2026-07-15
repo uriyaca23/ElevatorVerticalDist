@@ -64,7 +64,8 @@ def test_findSegments_default_equals_preresampled(acc):
     got = findSegments(acc)
     expected = findSegments(_resample_acc(acc), resample=False)
     assert len(got) == len(expected)
-    deep_equal(got, expected)
+    deep_equal([g.model_dump() for g in got],
+               [e.model_dump() for e in expected])
 
 
 def test_findSegments_default_finds_rides(acc):
@@ -82,17 +83,17 @@ def test_predictSegment_default_equals_preresampled(acc):
     segs = findSegments(acc)
     assert segs
     seg = {
-        "type": segs[0]["ride_type"],
-        "start_s": segs[0]["t_start_s"],
-        "end_s": segs[0]["t_end_s"],
+        "type": segs[0].ride_type,
+        "start_s": segs[0].t_start_s,
+        "end_s": segs[0].t_end_s,
     }
     got = predictSegment(acc, seg)
     expected = predictSegment(_resample_acc(acc), seg, resample=False)
-    assert got["primary"] == expected["primary"]
+    assert got.primary == expected.primary
     for aid in ("trap", "zupt"):
-        g, e = got[aid], expected[aid]
-        assert g["accepted"] == e["accepted"], f"{aid}: accept verdict differs"
-        gh, eh = float(g["delta_height_m"]), float(e["delta_height_m"])
+        g, e = got.row(aid), expected.row(aid)
+        assert g.accepted == e.accepted, f"{aid}: accept verdict differs"
+        gh, eh = float(g.delta_height_m), float(e.delta_height_m)
         if np.isnan(gh) or np.isnan(eh):
             assert np.isnan(gh) and np.isnan(eh), f"{aid}: one Δh is nan"
             continue

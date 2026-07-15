@@ -56,7 +56,7 @@ from pyramidElevatorDist.prediction.algorithms.accelerometer_only.trapezoid_acce
 from pyramidElevatorDist.prediction.algorithms.accelerometer_only.trapezoid_accel.pulse_pair import (  # noqa: E402
     trapezoid_kernel,
 )
-from src.prediction.evaluation.dataset import load_all_segments  # noqa: E402
+from src.evaluation.prediction.dataset import load_all_segments  # noqa: E402
 from pyramidElevatorDist.utils.accelerometer_utils import zupt_integrate  # noqa: E402
 
 PAPER_FIG = REPO / "paper_phd" / "figures"

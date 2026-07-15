@@ -13,7 +13,7 @@ consumes — into a timestamped folder.
 
 ```bash
 # from repo root, with venv activated
-venv/bin/python -m src.prediction.evaluation.evaluateOnData
+venv/bin/python -m src.evaluation.prediction.evaluateOnData
 ```
 
 Output lands under
@@ -100,18 +100,18 @@ you can inspect them directly without recompiling LaTeX.
 
 ```bash
 # Default: refit calibration on train, apply to test, render both halves.
-venv/bin/python -m src.prediction.evaluation.evaluateOnData
+venv/bin/python -m src.evaluation.prediction.evaluateOnData
 
 # Train-only sanity pass (skip the held-out test set):
-venv/bin/python -m src.prediction.evaluation.evaluateOnData --kind train
+venv/bin/python -m src.evaluation.prediction.evaluateOnData --kind train
 
 # Reuse an existing calibration on the test half:
-venv/bin/python -m src.prediction.evaluation.evaluateOnData \
+venv/bin/python -m src.evaluation.prediction.evaluateOnData \
     --kind test --mode test \
     --calibration-dir elevator_reports/pred_eval/run_20260507-101500/train
 
 # Evaluate on controlled experiments only, dropping a known-bad one:
-venv/bin/python -m src.prediction.evaluation.evaluateOnData \
+venv/bin/python -m src.evaluation.prediction.evaluateOnData \
     --source experiment \
     --exclude UriyaCohenEliya_BarIlan2Herzelia_Pixel10_24-3-2026
 ```

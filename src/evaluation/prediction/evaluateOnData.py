@@ -44,33 +44,33 @@ Typical usage::
 
     # 1. Refit calibration on the train half and overwrite the committed
     #    calibration.json for both algorithms.
-    venv/bin/python -m src.prediction.evaluation.evaluateOnData \\
+    venv/bin/python -m src.evaluation.prediction.evaluateOnData \\
         --kind train --calibrate
 
     # 2. Score the held-out test half with the committed calibration
     #    (no refit — the test set never touches calibration).
-    venv/bin/python -m src.prediction.evaluation.evaluateOnData --kind test
+    venv/bin/python -m src.evaluation.prediction.evaluateOnData --kind test
 
     # 3. One source only
-    venv/bin/python -m src.prediction.evaluation.evaluateOnData \\
+    venv/bin/python -m src.evaluation.prediction.evaluateOnData \\
         --source experiment
 
     # 4. Two sources (Ido + real-world)
-    venv/bin/python -m src.prediction.evaluation.evaluateOnData \\
+    venv/bin/python -m src.evaluation.prediction.evaluateOnData \\
         --source ido --source real_world
 
     # 5. Drop a known-bad experiment
-    venv/bin/python -m src.prediction.evaluation.evaluateOnData \\
+    venv/bin/python -m src.evaluation.prediction.evaluateOnData \\
         --source experiment \\
         --exclude UriyaCohenEliya_BarIlan2Herzelia_Pixel10_24-3-2026
 
     # 6. Whitelist a couple of experiments
-    venv/bin/python -m src.prediction.evaluation.evaluateOnData \\
+    venv/bin/python -m src.evaluation.prediction.evaluateOnData \\
         --include eyalyakir_milleniumHotel_SamsungSM-A235F_15-04-2026_exp1 \\
                   UriyaCohenEliya_milleniumHotel_GooglePixel10_15-04-2026_exp1
 
     # 7. Custom output root + stable run name
-    venv/bin/python -m src.prediction.evaluation.evaluateOnData \\
+    venv/bin/python -m src.evaluation.prediction.evaluateOnData \\
         --source experiment \\
         --out-root /tmp/pred_eval --run-name source_experiment_only
 """

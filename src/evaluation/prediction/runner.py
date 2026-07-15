@@ -9,7 +9,11 @@ from typing import Iterable
 
 import pandas as pd
 
-from ..algorithms import CalibrationSample, PredictionOutput, Predictor
+from pyramidElevatorDist.prediction.algorithms import (
+    CalibrationSample,
+    PredictionOutput,
+    Predictor,
+)
 from .dataset import SegmentRecord
 
 
