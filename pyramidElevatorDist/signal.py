@@ -17,7 +17,7 @@ from pyramidElevatorDist.physics.reconstruct_az import RECONSTRUCT_CHOICES
 
 # Thin façade: the resample → reconstruct → vertical-accel computation lives in
 # the shared boutique core; here we only pick the cadence policy and forward.
-from src.pipelines.inprocess import (
+from pyramidElevatorDist._orchestration import (
     RESAMPLE_TARGET_HZ,
     barometric_altitude as _barometric_altitude,
     signal as _signal,

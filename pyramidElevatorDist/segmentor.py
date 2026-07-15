@@ -27,7 +27,7 @@ from pyramidElevatorDist.segmentation.algorithms.accelerometer_only.template_mat
 # The API is a thin façade: it only picks the cadence policy (external data →
 # normalize to 50 Hz) and forwards. The Segmenter dispatcher does the detection
 # *and* the input-cadence normalization; the shared core is pure orchestration.
-from src.pipelines.inprocess import (
+from pyramidElevatorDist._orchestration import (
     RESAMPLE_TARGET_HZ,
     segment as _segment,
     find_matching_prediction as _find_matching_prediction,

@@ -1,7 +1,7 @@
 """Shared fixtures + a tolerant deep-equality helper.
 
 The regression tests pin the public ``pyramidElevatorDist`` façade to the
-shared in-process boutique core (``src.pipelines.inprocess``) on a real
+shared in-process boutique core (``pyramidElevatorDist._orchestration``) on a real
 experiment, so any drift in output is caught.
 """
 from __future__ import annotations

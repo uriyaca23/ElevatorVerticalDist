@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from pyramidElevatorDist.predection import predictSegment
+from pyramidElevatorDist.prediction import predictSegment
 from pyramidElevatorDist.segmentor import findSegments
 from pyramidElevatorDist._orchestration import RESAMPLE_TARGET_HZ, _resample_acc
 

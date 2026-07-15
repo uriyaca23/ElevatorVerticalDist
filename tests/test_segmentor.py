@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.pipelines.inprocess import segment as _core_segment
+from pyramidElevatorDist._orchestration import segment as _core_segment
 
 from pyramidElevatorDist.segmentor import findSegments, findSegmentParameters
 from pyramidElevatorDist.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E501

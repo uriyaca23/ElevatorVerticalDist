@@ -1,10 +1,10 @@
 """predictSegment / predictByParameters reproduce the current pipeline."""
 from __future__ import annotations
 
-from src.pipelines.inprocess import predict as _core_predict
+from pyramidElevatorDist._orchestration import predict as _core_predict
 
 from pyramidElevatorDist.segmentor import findSegments
-from pyramidElevatorDist.predection import predictSegment, predictByParameters
+from pyramidElevatorDist.prediction import predictSegment, predictByParameters
 
 from .conftest import deep_equal
 
