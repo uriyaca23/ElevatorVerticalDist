@@ -36,10 +36,54 @@ from .segmentor import (
 from .signal import (
     reconstructedSignal, displaySeries, barometricAltitude, RECONSTRUCT_CHOICES,
 )
+from .types import (
+    ALGORITHM_CHOICES,
+    CalibrationSample,
+    CorrelationCurves,
+    DetailedRideSegment,
+    DisplaySeries,
+    Heatmaps,
+    LobeFit,
+    PredictionOutput,
+    PredictionResult,
+    PredictionRow,
+    RideSegment,
+    SegmentDetail,
+    SegmentSpec,
+    TrapezoidOverride,
+    TrapezoidParams,
+)
+from .schemas import (
+    ACC_SCHEMA,
+    ALTITUDE_SCHEMA,
+    FrameSchema,
+    GYRO_SCHEMA,
+    PRS_SCHEMA,
+    RECONSTRUCTED_SIGNAL_SCHEMA,
+    SEGMENTS_TABLE_SCHEMA,
+)
+from .exceptions import (
+    BadDtypeError,
+    CalibrationFileError,
+    ConfigurationError,
+    EmptyInputError,
+    FrameValidationError,
+    InputTypeError,
+    InternalContractError,
+    InvalidSegmentError,
+    InvalidTrapezoidParamsError,
+    MissingColumnsError,
+    NaNValuesError,
+    NonMonotonicTimestampsError,
+    PyramidElevatorDistError,
+    UnknownAlgorithmError,
+    UnknownReconstructError,
+)
 
 __version__ = "0.2.0"
 
 __all__ = [
+    # entry points
     "findSegments",
     "findSegmentParameters",
     "findSegmentsDetailed",
@@ -48,5 +92,46 @@ __all__ = [
     "reconstructedSignal",
     "displaySeries",
     "barometricAltitude",
+    # choice constants
     "RECONSTRUCT_CHOICES",
+    "ALGORITHM_CHOICES",
+    # typed models
+    "LobeFit",
+    "Heatmaps",
+    "CorrelationCurves",
+    "SegmentDetail",
+    "RideSegment",
+    "DetailedRideSegment",
+    "SegmentSpec",
+    "TrapezoidParams",
+    "TrapezoidOverride",
+    "PredictionRow",
+    "PredictionResult",
+    "DisplaySeries",
+    "PredictionOutput",
+    "CalibrationSample",
+    # frame schemas
+    "FrameSchema",
+    "ACC_SCHEMA",
+    "GYRO_SCHEMA",
+    "PRS_SCHEMA",
+    "RECONSTRUCTED_SIGNAL_SCHEMA",
+    "ALTITUDE_SCHEMA",
+    "SEGMENTS_TABLE_SCHEMA",
+    # exceptions
+    "PyramidElevatorDistError",
+    "InputTypeError",
+    "FrameValidationError",
+    "MissingColumnsError",
+    "EmptyInputError",
+    "BadDtypeError",
+    "NaNValuesError",
+    "NonMonotonicTimestampsError",
+    "InvalidSegmentError",
+    "InvalidTrapezoidParamsError",
+    "UnknownAlgorithmError",
+    "UnknownReconstructError",
+    "CalibrationFileError",
+    "ConfigurationError",
+    "InternalContractError",
 ]

@@ -86,7 +86,16 @@ class TrapezoidAccelEstimator:
             finite_sample_correction=False,
         )
         if self.CALIBRATION_PATH.exists():
-            self.conformal = ConformalCalibrator.load(self.CALIBRATION_PATH)
+            try:
+                self.conformal = ConformalCalibrator.load(self.CALIBRATION_PATH)
+            except Exception as exc:
+                from pyramidElevatorDist.exceptions import CalibrationFileError
+                raise CalibrationFileError(
+                    f"failed to load the trapezoid conformal calibration at "
+                    f"{self.CALIBRATION_PATH} ({type(exc).__name__}: {exc}). "
+                    f"Re-install the package or re-calibrate; deleting the "
+                    f"file falls back to the uncalibrated theoretical CI."
+                ) from exc
 
     def save(self, path: Path | str | None = None) -> None:
         self.conformal.save(path or self.CALIBRATION_PATH)

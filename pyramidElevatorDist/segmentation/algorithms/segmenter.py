@@ -147,10 +147,17 @@ class Segmenter:
     ) -> pd.DataFrame:
         if self.config.algorithm is SegmentAlgorithm.PRESSURE_FILTER:
             algo_config = PressureFilterConfig(**self.params)
-            return HeightSegmenter(algo_config).segment(data)
-        if self.config.algorithm is SegmentAlgorithm.ACC_TEMPLATE_MATCH:
+            out = HeightSegmenter(algo_config).segment(data)
+        elif self.config.algorithm is SegmentAlgorithm.ACC_TEMPLATE_MATCH:
             predictions, _state = self.detect_raw(
                 data, phone_model=phone_model, gyro=gyro,
             )
-            return _template_match_to_segment_df(predictions)
-        raise ValueError(f"Unsupported algorithm: {self.config.algorithm}")
+            out = _template_match_to_segment_df(predictions)
+        else:
+            raise ValueError(f"Unsupported algorithm: {self.config.algorithm}")
+        # Contract check on the documented output schema; a violation is a
+        # package bug (InternalContractError), never a caller error.
+        from pyramidElevatorDist.schemas import SEGMENTS_TABLE_SCHEMA
+        return SEGMENTS_TABLE_SCHEMA.validate(
+            out, func="Segmenter.detect", param="return", internal=True,
+        )

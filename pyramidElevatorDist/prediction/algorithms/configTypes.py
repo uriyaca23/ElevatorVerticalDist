@@ -252,8 +252,17 @@ class PREDICT_ALGORITHM_CONFIG(BaseModel):
     resample_hz: int | None = None
 
     def load_params(self) -> dict[str, Any]:
-        with open(self.config_path, "r") as f:
-            all_params = json.load(f) or {}
+        try:
+            with open(self.config_path, "r") as f:
+                all_params = json.load(f) or {}
+        except (OSError, ValueError) as exc:
+            from pyramidElevatorDist.exceptions import ConfigurationError
+            raise ConfigurationError(
+                f"cannot read the algorithm config at {self.config_path} "
+                f"({type(exc).__name__}: {exc}). The packaged config.json "
+                f"ships with the library - re-install the package or point "
+                f"config_path at a valid JSON file."
+            ) from exc
         params = dict(all_params.get(self.algorithm.value, {}))
         params.update(self.overrides)
         return params

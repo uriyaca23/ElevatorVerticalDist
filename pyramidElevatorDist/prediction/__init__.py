@@ -12,8 +12,21 @@ fit (primary, on the rotation-invariant |a|-g signal) and ZUPT
 double-integration (on the gravity-projected a_vert) — with pre/post
 stationary-window gravity calibration. Configuration is loaded internally;
 the caller never passes hyperparameters.
+
+Inputs are validated on entry (see :mod:`pyramidElevatorDist.schemas` /
+:mod:`pyramidElevatorDist.exceptions`); the ``segment`` /
+``trapezoid_params`` arguments accept either the typed models
+(:class:`~pyramidElevatorDist.types.SegmentSpec`,
+:class:`~pyramidElevatorDist.types.TrapezoidParams`) or an equivalent
+mapping, which is validated and coerced. Results are typed
+:class:`~pyramidElevatorDist.types.PredictionResult` models, never dicts.
+
+The algorithm-dispatcher layer lives in
+:mod:`pyramidElevatorDist.prediction.algorithms` (``Predictor`` et al.).
 """
 from __future__ import annotations
+
+from typing import Any, Mapping, Sequence
 
 import pandas as pd
 
@@ -24,29 +37,49 @@ from pyramidElevatorDist._orchestration import (
     RESAMPLE_TARGET_HZ,
     predict as _predict_segments,
 )
+from pyramidElevatorDist._validation import (
+    check_algorithms,
+    check_reconstruct,
+    coerce_segment,
+    coerce_trapezoid,
+    segment_to_core_dict,
+    validate_acc,
+    validate_gyro,
+    validate_prs,
+)
+from pyramidElevatorDist.types.prediction import (
+    PredictionResult,
+    PredictionRow,
+    SegmentSpec,
+    TrapezoidOverride,
+    TrapezoidParams,
+)
 
 __all__ = ["predictSegment", "predictByParameters"]
 
 
 def _rows_to_result(rows_by_algo: dict[str, list[dict]],
-                    primary: str) -> dict:
-    """Flatten the single-segment ``_predict_segments`` output to one dict."""
-    result: dict = {"primary": primary}
+                    primary: str) -> PredictionResult:
+    """Flatten the single-segment ``_predict_segments`` output to one
+    typed :class:`PredictionResult`."""
+    result: dict[str, Any] = {"primary": primary}
     for aid, rows in rows_by_algo.items():
-        result[aid] = rows[0] if rows else None
-    return result
+        result[aid] = (
+            PredictionRow.model_validate(rows[0]) if rows else None
+        )
+    return PredictionResult.model_validate(result)
 
 
 def predictSegment(
     acc: pd.DataFrame,
-    segment: dict,
+    segment: SegmentSpec | Mapping[str, Any],
     phone_model: str = "",
-    algorithms: list[str] | None = None,
+    algorithms: Sequence[str] | None = None,
     resample: bool = True,
     gyro: pd.DataFrame | None = None,
     reconstruct: str = "none",
     prs: pd.DataFrame | None = None,
-) -> dict:
+) -> PredictionResult:
     """Predict Δh for one ride segment.
 
     Parameters
@@ -55,16 +88,17 @@ def predictSegment(
         Raw accelerometer samples — columns ``timestamp_ms``, ``x``, ``y``,
         ``z``.
     segment:
-        Ride interval — ``{"type": "up"|"down", "start_s": float,
-        "end_s": float}``. May also carry a ``"trapezoid_override"`` dict
-        (see :func:`predictByParameters`).
+        Ride interval — a :class:`SegmentSpec` or a mapping
+        ``{"type": "up"|"down", "start_s": float, "end_s": float}``. May
+        also carry a ``trapezoid_override`` (see
+        :func:`predictByParameters`).
     phone_model:
         Optional phone identifier for the accelerometer noise model.
     algorithms:
         Subset of ``["trap", "zupt"]`` to run. ``None`` runs both.
     prs:
         Optional pressure frame (columns ``timestamp_ms``, ``pressure``) for
-        the whole session. When given, the result gains a ``"baro"`` row — the
+        the whole session. When given, the result gains a ``baro`` row — the
         barometer (ground-truth) Δh for the segment, sign as measured.
     resample:
         When ``True`` (default), ``acc`` is first normalized onto the uniform
@@ -75,21 +109,21 @@ def predictSegment(
 
     Returns
     -------
-    dict
-        ``{"primary": "trap", "trap": <row>, "zupt": <row>}`` where each row
-        has::
-
-            delta_height_m   float   signed Δh (up +, down -), meters
-            abs_height_m     float   |Δh|, meters
-            accepted         bool    passed the quality filter
-            quality_score    float   0 = excellent, higher = worse
-            reject_reason    str     empty when accepted
-            ci_half_width    float   90% CI half-width, meters (nan if rejected)
-            meta             dict    algorithm-specific extras
-            type, start_s, end_s, duration_s, segment
+    PredictionResult
+        Typed per-algorithm rows: ``result.trap`` / ``result.zupt`` (and
+        ``result.baro`` when ``prs`` was given), each a
+        :class:`~pyramidElevatorDist.types.PredictionRow` or ``None``.
     """
+    acc = validate_acc(acc, func="predictSegment")
+    gyro = validate_gyro(gyro, func="predictSegment")
+    prs = validate_prs(prs, func="predictSegment", allow_empty=True)
+    reconstruct = check_reconstruct(reconstruct, func="predictSegment")
+    algorithms = check_algorithms(algorithms, func="predictSegment")
+    spec = coerce_segment(segment, func="predictSegment")
+
     rows_by_algo, primary = _predict_segments(
-        acc, [segment], phone_model=phone_model, algorithms=algorithms,
+        acc, [segment_to_core_dict(spec)],
+        phone_model=phone_model, algorithms=algorithms,
         resample_hz=(RESAMPLE_TARGET_HZ if resample else None),
         gyro=gyro, reconstruct=reconstruct, prs=prs,
     )
@@ -98,15 +132,15 @@ def predictSegment(
 
 def predictByParameters(
     acc: pd.DataFrame,
-    segment: dict,
-    trapezoid_params: dict,
+    segment: SegmentSpec | Mapping[str, Any],
+    trapezoid_params: TrapezoidParams | Mapping[str, Any],
     phone_model: str = "",
-    algorithms: list[str] | None = None,
+    algorithms: Sequence[str] | None = None,
     resample: bool = True,
     gyro: pd.DataFrame | None = None,
     reconstruct: str = "none",
     prs: pd.DataFrame | None = None,
-) -> dict:
+) -> PredictionResult:
     """Predict Δh for a segment using a manually edited trapezoid.
 
     The user overrides the fitted pulse shape; only the trapezoid estimator
@@ -117,22 +151,26 @@ def predictByParameters(
     Parameters
     ----------
     trapezoid_params:
-        ``{"W": float, "f": float, "abs_A": float}`` — half-width (s),
-        plateau fraction (0–1), and absolute peak amplitude (m/s²).
+        A :class:`TrapezoidParams` or a mapping ``{"W": float, "f": float,
+        "abs_A": float}`` — half-width (s), plateau fraction (0–1), and
+        absolute peak amplitude (m/s²).
     resample:
         Same as :func:`predictSegment` (default ``True``). The resampling is
         applied once, by the delegated ``predictSegment`` call.
 
     Returns
     -------
-    dict
+    PredictionResult
         Same shape as :func:`predictSegment`.
     """
-    seg = {
-        **segment,
-        "trapezoid_override": {"mode": "manual", **trapezoid_params},
-    }
+    spec = coerce_segment(segment, func="predictByParameters")
+    params = coerce_trapezoid(trapezoid_params, func="predictByParameters")
+    spec = spec.model_copy(update={
+        "trapezoid_override": TrapezoidOverride(
+            W=params.W, f=params.f, abs_A=params.abs_A,
+        ),
+    })
     return predictSegment(
-        acc, seg, phone_model=phone_model, algorithms=algorithms,
+        acc, spec, phone_model=phone_model, algorithms=algorithms,
         resample=resample, gyro=gyro, reconstruct=reconstruct, prs=prs,
     )

@@ -1,6 +1,6 @@
 """Public segmentation API.
 
-Two functions:
+Three functions:
 
 * :func:`findSegments` — detect every elevator ride in an accelerometer
   trace and return the rich per-ride trapezoid fits.
@@ -8,11 +8,17 @@ Two functions:
   the fitted trapezoid pulse-pair, its parameters, the per-lobe R² heatmaps,
   and the correlation map — everything the interactive editor shows for one
   segment.
+* :func:`findSegmentsDetailed` — :func:`findSegments` plus the per-ride
+  detail, all from a single detector pass.
 
-Both load their (local, fixed) detector configuration internally; the caller
+All load their (local, fixed) detector configuration internally; the caller
 never passes hyperparameters. Input is always a pandas ``DataFrame`` with
 columns ``timestamp_ms`` (Unix-epoch ms), ``x``, ``y``, ``z`` (raw
-accelerometer, m/s²).
+accelerometer, m/s²) — validated on entry against
+:data:`pyramidElevatorDist.schemas.ACC_SCHEMA`; malformed input raises a
+:mod:`pyramidElevatorDist.exceptions` subclass. Results are typed pydantic
+models (:class:`RideSegment`, :class:`SegmentDetail`,
+:class:`DetailedRideSegment`), never plain dicts.
 """
 from __future__ import annotations
 
@@ -32,13 +38,23 @@ from pyramidElevatorDist._orchestration import (
     segment as _segment,
     find_matching_prediction as _find_matching_prediction,
 )
+from pyramidElevatorDist._validation import (
+    check_reconstruct,
+    validate_acc,
+    validate_gyro,
+)
+from pyramidElevatorDist.types.segmentation import (
+    DetailedRideSegment,
+    RideSegment,
+    SegmentDetail,
+)
 
 __all__ = ["findSegments", "findSegmentParameters", "findSegmentsDetailed"]
 
 
 def findSegments(acc: pd.DataFrame, phone_model: str = "",
                  resample: bool = True, gyro: pd.DataFrame | None = None,
-                 reconstruct: str = "none") -> list[dict]:
+                 reconstruct: str = "none") -> list[RideSegment]:
     """Detect all elevator ride segments in an accelerometer trace.
 
     Parameters
@@ -60,26 +76,19 @@ def findSegments(acc: pd.DataFrame, phone_model: str = "",
 
     Returns
     -------
-    list[dict]
-        One dict per detected ride, each with::
-
-            index            int    position in the list
-            ride_type        str    "up" | "down"
-            t_start_s        float  ride start, seconds (relative to acc[0])
-            t_end_s          float  ride end, seconds
-            duration_s       float  t_end_s - t_start_s
-            lobe1, lobe2     dict   {t_c, a_peak, half_width_s, frac_flat, r2_local}
-            joint_r2_mean    float  shared-shape mean R² across both lobes
-            heatmap_energy   float  grid support of the match
-
-        Empty list when the trace is empty/too short or no ride is found.
+    list[RideSegment]
+        One typed :class:`RideSegment` per detected ride. Empty list when
+        the trace is too short or no ride is found.
     """
+    acc = validate_acc(acc, func="findSegments")
+    gyro = validate_gyro(gyro, func="findSegments")
+    reconstruct = check_reconstruct(reconstruct, func="findSegments")
     predictions, _state, _t0 = _segment(
         acc, phone_model=phone_model,
         resample_hz=(RESAMPLE_TARGET_HZ if resample else None),
         gyro=gyro, reconstruct=reconstruct,
     )
-    return predictions
+    return [RideSegment.model_validate(p) for p in predictions]
 
 
 def _lobe_dict(t_c: float, a_peak: float, W: float, f: float,
@@ -145,6 +154,8 @@ def _detail_from_state(
     Split out of :func:`findSegmentParameters` so a single detector pass can
     serve many windows (see :func:`findSegmentsDetailed`). Pass ``predictions``
     precomputed to avoid re-running ``predict_pairs`` on every call.
+    Internal — returns the raw dict; the public wrappers convert it to
+    :class:`SegmentDetail` at the boundary.
     """
     t_arr = np.asarray(state["t"])
     if t_arr.size == 0:
@@ -211,7 +222,7 @@ def findSegmentParameters(
     resample: bool = True,
     gyro: pd.DataFrame | None = None,
     reconstruct: str = "none",
-) -> dict | None:
+) -> SegmentDetail | None:
     """Fit the trapezoid pulse-pair + heatmaps for a marked interval.
 
     Use this for manual segment editing: the user marks ``[start_s, end_s]``
@@ -228,24 +239,11 @@ def findSegmentParameters(
     Otherwise the trapezoid is fitted fresh inside the window.
 
     Returns ``None`` when the trace is unusable or the window has no usable
-    +peak / -peak pair.
-
-    Returns
-    -------
-    dict
-        ::
-
-            ride_type       str
-            t_start_s       float   lobe1.t_c - half_width
-            t_end_s         float   lobe2.t_c + half_width
-            lobe1, lobe2    dict    {t_c, a_peak, half_width_s, frac_flat, r2_local}
-            joint_r2_mean   float
-            heatmap_energy  float
-            heatmaps        dict    {lobe1: ndarray(nW,nF), lobe2: ndarray(nW,nF),
-                                     grid_w_s: ndarray, grid_f: ndarray}
-            correlation     dict    {t: ndarray, best_pos_r2: ndarray,
-                                     best_neg_r2: ndarray}
+    +peak / -peak pair; otherwise a typed :class:`SegmentDetail`.
     """
+    acc = validate_acc(acc, func="findSegmentParameters")
+    gyro = validate_gyro(gyro, func="findSegmentParameters")
+    reconstruct = check_reconstruct(reconstruct, func="findSegmentParameters")
     # Detection (with its state) runs through the shared core / Segmenter
     # dispatcher, which also owns the optional resample + reconstruction.
     _preds, state, _t0 = _segment(
@@ -255,7 +253,10 @@ def findSegmentParameters(
     )
     if not state:
         return None
-    return _detail_from_state(state, float(start_s), float(end_s), ride_type)
+    detail = _detail_from_state(state, float(start_s), float(end_s), ride_type)
+    if detail is None:
+        return None
+    return SegmentDetail.model_validate(detail)
 
 
 def findSegmentsDetailed(
@@ -264,9 +265,9 @@ def findSegmentsDetailed(
     resample: bool = True,
     gyro: pd.DataFrame | None = None,
     reconstruct: str = "none",
-) -> list[dict]:
-    """Like :func:`findSegments`, but each ride dict also carries a ``"detail"``
-    key — the full :func:`findSegmentParameters` result (lobes, heatmaps,
+) -> list[DetailedRideSegment]:
+    """Like :func:`findSegments`, but each ride also carries its ``detail``
+    — the full :func:`findSegmentParameters` result (lobes, heatmaps,
     correlation) — all computed in a SINGLE detector pass.
 
     This lets an interactive UI precompute every ride's detail once at load
@@ -274,6 +275,9 @@ def findSegmentsDetailed(
     call repeats the whole matched-filter pass every time). ``detail`` is
     ``None`` for the rare ride whose window yields no usable +/- pair.
     """
+    acc = validate_acc(acc, func="findSegmentsDetailed")
+    gyro = validate_gyro(gyro, func="findSegmentsDetailed")
+    reconstruct = check_reconstruct(reconstruct, func="findSegmentsDetailed")
     preds, state, _t0 = _segment(
         acc, phone_model=phone_model, include_state=True,
         resample_hz=(RESAMPLE_TARGET_HZ if resample else None),
@@ -284,7 +288,7 @@ def findSegmentsDetailed(
     predictions = (
         _pair_filter.predict_pairs(state, state["config"]) if state else []
     )
-    out: list[dict] = []
+    out: list[DetailedRideSegment] = []
     for p in preds:
         detail = (
             _detail_from_state(
@@ -293,5 +297,5 @@ def findSegmentsDetailed(
             )
             if state else None
         )
-        out.append({**p, "detail": detail})
+        out.append(DetailedRideSegment.model_validate({**p, "detail": detail}))
     return out
