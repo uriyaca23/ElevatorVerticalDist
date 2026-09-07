@@ -5,11 +5,12 @@ Three functions:
 * :func:`findSegments` — detect every elevator ride in an accelerometer
   trace and return the rich per-ride trapezoid fits.
 * :func:`findSegmentParameters` — for a single user-marked interval, return
-  the fitted trapezoid pulse-pair, its parameters, the per-lobe R² heatmaps,
-  and the correlation map — everything the interactive editor shows for one
-  segment.
+  a :class:`SegmentParametersResult`: the fitted trapezoid pulse-pair, its
+  parameters, the per-lobe R² heatmaps and the correlation map under
+  ``detail``, plus the detector ``state``.
 * :func:`findSegmentsDetailed` — :func:`findSegments` plus the per-ride
-  detail, all from a single detector pass.
+  detail and the detector's raw ``state``, all from a single pass, wrapped
+  in one :class:`DetailedSegmentsResult`.
 
 All load their (local, fixed) detector configuration internally; the caller
 never passes hyperparameters. Input is always a pandas ``DataFrame`` with
@@ -18,7 +19,8 @@ accelerometer, m/s²) — validated on entry against
 :data:`pyramidElevatorDist.schemas.ACC_SCHEMA`; malformed input raises a
 :mod:`pyramidElevatorDist.exceptions` subclass. Results are typed pydantic
 models (:class:`RideSegment`, :class:`SegmentDetail`,
-:class:`DetailedRideSegment`), never plain dicts.
+:class:`DetailedRideSegment`, :class:`DetailedSegmentsResult`,
+:class:`SegmentParametersResult`), never plain dicts.
 """
 from __future__ import annotations
 
@@ -45,8 +47,10 @@ from pyramidElevatorDist._validation import (
 )
 from pyramidElevatorDist.types.segmentation import (
     DetailedRideSegment,
+    DetailedSegmentsResult,
     RideSegment,
     SegmentDetail,
+    SegmentParametersResult,
 )
 
 __all__ = ["findSegments", "findSegmentParameters", "findSegmentsDetailed"]
@@ -231,7 +235,7 @@ def findSegmentParameters(
     resample: bool = True,
     gyro: pd.DataFrame | None = None,
     reconstruct: str = "none",
-) -> SegmentDetail | None:
+) -> SegmentParametersResult | None:
     """Fit the trapezoid pulse-pair + heatmaps for a marked interval.
 
     Use this for manual segment editing: the user marks ``[start_s, end_s]``
@@ -247,8 +251,11 @@ def findSegmentParameters(
     ride's lobe parameters are returned (identical to what the editor shows).
     Otherwise the trapezoid is fitted fresh inside the window.
 
-    Returns ``None`` when the trace is unusable or the window has no usable
-    +peak / -peak pair; otherwise a typed :class:`SegmentDetail`.
+    Returns ``None`` when the trace itself is unusable (the detector could
+    not build a state at all). Otherwise a :class:`SegmentParametersResult`
+    carrying ``detail`` — the typed :class:`SegmentDetail`, or ``None`` when
+    the window held no usable +peak / -peak pair — plus the detector
+    ``state``.
     """
     acc = validate_acc(acc, func="findSegmentParameters")
     gyro = validate_gyro(gyro, func="findSegmentParameters")
@@ -263,9 +270,11 @@ def findSegmentParameters(
     if not state:
         return None
     detail = _detail_from_state(state, float(start_s), float(end_s), ride_type)
-    if detail is None:
-        return None
-    return SegmentDetail.model_validate(detail)
+    return SegmentParametersResult.model_validate({
+        "detail": (SegmentDetail.model_validate(detail)
+                   if detail is not None else None),
+        "state": state,
+    })
 
 
 def findSegmentsDetailed(
@@ -274,15 +283,23 @@ def findSegmentsDetailed(
     resample: bool = True,
     gyro: pd.DataFrame | None = None,
     reconstruct: str = "none",
-) -> list[DetailedRideSegment]:
-    """Like :func:`findSegments`, but each ride also carries its ``detail``
+) -> DetailedSegmentsResult:
+    """Like :func:`findSegments`, but every ride also carries its ``detail``
     — the full :func:`findSegmentParameters` result (lobes, heatmaps,
-    correlation) — all computed in a SINGLE detector pass.
+    correlation) — and the result also hands back the detector's raw
+    ``state``, all from a SINGLE detector pass.
 
     This lets an interactive UI precompute every ride's detail once at load
-    instead of re-running the detector on each click (the stateless per-segment
-    call repeats the whole matched-filter pass every time). ``detail`` is
-    ``None`` for the rare ride whose window yields no usable +/- pair.
+    instead of re-running the detector on each click (the stateless
+    per-segment call repeats the whole matched-filter pass every time).
+    ``detail`` is ``None`` for the rare ride whose window yields no usable
+    +/- pair.
+
+    ``result.state`` is the detector's working dict (``t``, ``a_smooth``, the
+    ``best_pos_r2`` / ``best_neg_r2`` correlation curves, the ``(W, f)``
+    grids, the live ``DetectConfig``, ``t0_ms``). It holds numpy arrays and a
+    config object, so the result is not JSON-serializable — consume it
+    in-process.
     """
     acc = validate_acc(acc, func="findSegmentsDetailed")
     gyro = validate_gyro(gyro, func="findSegmentsDetailed")
@@ -292,12 +309,10 @@ def findSegmentsDetailed(
         resample_hz=(RESAMPLE_TARGET_HZ if resample else None),
         gyro=gyro, reconstruct=reconstruct,
     )
-    if not preds:
-        return []
     predictions = (
         _pair_filter.predict_pairs(state, state["config"]) if state else []
     )
-    out: list[DetailedRideSegment] = []
+    segments: list[DetailedRideSegment] = []
     for p in preds:
         detail = (
             _detail_from_state(
@@ -306,5 +321,10 @@ def findSegmentsDetailed(
             )
             if state else None
         )
-        out.append(DetailedRideSegment.model_validate({**p, "detail": detail}))
-    return out
+        segments.append(
+            DetailedRideSegment.model_validate({**p, "detail": detail}),
+        )
+    return DetailedSegmentsResult.model_validate({
+        "segments": segments,
+        "state": state or {},
+    })

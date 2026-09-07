@@ -52,8 +52,9 @@ def test_findSegmentParameters_matches_detector_fit(acc):
     t_arr = np.asarray(state["t"])
 
     for seg in segs[:5]:
-        res = findSegmentParameters(acc, seg.t_start_s, seg.t_end_s,
+        out = findSegmentParameters(acc, seg.t_start_s, seg.t_end_s,
                                     ride_type=seg.ride_type, resample=False)
+        res = out.detail
         assert isinstance(res, SegmentDetail)
         # Lobe parameters identical to the detector's prediction.
         deep_equal(res.lobe1.model_dump(), seg.lobe1.model_dump())
@@ -81,5 +82,6 @@ def test_findSegmentParameters_no_overlap_returns_none_or_fit(acc):
     """A window in a quiet region either fits fresh or returns None — never
     raises."""
     # Far past the end of the trace → empty/extrema-less window.
-    res = findSegmentParameters(acc, 1e9, 1e9 + 5.0)
+    out = findSegmentParameters(acc, 1e9, 1e9 + 5.0)
+    res = None if out is None else out.detail
     assert res is None or isinstance(res, SegmentDetail)

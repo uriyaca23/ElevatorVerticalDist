@@ -172,9 +172,11 @@ class ExperimentBarMixin:
         self.update_idletasks()
         try:
             # One detector pass returns every ride WITH its detail (heatmaps +
-            # correlation), so segment clicks are instant instead of re-running
-            # the detector each time.
-            self.predictions = findSegmentsDetailed(acc, resample=True)
+            # correlation) plus the raw detector state, so segment clicks are
+            # instant instead of re-running the detector each time.
+            detected = findSegmentsDetailed(acc, resample=True)
+            self.predictions = detected.segments
+            self.detector_state = detected.state
             self._detail_cache = {
                 p.index: p.detail for p in self.predictions
             }

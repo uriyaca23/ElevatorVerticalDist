@@ -56,33 +56,38 @@ def test_short_trace_returns_empty_list(quiet_acc):
 def test_segment_parameters_happy_path(ride_acc):
     res = P.findSegmentParameters(
         ride_acc, RIDE["t_c1"] - 2.0, RIDE["t_c2"] + 2.0)
-    assert isinstance(res, P.SegmentDetail)
-    assert res.heatmaps.lobe1.shape == (res.heatmaps.grid_w_s.size,
-                                        res.heatmaps.grid_f.size)
-    assert res.correlation.t.size == res.correlation.best_pos_r2.size
+    assert isinstance(res, P.SegmentParametersResult)
+    det = res.detail
+    assert isinstance(det, P.SegmentDetail)
+    assert det.heatmaps.lobe1.shape == (det.heatmaps.grid_w_s.size,
+                                        det.heatmaps.grid_f.size)
+    assert det.correlation.t.size == det.correlation.best_pos_r2.size
     # Parameter recovery ≈ synthesis (within a grid step / noise).
-    assert res.lobe1.half_width_s == pytest.approx(RIDE["W"], abs=0.4)
-    assert abs(res.lobe1.a_peak) == pytest.approx(RIDE["A"], abs=0.3)
+    assert det.lobe1.half_width_s == pytest.approx(RIDE["W"], abs=0.4)
+    assert abs(det.lobe1.a_peak) == pytest.approx(RIDE["A"], abs=0.3)
 
 
 def test_segment_parameters_quiet_window_none_or_detail(quiet_acc):
-    """A quiet window either fits fresh or returns None — never raises
+    """A quiet window either fits fresh or yields detail=None — never raises
     (behavior pin)."""
     res = P.findSegmentParameters(quiet_acc, 5.0, 10.0)
-    assert res is None or isinstance(res, P.SegmentDetail)
+    assert res is None or isinstance(res, P.SegmentParametersResult)
+    if res is not None:
+        assert res.detail is None or isinstance(res.detail, P.SegmentDetail)
 
 
 def test_detailed_matches_parameters(ride_acc):
+    """Each ride's precomputed ``detail`` equals the single-window fit."""
     detailed = P.findSegmentsDetailed(ride_acc)
-    assert len(detailed) >= 1
-    for d in detailed:
+    assert len(detailed.segments) >= 1
+    for d in detailed.segments:
         assert isinstance(d, P.DetailedRideSegment)
         if d.detail is None:
             continue
         res = P.findSegmentParameters(
             ride_acc, d.t_start_s, d.t_end_s, ride_type=d.ride_type)
-        assert res is not None
-        assert nan_equal(d.detail.model_dump(), res.model_dump())
+        assert res is not None and res.detail is not None
+        assert nan_equal(d.detail.model_dump(), res.detail.model_dump())
 
 
 def test_model_roundtrip_and_json(ride_acc):
@@ -92,7 +97,7 @@ def test_model_roundtrip_and_json(ride_acc):
         == s.model_dump()
 
     detail = P.findSegmentParameters(
-        ride_acc, RIDE["t_c1"] - 2.0, RIDE["t_c2"] + 2.0)
+        ride_acc, RIDE["t_c1"] - 2.0, RIDE["t_c2"] + 2.0).detail
     payload = detail.model_dump(mode="json")
     json.dumps(payload)  # ndarrays serialized to lists
 
@@ -136,9 +141,8 @@ def test_find_segments_bounds_carry_the_eps_pad(ride_acc):
 
 
 def test_detail_bounds_match_their_own_ride(ride_acc):
-    """``DetailedRideSegment.detail`` must not disagree with the ride it
-    hangs off."""
-    for d in P.findSegmentsDetailed(ride_acc):
+    """``DetailedRideSegment.detail`` must not disagree with its own ride."""
+    for d in P.findSegmentsDetailed(ride_acc).segments:
         assert d.detail is not None
         assert d.detail.t_start_s == pytest.approx(d.t_start_s)
         assert d.detail.t_end_s == pytest.approx(d.t_end_s)
@@ -147,22 +151,22 @@ def test_detail_bounds_match_their_own_ride(ride_acc):
 def test_segment_parameters_returns_the_detected_ride_bounds(ride_acc):
     """Asking for a detected ride's own window returns that ride's bounds."""
     seg = P.findSegments(ride_acc)[0]
-    res = P.findSegmentParameters(
-        ride_acc, seg.t_start_s, seg.t_end_s, ride_type=seg.ride_type)
-    assert res is not None
-    assert res.t_start_s == pytest.approx(seg.t_start_s)
-    assert res.t_end_s == pytest.approx(seg.t_end_s)
+    det = P.findSegmentParameters(
+        ride_acc, seg.t_start_s, seg.t_end_s, ride_type=seg.ride_type).detail
+    assert det is not None
+    assert det.t_start_s == pytest.approx(seg.t_start_s)
+    assert det.t_end_s == pytest.approx(seg.t_end_s)
 
 
 def test_every_entry_point_describes_the_ride_identically(ride_acc):
-    """findSegments / findSegmentsDetailed / .detail / findSegmentParameters
+    """findSegments / .segments / .segments[i].detail / findSegmentParameters
     are four views of one ride — they must agree on all of it."""
     plain = P.findSegments(ride_acc)
-    detailed = P.findSegmentsDetailed(ride_acc)
+    detailed = P.findSegmentsDetailed(ride_acc).segments
     assert len(plain) == len(detailed) >= 1
     for p, d in zip(plain, detailed):
         params = P.findSegmentParameters(
-            ride_acc, p.t_start_s, p.t_end_s, ride_type=p.ride_type)
+            ride_acc, p.t_start_s, p.t_end_s, ride_type=p.ride_type).detail
         assert params is not None
         assert d.detail is not None
         for view in (d, d.detail, params):
@@ -183,6 +187,70 @@ def test_fresh_fit_window_is_eps_padded_too(subthreshold_ride_acc):
     segs = P.findSegments(subthreshold_ride_acc)
     assert not any(s.t_start_s <= 70.0 and s.t_end_s >= 50.0 for s in segs), \
         "fixture must leave [50, 70] s undetected to reach the fresh-fit branch"
-    res = P.findSegmentParameters(subthreshold_ride_acc, 50.0, 70.0, "up")
-    assert res is not None
-    _assert_eps_padded(res, eps)
+    det = P.findSegmentParameters(
+        subthreshold_ride_acc, 50.0, 70.0, "up").detail
+    assert det is not None
+    _assert_eps_padded(det, eps)
+
+
+# --------------------------------------------------------------------------
+# Result wrappers — findSegmentsDetailed / findSegmentParameters return a
+# single result object carrying the detector ``state`` alongside the rides.
+# --------------------------------------------------------------------------
+
+_STATE_KEYS = {"t", "a_smooth", "best_pos_r2", "best_neg_r2",
+               "grid_w_s", "grid_f", "config", "t0_ms"}
+
+
+def test_detailed_ride_segment_is_exported():
+    """The per-ride detail model is the element type of the wrapper."""
+    assert "DetailedRideSegment" in P.__all__
+    assert issubclass(P.DetailedRideSegment, P.RideSegment)
+    assert "detail" in P.DetailedRideSegment.model_fields
+
+
+def test_find_segments_detailed_returns_result_wrapper(ride_acc):
+    res = P.findSegmentsDetailed(ride_acc)
+    assert isinstance(res, P.DetailedSegmentsResult)
+    assert isinstance(res.segments, list)
+    assert len(res.segments) >= 1
+    assert all(isinstance(s, P.DetailedRideSegment) for s in res.segments)
+    assert isinstance(res.state, dict)
+    assert _STATE_KEYS <= set(res.state)
+
+
+def test_detailed_segments_match_find_segments(ride_acc):
+    """The wrapper's rides carry exactly the findSegments fields, plus
+    ``detail``."""
+    plain = P.findSegments(ride_acc)
+    wrapped = P.findSegmentsDetailed(ride_acc).segments
+    assert len(plain) == len(wrapped)
+    for a, b in zip(plain, wrapped):
+        shared = {k: v for k, v in b.model_dump().items() if k != "detail"}
+        assert nan_equal(a.model_dump(), shared)
+
+
+def test_find_segment_parameters_returns_result_wrapper(ride_acc):
+    """findSegmentParameters returns the wrapper: .detail + .state."""
+    seg = P.findSegments(ride_acc)[0]
+    res = P.findSegmentParameters(
+        ride_acc, seg.t_start_s, seg.t_end_s, ride_type=seg.ride_type)
+    assert isinstance(res, P.SegmentParametersResult)
+    assert isinstance(res.detail, P.SegmentDetail)
+    assert isinstance(res.state, dict)
+    assert _STATE_KEYS <= set(res.state)
+
+
+def test_segment_parameters_result_field_names():
+    """Singular ``detail``, not ``details``."""
+    assert "SegmentParametersResult" in P.__all__
+    assert set(P.SegmentParametersResult.model_fields) == {"detail", "state"}
+
+
+def test_result_wrappers_forbid_extra_keys():
+    with pytest.raises(pydantic.ValidationError):
+        P.DetailedSegmentsResult.model_validate(
+            {"segments": [], "state": {}, "nope": 1})
+    with pytest.raises(pydantic.ValidationError):
+        P.SegmentParametersResult.model_validate(
+            {"details": None, "state": {}, "nope": 1})

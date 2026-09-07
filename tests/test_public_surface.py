@@ -18,6 +18,7 @@ _CHOICE_CONSTANTS = {"RECONSTRUCT_CHOICES", "ALGORITHM_CHOICES"}
 _MODELS = {
     "LobeFit", "Heatmaps", "CorrelationCurves", "SegmentDetail",
     "RideSegment", "DetailedRideSegment",
+    "DetailedSegmentsResult", "SegmentParametersResult",
     "SegmentSpec", "TrapezoidParams", "TrapezoidOverride",
     "PredictionRow", "PredictionResult", "DisplaySeries",
     "PredictionOutput", "CalibrationSample",

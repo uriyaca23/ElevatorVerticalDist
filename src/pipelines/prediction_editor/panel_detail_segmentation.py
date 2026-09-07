@@ -217,10 +217,11 @@ class DetailSegmentationMixin:
         params = self._detail_cache.get(idx)
         if params is None and idx not in self._detail_cache:
             # Rare fallback: compute on demand and memoize.
-            params = findSegmentParameters(
+            res = findSegmentParameters(
                 self.acc, float(pred.t_start_s), float(pred.t_end_s),
                 str(pred.ride_type), resample=True,
             )
+            params = res.detail if res is not None else None
             self._detail_cache[idx] = params
         if params is None:
             self._detail_placeholder("No trapezoid fit for this interval.")
@@ -261,9 +262,10 @@ class DetailSegmentationMixin:
         if key in self._param_cache:
             params = self._param_cache[key]
         else:
-            params = findSegmentParameters(
+            res = findSegmentParameters(
                 self.acc, float(t_lo), float(t_hi), ride_type, resample=True,
             )
+            params = res.detail if res is not None else None
             self._param_cache[key] = params
         matched = self._gt_matched_by_prediction(t_lo, t_hi)
         if params is None:

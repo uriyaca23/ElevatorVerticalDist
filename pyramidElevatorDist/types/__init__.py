@@ -21,10 +21,12 @@ from .prediction import (  # noqa: F401
 from .segmentation import (  # noqa: F401
     CorrelationCurves,
     DetailedRideSegment,
+    DetailedSegmentsResult,
     Heatmaps,
     LobeFit,
     RideSegment,
     SegmentDetail,
+    SegmentParametersResult,
 )
 
 __all__ = [
@@ -37,6 +39,8 @@ __all__ = [
     "SegmentDetail",
     "RideSegment",
     "DetailedRideSegment",
+    "DetailedSegmentsResult",
+    "SegmentParametersResult",
     "ALGORITHM_CHOICES",
     "SegmentSpec",
     "TrapezoidParams",

@@ -6,7 +6,7 @@ wrappers convert at the boundary, the algorithms are untouched.
 """
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import model_validator
 
@@ -19,6 +19,8 @@ __all__ = [
     "SegmentDetail",
     "RideSegment",
     "DetailedRideSegment",
+    "DetailedSegmentsResult",
+    "SegmentParametersResult",
 ]
 
 
@@ -108,3 +110,31 @@ class DetailedRideSegment(RideSegment):
     """
 
     detail: SegmentDetail | None = None
+
+
+class DetailedSegmentsResult(PyramidModel):
+    """Everything one detector pass produced: the rides plus its raw state.
+
+    ``state`` is the detector's own working dict — ``t``, ``a_smooth``, the
+    ``best_pos_r2`` / ``best_neg_r2`` correlation curves, the ``(W, f)``
+    grids (``grid_w_s`` / ``grid_f``), the live ``DetectConfig`` under
+    ``config``, and ``t0_ms``. It carries numpy arrays and a config object,
+    so it is deliberately NOT JSON-serializable: consume it in-process (UI
+    plots, re-fits) rather than sending it over the wire.
+    """
+
+    segments: list[DetailedRideSegment]
+    state: dict[str, Any]
+
+
+class SegmentParametersResult(PyramidModel):
+    """One marked interval's trapezoid fit, plus the detector state.
+
+    Returned by :func:`~pyramidElevatorDist.findSegmentParameters`.
+    ``detail`` is ``None`` when the window holds no usable +/- lobe pair —
+    the trace was readable, the window simply had nothing to fit. ``state``
+    is the same dict :class:`DetailedSegmentsResult` carries.
+    """
+
+    detail: SegmentDetail | None
+    state: dict[str, Any]

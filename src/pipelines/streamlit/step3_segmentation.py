@@ -284,7 +284,7 @@ def _heatmap_figure(heat, grid_w_s, grid_f, title: str,
     """Per-lobe R² heatmap over the (W, f) template grid.
 
     ``heat`` / ``grid_w_s`` / ``grid_f`` come straight from
-    ``findSegmentParameters(...).heatmaps``.
+    ``findSegmentParameters(...).detail.heatmaps``.
     """
     fig = go.Figure(go.Heatmap(
         z=np.asarray(heat), x=np.asarray(grid_f), y=np.asarray(grid_w_s),
@@ -310,7 +310,7 @@ def _correlation_figure(
     """Per-sign best-R² correlation curves over a window.
 
     Plots only the two curves from
-    ``findSegmentParameters(...).correlation`` — no threshold line and
+    ``findSegmentParameters(...).detail.correlation`` — no threshold line and
     no peak-status dots (those needed detector internals).
     """
     t = np.asarray(correlation.t, dtype=float)
@@ -454,9 +454,10 @@ def render() -> None:
         # Fit the trapezoid + heatmaps + correlation for this interval.
         # Segmentation is magnitude-invariant, so this call is acc-only
         # (no gyro / reconstruct). Cached by bounds signature for step 5.
-        params = findSegmentParameters(
+        _fit = findSegmentParameters(
             loaded.acc, t_lo, t_hi, ride_type=rt, resample=False,
         )
+        params = _fit.detail if _fit is not None else None
         cache = st.session_state.get("segment_params")
         if not isinstance(cache, dict):
             cache = {}

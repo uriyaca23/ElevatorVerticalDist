@@ -328,7 +328,7 @@ def _build_correlation_png(
 ) -> bytes:
     """Correlation panel ±30 s around the segment — the two per-sign best-R²
     curves only (no threshold line, no peak-status dots; those needed detector
-    internals). ``correlation`` is ``findSegmentParameters(...).correlation``.
+    internals). ``correlation`` is ``findSegmentParameters(...).detail.correlation``.
     """
     if correlation is None:
         return b""
@@ -1403,9 +1403,10 @@ def _correlation_for_report(
         except (TypeError, ValueError):
             continue
         rt = str(row.get("type", "up")).lower()
-        params = findSegmentParameters(
+        _fit = findSegmentParameters(
             loaded.acc, t_lo, t_hi, ride_type=rt, resample=False,
         )
+        params = _fit.detail if _fit is not None else None
         if params is not None:
             return params.correlation
     return None
