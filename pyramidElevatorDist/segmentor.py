@@ -151,6 +151,7 @@ def _fit_fresh(state: dict, t_lo: float, t_hi: float,
 def _detail_from_state(
     state: dict, t_lo: float, t_hi: float, ride_type: str | None,
     predictions: list[dict] | None = None,
+    force_fresh_fit: bool = False,
 ) -> dict | None:
     """Build one segment's detail (lobes, heatmaps, correlation) from an
     already-computed detector ``state`` + a ``[t_lo, t_hi]`` window.
@@ -160,6 +161,10 @@ def _detail_from_state(
     precomputed to avoid re-running ``predict_pairs`` on every call.
     Internal — returns the raw dict; the public wrappers convert it to
     :class:`SegmentDetail` at the boundary.
+
+    ``force_fresh_fit`` treats ``[t_lo, t_hi]`` as caller-stated ground truth:
+    ``predict_pairs`` is skipped entirely (so no detected ride can be snapped
+    to) and the returned ``t_start_s`` / ``t_end_s`` are the window verbatim.
     """
     t_arr = np.asarray(state["t"])
     if t_arr.size == 0:
@@ -168,9 +173,15 @@ def _detail_from_state(
     grid_f = state["grid_f"]
     a_smooth = state["a_smooth"]
 
-    if predictions is None:
-        predictions = _pair_filter.predict_pairs(state, state["config"])
-    matching = _find_matching_prediction(predictions, t_lo, t_hi)
+    if force_fresh_fit:
+        # Caller stated the exact ride bounds. Skip pairing outright rather
+        # than fitting and discarding: nothing downstream of predict_pairs may
+        # influence a window the caller already knows the answer for.
+        matching = None
+    else:
+        if predictions is None:
+            predictions = _pair_filter.predict_pairs(state, state["config"])
+        matching = _find_matching_prediction(predictions, t_lo, t_hi)
 
     if matching is not None:
         lobe1 = dict(matching["lobe1"])
@@ -191,13 +202,21 @@ def _detail_from_state(
             rt = ride_type
         else:
             rt = "up" if lobe1["a_peak"] > 0 else "down"
-        # Fresh fit: apply the same ε segment-padding pair_filter.predict_pairs
-        # does, so a hand-marked window is described on the detector's terms —
-        # the downstream Δh estimators re-fit / double-integrate inside the
-        # interval they are handed and clip the pulse tails without it.
-        eps = float(getattr(state.get("config"), "segment_pad_eps_s", 0.0))
-        t_start = float(lobe1["t_c"]) - float(lobe1["half_width_s"]) - eps
-        t_end = float(lobe2["t_c"]) + float(lobe2["half_width_s"]) + eps
+        if force_fresh_fit:
+            # Ground-truth bounds: hand them back untouched. This deliberately
+            # forgoes the ε padding below — widening a stated interval is
+            # exactly the override this flag exists to prevent, at the cost of
+            # the tail room the downstream Δh estimators would otherwise get.
+            t_start, t_end = float(t_lo), float(t_hi)
+        else:
+            # Fresh fit: apply the same ε segment-padding
+            # pair_filter.predict_pairs does, so a hand-marked window is
+            # described on the detector's terms — the downstream Δh estimators
+            # re-fit / double-integrate inside the interval they are handed and
+            # clip the pulse tails without it.
+            eps = float(getattr(state.get("config"), "segment_pad_eps_s", 0.0))
+            t_start = float(lobe1["t_c"]) - float(lobe1["half_width_s"]) - eps
+            t_end = float(lobe2["t_c"]) + float(lobe2["half_width_s"]) + eps
 
     i1 = int(np.clip(np.argmin(np.abs(t_arr - lobe1["t_c"])), 0, t_arr.size - 1))
     i2 = int(np.clip(np.argmin(np.abs(t_arr - lobe2["t_c"])), 0, t_arr.size - 1))
@@ -235,6 +254,7 @@ def findSegmentParameters(
     resample: bool = True,
     gyro: pd.DataFrame | None = None,
     reconstruct: str = "none",
+    force_fresh_fit: bool = False,
 ) -> SegmentParametersResult | None:
     """Fit the trapezoid pulse-pair + heatmaps for a marked interval.
 
@@ -250,6 +270,17 @@ def findSegmentParameters(
     If the detector already proposed a ride overlapping the interval, that
     ride's lobe parameters are returned (identical to what the editor shows).
     Otherwise the trapezoid is fitted fresh inside the window.
+
+    ``force_fresh_fit`` (default ``False``) suppresses that reuse: the pairing
+    stage is skipped and the trapezoid is always fitted fresh inside
+    ``[start_s, end_s]``. Use it when the caller already knows the ride's exact
+    times — ``t_start_s`` / ``t_end_s`` then come back as the values passed in,
+    rather than the detector's interval or the lobe-derived bounds. Note this
+    forgoes the ε tail padding the default path applies, so a window marked
+    tight to the ride body may clip the pulse tails the downstream Δh
+    estimators integrate over. The lobes, R², heatmaps and correlation curves
+    are computed exactly as on the default path. The whole-trace template sweep
+    still runs — it is what the heatmaps and correlation curves are built from.
 
     Returns ``None`` when the trace itself is unusable (the detector could
     not build a state at all). Otherwise a :class:`SegmentParametersResult`
@@ -269,7 +300,10 @@ def findSegmentParameters(
     )
     if not state:
         return None
-    detail = _detail_from_state(state, float(start_s), float(end_s), ride_type)
+    detail = _detail_from_state(
+        state, float(start_s), float(end_s), ride_type,
+        force_fresh_fit=bool(force_fresh_fit),
+    )
     return SegmentParametersResult.model_validate({
         "detail": (SegmentDetail.model_validate(detail)
                    if detail is not None else None),

@@ -254,3 +254,107 @@ def test_result_wrappers_forbid_extra_keys():
     with pytest.raises(pydantic.ValidationError):
         P.SegmentParametersResult.model_validate(
             {"details": None, "state": {}, "nope": 1})
+
+
+# --------------------------------------------------------------------------
+# force_fresh_fit — the caller states the ride's exact times, so the pairing
+# stage is skipped and the bounds come back verbatim. Opt-in: the default
+# stays byte-identical to the historical behaviour pinned above.
+# --------------------------------------------------------------------------
+
+def test_force_fresh_fit_defaults_to_false_and_is_appended_last():
+    """Existing positional callers must keep working — the new parameter goes
+    after every parameter that shipped before it."""
+    import inspect
+    params = list(inspect.signature(P.findSegmentParameters).parameters)
+    assert params == [
+        "acc", "start_s", "end_s", "ride_type", "phone_model",
+        "resample", "gyro", "reconstruct", "force_fresh_fit",
+    ]
+    assert inspect.signature(
+        P.findSegmentParameters).parameters["force_fresh_fit"].default is False
+
+
+def test_force_fresh_fit_off_is_identical_to_omitting_it(ride_acc):
+    """The default path is untouched (behavior pin for existing users)."""
+    seg = P.findSegments(ride_acc)[0]
+    a = P.findSegmentParameters(ride_acc, seg.t_start_s, seg.t_end_s)
+    b = P.findSegmentParameters(ride_acc, seg.t_start_s, seg.t_end_s,
+                                force_fresh_fit=False)
+    assert nan_equal(a.detail.model_dump(), b.detail.model_dump())
+
+
+def test_force_fresh_fit_returns_the_caller_bounds_verbatim(ride_acc):
+    t_lo, t_hi = RIDE["t_c1"] - 2.0, RIDE["t_c2"] + 2.0
+    det = P.findSegmentParameters(
+        ride_acc, t_lo, t_hi, force_fresh_fit=True).detail
+    assert det is not None
+    assert det.t_start_s == pytest.approx(t_lo)
+    assert det.t_end_s == pytest.approx(t_hi)
+
+
+def test_force_fresh_fit_ignores_an_overlapping_detected_ride(ride_acc):
+    """The window overlaps a detected ride, so the default path snaps to that
+    ride's bounds; forcing keeps the caller's."""
+    seg = P.findSegments(ride_acc)[0]
+    t_lo, t_hi = seg.t_start_s + 0.5, seg.t_end_s - 0.5
+
+    snapped = P.findSegmentParameters(ride_acc, t_lo, t_hi).detail
+    assert snapped.t_start_s == pytest.approx(seg.t_start_s)
+    assert snapped.t_end_s == pytest.approx(seg.t_end_s)
+
+    forced = P.findSegmentParameters(
+        ride_acc, t_lo, t_hi, force_fresh_fit=True).detail
+    assert forced.t_start_s == pytest.approx(t_lo)
+    assert forced.t_end_s == pytest.approx(t_hi)
+
+
+def test_force_fresh_fit_drops_the_eps_pad(subthreshold_ride_acc):
+    """Same undetected window as the fresh-fit pad pin: padded by default,
+    verbatim when forced."""
+    eps = _segment_pad_eps_s()
+    padded = P.findSegmentParameters(
+        subthreshold_ride_acc, 50.0, 70.0, "up").detail
+    _assert_eps_padded(padded, eps)
+
+    forced = P.findSegmentParameters(
+        subthreshold_ride_acc, 50.0, 70.0, "up", force_fresh_fit=True).detail
+    assert forced is not None
+    assert forced.t_start_s == pytest.approx(50.0)
+    assert forced.t_end_s == pytest.approx(70.0)
+
+
+def test_force_fresh_fit_still_fits_real_lobes_and_heatmaps(ride_acc):
+    """Only the bounds are the caller's — the diagnostics are genuine fits."""
+    det = P.findSegmentParameters(
+        ride_acc, RIDE["t_c1"] - 2.0, RIDE["t_c2"] + 2.0,
+        force_fresh_fit=True).detail
+    assert det is not None
+    assert det.lobe1.t_c == pytest.approx(RIDE["t_c1"], abs=0.5)
+    assert det.lobe2.t_c == pytest.approx(RIDE["t_c2"], abs=0.5)
+    assert det.lobe1.a_peak > 0 > det.lobe2.a_peak
+    assert 0.9 <= det.joint_r2_mean <= 1.0
+    assert det.heatmaps.lobe1.shape == (det.heatmaps.grid_w_s.size,
+                                        det.heatmaps.grid_f.size)
+    assert det.correlation.t.size == det.correlation.best_pos_r2.size
+
+
+def test_force_fresh_fit_output_structure_is_unchanged(ride_acc):
+    """Same wrapper, same fields — no schema change for existing consumers."""
+    res = P.findSegmentParameters(
+        ride_acc, RIDE["t_c1"] - 2.0, RIDE["t_c2"] + 2.0,
+        force_fresh_fit=True)
+    assert isinstance(res, P.SegmentParametersResult)
+    assert set(res.model_dump()) == {"detail", "state"}
+    assert isinstance(res.detail, P.SegmentDetail)
+    assert _STATE_KEYS <= set(res.state)
+
+
+def test_force_fresh_fit_unfittable_window_returns_detail_none(quiet_acc):
+    """No usable +/- pair → detail is None, never an exception; when a fit
+    does happen the bounds are still the caller's (behavior pin)."""
+    res = P.findSegmentParameters(quiet_acc, 5.0, 10.0, force_fresh_fit=True)
+    assert res is None or isinstance(res, P.SegmentParametersResult)
+    if res is not None and res.detail is not None:
+        assert res.detail.t_start_s == pytest.approx(5.0)
+        assert res.detail.t_end_s == pytest.approx(10.0)
