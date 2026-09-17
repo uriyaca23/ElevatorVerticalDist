@@ -50,7 +50,7 @@ def test_top_level_exports():
     assert isinstance(pkg.RECONSTRUCT_CHOICES, list)
     assert pkg.RECONSTRUCT_CHOICES[0] == "none"
     assert pkg.ALGORITHM_CHOICES == ("trap", "zupt")
-    assert pkg.__version__ == "0.2.0"
+    assert pkg.__version__ == "0.3.0"
 
 
 def test_submodule_exports():

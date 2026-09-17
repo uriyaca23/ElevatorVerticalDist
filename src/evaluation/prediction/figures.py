@@ -18,6 +18,13 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+
+from src.evaluation.bin_charts import (
+    BAND_CONFIDENCE,
+    DISTANCE_BIN_EDGES,
+    DURATION_BIN_EDGES,
+    bin_rate_chart,
+)
 import pandas as pd
 
 from .metrics import per_experiment_metrics
@@ -309,107 +316,39 @@ def fig_ci_vs_duration(df: pd.DataFrame, out_path: Path, title: str) -> None:
 
 def fig_coverage_vs_distance_bins(df: pd.DataFrame, out_path: Path, title: str,
                                    bin_edges: np.ndarray | None = None) -> None:
-    """Coverage rate broken down by |true_dh| bin."""
+    """Inclusion rate by |Δh| bin. See :func:`bin_rate_chart`."""
     sub = _clean(df)
-    if sub.empty:
-        fig, ax = plt.subplots(figsize=(7, 5)); ax.set_title(title + " (empty)")
-        fig.savefig(out_path); plt.close(fig); return
-
-    if bin_edges is None:
-        bin_edges = np.array([0, 3, 6, 12, 24, 60])
-
-    abs_dh = np.abs(sub["true_dh"].to_numpy())
-    bins = np.digitize(abs_dh, bin_edges) - 1
-    rows = []
-    for b in range(len(bin_edges) - 1):
-        mask = bins == b
-        if mask.sum() == 0:
-            continue
-        rows.append({
-            "label": f"{bin_edges[b]:.0f}–{bin_edges[b+1]:.0f} m",
-            "n": int(mask.sum()),
-            "coverage": float(np.mean(sub["covered"].to_numpy()[mask])),
-            "mae": float(np.mean(sub["abs_error"].to_numpy()[mask])),
-        })
-    if not rows:
-        fig, ax = plt.subplots(figsize=(7, 5)); ax.set_title(title + " (empty)")
-        fig.savefig(out_path); plt.close(fig); return
-    df_b = pd.DataFrame(rows)
-
-    fig, ax1 = plt.subplots(figsize=(8, 5))
-    x = np.arange(len(df_b))
-    ax1.bar(x, df_b["coverage"], color="tab:green", alpha=0.6, label="coverage")
-    ax1.axhline(0.9, color="b", ls=":", alpha=0.8, label="90% target")
-    ax1.set_xticks(x); ax1.set_xticklabels(df_b["label"])
-    ax1.set_ylabel("coverage"); ax1.set_ylim(0, 1.05)
-    ax2 = ax1.twinx()
-    ax2.plot(x, df_b["mae"], "r-o", lw=1.5, label="MAE")
-    ax2.set_ylabel("MAE (m)")
-    for xi, n in zip(x, df_b["n"]):
-        ax1.text(xi, 0.03, f"n={n}", ha="center", color="black", fontsize=8)
-    ax1.set_title(title)
-    # merge legends
-    h1, l1 = ax1.get_legend_handles_labels()
-    h2, l2 = ax2.get_legend_handles_labels()
-    ax1.legend(h1 + h2, l1 + l2, loc="lower right")
-    fig.savefig(out_path)
-    plt.close(fig)
-
-
-DURATION_BIN_EDGES = np.array([0.0, 5.0, 10.0, 20.0, 40.0, 90.0])
+    bin_rate_chart(
+        np.abs(sub["true_dh"].to_numpy(dtype=float)) if not sub.empty else [],
+        sub["covered"].to_numpy() if not sub.empty else [],
+        sub["abs_error"].to_numpy(dtype=float) if not sub.empty else [],
+        out_path,
+        title=title,
+        bin_edges=DISTANCE_BIN_EDGES if bin_edges is None else bin_edges,
+        unit="m",
+        xlabel=r"true $|\Delta h|$ (m)",
+    )
 
 
 def fig_coverage_vs_duration_bins(df: pd.DataFrame, out_path: Path, title: str,
                                    bin_edges: np.ndarray | None = None) -> None:
-    """Coverage rate broken down by ride duration bin (seconds).
+    """Inclusion rate by ride-duration bin.
 
-    Mirror of :func:`fig_coverage_vs_distance_bins` with the X axis swapped
-    from |Δh| to ride duration. Bars = coverage; overlaid line = MAE.
+    Mirror of :func:`fig_coverage_vs_distance_bins` with the X axis
+    swapped from |Δh| to ride duration; both render through
+    :func:`bin_rate_chart`.
     """
     sub = _clean(df)
-    if sub.empty:
-        fig, ax = plt.subplots(figsize=(7, 5)); ax.set_title(title + " (empty)")
-        fig.savefig(out_path); plt.close(fig); return
-
-    if bin_edges is None:
-        bin_edges = DURATION_BIN_EDGES
-
-    dur = sub["duration_sec"].to_numpy(dtype=float)
-    bins = np.digitize(dur, bin_edges) - 1
-    rows = []
-    for b in range(len(bin_edges) - 1):
-        mask = bins == b
-        if mask.sum() == 0:
-            continue
-        rows.append({
-            "label": f"{bin_edges[b]:.0f}–{bin_edges[b+1]:.0f} s",
-            "n": int(mask.sum()),
-            "coverage": float(np.mean(sub["covered"].to_numpy()[mask])),
-            "mae": float(np.mean(sub["abs_error"].to_numpy()[mask])),
-        })
-    if not rows:
-        fig, ax = plt.subplots(figsize=(7, 5)); ax.set_title(title + " (empty)")
-        fig.savefig(out_path); plt.close(fig); return
-    df_b = pd.DataFrame(rows)
-
-    fig, ax1 = plt.subplots(figsize=(8, 5))
-    x = np.arange(len(df_b))
-    ax1.bar(x, df_b["coverage"], color="tab:green", alpha=0.6, label="coverage")
-    ax1.axhline(0.9, color="b", ls=":", alpha=0.8, label="90% target")
-    ax1.set_xticks(x); ax1.set_xticklabels(df_b["label"])
-    ax1.set_xlabel("ride duration (s)")
-    ax1.set_ylabel("coverage"); ax1.set_ylim(0, 1.05)
-    ax2 = ax1.twinx()
-    ax2.plot(x, df_b["mae"], "r-o", lw=1.5, label="MAE")
-    ax2.set_ylabel("MAE (m)")
-    for xi, n in zip(x, df_b["n"]):
-        ax1.text(xi, 0.03, f"n={n}", ha="center", color="black", fontsize=8)
-    ax1.set_title(title)
-    h1, l1 = ax1.get_legend_handles_labels()
-    h2, l2 = ax2.get_legend_handles_labels()
-    ax1.legend(h1 + h2, l1 + l2, loc="lower right")
-    fig.savefig(out_path)
-    plt.close(fig)
+    bin_rate_chart(
+        sub["duration_sec"].to_numpy(dtype=float) if not sub.empty else [],
+        sub["covered"].to_numpy() if not sub.empty else [],
+        sub["abs_error"].to_numpy(dtype=float) if not sub.empty else [],
+        out_path,
+        title=title,
+        bin_edges=DURATION_BIN_EDGES if bin_edges is None else bin_edges,
+        unit="s",
+        xlabel="ride duration (s)",
+    )
 
 
 def fig_error_vs_duration_bins(df: pd.DataFrame, out_path: Path, title: str,
@@ -587,9 +526,9 @@ def save_all_figures(
     _f("reject", fig_rejection_reasons, "Rejection reasons")
     _f("ci_vs_dh", fig_ci_vs_distance, "CI width vs. |true Δh|")
     _f("ci_vs_duration", fig_ci_vs_duration, "CI width vs. ride duration")
-    _f("cov_bins", fig_coverage_vs_distance_bins, "Coverage by distance bin")
+    _f("cov_bins", fig_coverage_vs_distance_bins, "Inclusion by distance bin")
     _f("cov_bins_duration", fig_coverage_vs_duration_bins,
-       "Coverage by ride-duration bin")
+       "Inclusion by ride-duration bin")
     _f("reliability", fig_reliability_diagram, "Reliability diagram")
     _f("signed_err", fig_error_sign_analysis, "Signed error vs. true Δh")
 

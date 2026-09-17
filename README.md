@@ -61,7 +61,8 @@ pyramidElevatorDist/
 │                          #   TrapezoidParams, PredictionRow, PredictionResult, …
 ├── utils/                 # pure numpy/scipy helpers (accelerometer_utils, conformal,
 │                          #   sensor_noise, signal_processing, trapezoid_template,
-│                          #   trapezoid_fast, resampling)
+│                          #   trapezoid_fast, resampling, binomial_ci,
+│                          #   findPossibleHouseEntrance)
 ├── physics/               # barometric.py (ISA inversion) + reconstruct_az/ (accel+gyro
 │                          #   world-frame a_z filters: Complementary, Mahony, Madgwick,
 │                          #   Valenti, ESKF)
@@ -146,6 +147,14 @@ share. If it has no dependency on either stage's data types, it lives here.
   matched-filter primitives (single-template and FFT-batched bank).
 - **`resampling.py`** — gap-aware 50 Hz resampler
   (`resample_sensor_with_gaps`; `src.data.loader` re-exports it).
+- **`binomial_ci.py`** — Wald / Wilson binomial proportion intervals and the
+  score-test acceptance band (`target_band`) drawn around a target rate.
+- **`findPossibleHouseEntrance.py`** — parses the output of GPS stay
+  detection into the stay↔movement switch timestamps, optionally only those
+  within a radius of one lat/lon. Candidate moments the user entered or left
+  a building, so the elevator pipeline can run around them instead of
+  continuously. Reads the segmentation structurally: nothing here imports or
+  depends on the GPS stay package.
 
 ### Segmentation — stage 1
 

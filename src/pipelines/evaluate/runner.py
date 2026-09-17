@@ -50,6 +50,10 @@ from pyramidElevatorDist.segmentation.algorithms.metrics.metrics import (
     _intervals_match,
 )
 from pyramidElevatorDist.segmentation.algorithms.segmenter import Segmenter
+from src.evaluation.bin_charts import (
+    DURATION_BIN_EDGES,
+    bin_rate_chart,
+)
 from src.evaluation.segmentation.evaluator import (
     _gt_to_interval_dicts,
     _phone_model_from_metadata,
@@ -794,7 +798,6 @@ def per_exp_mae_bar(gt_df: pd.DataFrame, seg_df: pd.DataFrame,
     plt.close(fig)
 
 
-DURATION_BIN_EDGES = np.array([0.0, 5.0, 10.0, 20.0, 40.0, 90.0])
 
 
 def _gt_view_arrays(gt_df: pd.DataFrame):
@@ -809,56 +812,25 @@ def _gt_view_arrays(gt_df: pd.DataFrame):
 
 
 def coverage_vs_duration_bins(gt_df: pd.DataFrame, out_path: Path,
-                              title: str = "Coverage by ride-duration bin",
+                              title: str = "Inclusion by ride-duration bin",
                               bin_edges: np.ndarray | None = None) -> None:
-    """Pipeline coverage rate per ride-duration bin (oracle GT view).
+    """Pipeline inclusion rate per ride-duration bin (oracle GT view).
 
-    Bars = coverage (P(|err| ≤ oracle CI)); overlaid line = MAE.
+    Renders through the shared :func:`bin_rate_chart`, so this figure is
+    identical in wording, binning and styling to the ones the prediction
+    evaluator emits — only the data view differs.
     """
     dur, err, cov = _gt_view_arrays(gt_df)
-    if bin_edges is None:
-        bin_edges = DURATION_BIN_EDGES
-    fig, ax1 = plt.subplots(figsize=(8, 5))
-    if dur.size == 0:
-        ax1.text(0.5, 0.5, "no data", ha="center", va="center",
-                 transform=ax1.transAxes)
-        ax1.set_title(title); fig.savefig(out_path, dpi=120); plt.close(fig)
-        return
-    bins = np.digitize(dur, bin_edges) - 1
-    rows = []
-    for b in range(len(bin_edges) - 1):
-        m = bins == b
-        if m.sum() == 0:
-            continue
-        rows.append({
-            "label": f"{bin_edges[b]:.0f}–{bin_edges[b+1]:.0f} s",
-            "n":        int(m.sum()),
-            "coverage": float(np.mean(cov[m])),
-            "mae":      float(np.mean(err[m])),
-        })
-    if not rows:
-        ax1.text(0.5, 0.5, "no data in bins", ha="center", va="center",
-                 transform=ax1.transAxes)
-        ax1.set_title(title); fig.savefig(out_path, dpi=120); plt.close(fig)
-        return
-    df_b = pd.DataFrame(rows)
-    x = np.arange(len(df_b))
-    ax1.bar(x, df_b["coverage"], color=COLOR["gt"], alpha=0.6, label="coverage")
-    ax1.axhline(0.9, color="b", ls=":", alpha=0.8, label="90% target")
-    ax1.set_xticks(x); ax1.set_xticklabels(df_b["label"])
-    ax1.set_xlabel("ride duration (s)")
-    ax1.set_ylabel("coverage"); ax1.set_ylim(0, 1.05)
-    ax2 = ax1.twinx()
-    ax2.plot(x, df_b["mae"], "r-o", lw=1.5, label="MAE")
-    ax2.set_ylabel("MAE (m)")
-    for xi, n in zip(x, df_b["n"]):
-        ax1.text(xi, 0.03, f"n={n}", ha="center", color="black", fontsize=8)
-    ax1.set_title(title)
-    h1, l1 = ax1.get_legend_handles_labels()
-    h2, l2 = ax2.get_legend_handles_labels()
-    ax1.legend(h1 + h2, l1 + l2, loc="lower right")
-    ax1.grid(True, axis="y", alpha=0.3)
-    fig.tight_layout(); fig.savefig(out_path, dpi=120); plt.close(fig)
+    bin_rate_chart(
+        dur, cov, err, out_path,
+        title=title,
+        bin_edges=DURATION_BIN_EDGES if bin_edges is None else bin_edges,
+        unit="s",
+        xlabel="ride duration (s)",
+        # shared default green, not COLOR["gt"]: the target band is blue,
+        # and blue bars on it are unreadable
+        dpi=120,
+    )
 
 
 def error_vs_duration_bins(gt_df: pd.DataFrame, out_path: Path,
