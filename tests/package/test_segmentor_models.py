@@ -358,3 +358,65 @@ def test_force_fresh_fit_unfittable_window_returns_detail_none(quiet_acc):
     if res is not None and res.detail is not None:
         assert res.detail.t_start_s == pytest.approx(5.0)
         assert res.detail.t_end_s == pytest.approx(10.0)
+
+
+# The window is not just echoed back as the bounds — it is the search region
+# the lobes are fitted in. subthreshold_ride_acc carries a STRONG ride
+# (A=1.0 at 20/32 s) and a WEAK pair (A=0.25 at 55/65 s), so a fit that
+# ignored the window would always return the strong one; asking for the weak
+# window and getting the weak pair is what proves the constraint.
+
+def test_force_fresh_fit_fits_inside_the_given_window(subthreshold_ride_acc):
+    det = P.findSegmentParameters(
+        subthreshold_ride_acc, 50.0, 70.0, force_fresh_fit=True).detail
+    assert det is not None
+    assert det.lobe1.t_c == pytest.approx(55.0, abs=0.6)
+    assert det.lobe2.t_c == pytest.approx(65.0, abs=0.6)
+    # The weak pair's amplitude, not the strong ride's — the window, not the
+    # trace, decided which peaks were eligible.
+    assert abs(det.lobe1.a_peak) < 0.4
+    for t_c in (det.lobe1.t_c, det.lobe2.t_c):
+        assert not (18.0 <= t_c <= 34.0), \
+            "fitted the strong ride: the window did not constrain the search"
+
+
+def test_force_fresh_fit_different_windows_give_different_fits(
+        subthreshold_ride_acc):
+    """Same trace, same flag, two windows — the fit follows the window."""
+    strong = P.findSegmentParameters(
+        subthreshold_ride_acc, 10.0, 40.0, force_fresh_fit=True).detail
+    weak = P.findSegmentParameters(
+        subthreshold_ride_acc, 50.0, 70.0, force_fresh_fit=True).detail
+    assert strong.lobe1.t_c == pytest.approx(20.0, abs=0.6)
+    assert weak.lobe1.t_c == pytest.approx(55.0, abs=0.6)
+    assert abs(strong.lobe1.a_peak) > abs(weak.lobe1.a_peak)
+
+
+@pytest.mark.parametrize("t_lo,t_hi", [
+    (10.0, 40.0),   # the strong ride alone
+    (50.0, 70.0),   # the weak pair alone
+    (15.0, 75.0),   # both — the strong one wins on amplitude
+    (30.0, 70.0),   # straddles the strong ride's second lobe
+])
+def test_force_fresh_fit_lobes_never_leave_the_window(
+        subthreshold_ride_acc, t_lo, t_hi):
+    """Structural invariant: both lobe centres lie inside the caller's window,
+    so the reported bounds can never contradict the fit they describe."""
+    det = P.findSegmentParameters(
+        subthreshold_ride_acc, t_lo, t_hi, force_fresh_fit=True).detail
+    assert det is not None
+    assert t_lo <= det.lobe1.t_c <= t_hi
+    assert t_lo <= det.lobe2.t_c <= t_hi
+    assert det.t_start_s == pytest.approx(t_lo)
+    assert det.t_end_s == pytest.approx(t_hi)
+
+
+def test_force_fresh_fit_bad_window_is_flagged_by_r2_not_an_exception(
+        subthreshold_ride_acc):
+    """A window that slices a ride in half still returns a fit — the flag
+    trusts the caller's times. joint_r2_mean is the only signal that the
+    window was wrong, so callers must check it."""
+    det = P.findSegmentParameters(
+        subthreshold_ride_acc, 30.0, 70.0, force_fresh_fit=True).detail
+    assert det is not None
+    assert det.joint_r2_mean < 0.5
