@@ -23,6 +23,7 @@ ElevatorVerticalDist/
 ├── src/                      # application layer: data I/O, pipelines/apps, evaluation
 ├── scripts/                  # one-shot runners (build reports, evaluations)
 ├── tests/                    # pytest suite (tests/package/ = synthetic, package-only)
+├── web/                      # Shaft Lab: Next.js (Vercel) app to browse/label Skydex recordings (see web/README.md)
 ├── docs/                     # LaTeX report + figures + reference PDFs
 ├── papers/                   # reference papers (elevator motion profiles, etc.)
 ├── pyproject.toml            # packaging config for pyramidElevatorDist (v0.2.0)
