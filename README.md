@@ -148,8 +148,10 @@ share. If it has no dependency on either stage's data types, it lives here.
   matched-filter primitives (single-template and FFT-batched bank).
 - **`resampling.py`** — gap-aware 50 Hz resampler
   (`resample_sensor_with_gaps`; `src.data.loader` re-exports it).
-- **`binomial_ci.py`** — Wald / Wilson binomial proportion intervals and the
-  score-test acceptance band (`target_band`) drawn around a target rate.
+- **`binomial_ci.py`** — Wald / Wilson binomial proportion intervals on a
+  measured rate (`wilson_interval` is what the inclusion-by-bin figures draw
+  on each bar), plus the score-test acceptance region for a hypothesised
+  rate (`target_band`).
 - **`findPossibleHouseEntrance.py`** — parses the output of GPS stay
   detection into the stay↔movement switch timestamps, optionally only those
   within a radius of one lat/lon. Candidate moments the user entered or left

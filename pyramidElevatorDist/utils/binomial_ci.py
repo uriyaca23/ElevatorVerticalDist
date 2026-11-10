@@ -20,8 +20,11 @@ Two constructions are provided:
 Inverting the score test is also what gives the *acceptance region*
 for a hypothesised ``p₀``: the observed rates consistent with a true
 probability ``p₀`` at ``n`` trials are ``p₀ ± z · sqrt(p₀(1-p₀)/n)``,
-which uses the null SE rather than the estimated one. That is the band
-drawn around the 90 % target in the inclusion-by-distance-bin figure.
+which uses the null SE rather than the estimated one. It is the mirror
+image of the Wilson interval, and it is the one to reach for when the
+uncertainty belongs on a *hypothesis* rather than on a measurement. The
+inclusion-by-bin figures put it on the measurement: each bar carries its
+own Wilson interval, and the 90 % target is a bare line.
 
 The same formulas are mirrored in ``ts/binomialCI.ts`` for the
 TypeScript side; keep the two in step.

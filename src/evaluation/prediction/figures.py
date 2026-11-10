@@ -20,7 +20,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from src.evaluation.bin_charts import (
-    BAND_CONFIDENCE,
     DISTANCE_BIN_EDGES,
     DURATION_BIN_EDGES,
     bin_rate_chart,

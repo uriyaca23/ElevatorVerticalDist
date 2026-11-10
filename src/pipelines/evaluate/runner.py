@@ -827,8 +827,8 @@ def coverage_vs_duration_bins(gt_df: pd.DataFrame, out_path: Path,
         bin_edges=DURATION_BIN_EDGES if bin_edges is None else bin_edges,
         unit="s",
         xlabel="ride duration (s)",
-        # shared default green, not COLOR["gt"]: the target band is blue,
-        # and blue bars on it are unreadable
+        # shared default green, not COLOR["gt"]: the target line is blue,
+        # and blue bars under it are unreadable
         dpi=120,
     )
 

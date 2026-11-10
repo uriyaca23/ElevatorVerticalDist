@@ -9,13 +9,18 @@ here lands in every run.
 The chart answers one question: *does the calibrated CI hold up across
 the range of rides, or only on average?* Bars are the inclusion rate
 (the fraction of segments whose truth fell inside the predicted CI) per
-bin, the red line is MAE on the right-hand axis, and the target is drawn
-as a **band** rather than a line — see
-:func:`pyramidElevatorDist.utils.binomial_ci.target_band`. Each bin
-holds a finite number of segments, so its rate carries sampling error;
-the band is the range of rates consistent with a true 90 % inclusion
-probability at that bin's own ``n``. A bar inside the band is on target,
-whatever the eye says about the gap; a bar clearing it is genuinely off.
+bin, the red line is MAE on the right-hand axis, and the target is a
+plain dotted line at 90 %.
+
+The sampling error sits on the **estimate**, not on the target: each bin
+holds a finite number of segments, so its bar is a proportion measured
+from ``n`` trials, and the true inclusion probability could be anywhere
+in that bar's own interval. So every bar carries a Wilson interval drawn
+from its own height — see
+:func:`pyramidElevatorDist.utils.binomial_ci.wilson_interval`. A bar
+whose interval still reaches the target line is on target, whatever the
+eye says about the gap; one whose whole interval clears the line is
+genuinely off.
 """
 
 from __future__ import annotations
@@ -28,11 +33,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from pyramidElevatorDist.utils.binomial_ci import target_band
+from pyramidElevatorDist.utils.binomial_ci import wilson_interval
 
 
-# Confidence level of the band drawn around the inclusion target.
-BAND_CONFIDENCE = 0.95
+# Confidence level of the interval drawn on each bin's measured rate.
+RATE_CI_CONFIDENCE = 0.95
 
 # Ride-magnitude bins, in metres. Starts at 3 m: a sub-3 m ride is one
 # floor, where the interval is wide relative to the distance and the
@@ -62,10 +67,10 @@ def bin_rate_chart(
     xlabel: str,
     bar_color: str = "tab:green",
     target: float = 0.9,
-    band_confidence: float = BAND_CONFIDENCE,
+    rate_ci_confidence: float = RATE_CI_CONFIDENCE,
     dpi: int | None = None,
 ) -> None:
-    """Inclusion rate + MAE per bin of ``values``, with a target band.
+    """Inclusion rate + MAE per bin of ``values``, with a CI per bar.
 
     ``values`` is the quantity being binned (|Δh| in metres, duration in
     seconds, …), ``covered`` the per-segment boolean "truth fell inside
@@ -102,17 +107,18 @@ def bin_rate_chart(
     x = np.arange(len(df_b))
     ax1.bar(x, df_b["inclusion"], color=bar_color, alpha=0.6, label="inclusion")
 
-    # The target is a probability read off a finite number of trials, so
-    # it is drawn as a band: the score-test acceptance region at each
-    # bin's own n. A bar clearing it is off-target by more than sampling
-    # noise explains.
-    band_lo, band_hi = target_band(target, df_b["n"].to_numpy(), band_confidence)
-    xb = np.concatenate(([x[0] - 0.5], x, [x[-1] + 0.5]))   # span outer bars
-    ax1.fill_between(xb, np.r_[band_lo[0], band_lo, band_lo[-1]],
-                     np.r_[band_hi[0], band_hi, band_hi[-1]],
-                     step="mid", color="b", alpha=0.15,
-                     label=f"{target:.0%} target, {band_confidence:.0%} CI on n")
-    ax1.axhline(target, color="b", ls=":", alpha=0.8, lw=1.2)
+    # Each bar is a rate read off that bin's own n, so the uncertainty
+    # belongs on the bar: a Wilson interval grown from the measured
+    # height. Wilson always contains p̂, so both arms are >= 0 — the clip
+    # only guards float noise at p̂ = 0 or 1.
+    p_hat = df_b["inclusion"].to_numpy()
+    ci_lo, ci_hi = wilson_interval(p_hat, df_b["n"].to_numpy(), rate_ci_confidence)
+    yerr = np.clip(np.vstack([p_hat - ci_lo, ci_hi - p_hat]), 0.0, None)
+    ax1.errorbar(x, p_hat, yerr=yerr, fmt="none", ecolor="black",
+                 elinewidth=1.2, capsize=5,
+                 label=f"{rate_ci_confidence:.0%} CI on rate")
+    ax1.axhline(target, color="b", ls=":", alpha=0.8, lw=1.2,
+                label=f"{target:.0%} target")
 
     ax1.set_xticks(x); ax1.set_xticklabels(df_b["label"])
     ax1.set_xlabel(xlabel)
@@ -131,7 +137,7 @@ def bin_rate_chart(
     h1, l1 = ax1.get_legend_handles_labels()
     h2, l2 = ax2.get_legend_handles_labels()
     ax1.legend(h1 + h2, l1 + l2, loc="upper center",
-               bbox_to_anchor=(0.5, -0.14), ncol=3, frameon=False)
+               bbox_to_anchor=(0.5, -0.14), ncol=4, frameon=False)
 
     fig.savefig(out_path, bbox_inches="tight", **({"dpi": dpi} if dpi else {}))
     plt.close(fig)
