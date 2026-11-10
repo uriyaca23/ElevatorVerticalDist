@@ -27,6 +27,11 @@ opencv-python>=4.8
 moviepy>=1.0
 fastdtw>=0.3
 
+# --- GPS / NMEA house-entrance figures (scripts/house_entrance_figures.py;
+#     also needs the sibling nahori + gps_stay repos on disk) ---
+pyyaml>=6.0
+google-cloud-storage>=2.10
+
 # --- Word report / doc builders (docs/, python-docx) ---
 python-docx>=1.0
 
