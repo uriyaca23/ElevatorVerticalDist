@@ -1,0 +1,10 @@
+{
+  "name": "binomial-ci",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Binomial proportion confidence intervals (Wald + Wilson score).",
+  "main": "binomialCI.ts",
+  "scripts": {
+    "test": "node --test"
+  }
+}

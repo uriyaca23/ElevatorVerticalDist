@@ -1,24 +1,87 @@
-# System Junk
-desktop.ini
-**/desktop.ini
-.DS_Store
-Thumbs.db
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+venv/
+.env
 
-# Data and Artifacts
+# Packaging: build_wheel.py staging + outputs (never committed — generated from src/)
+build/
+dist/
+*.egg-info/
+
+# OS / IDE
+.DS_Store
+desktop.ini
+Thumbs.db
+.claude/
+
+# Local snapshot of uncommitted files (copyUncommitedFileToChangeFolder skill)
+change/
+
+# Office temp files
+~$*.docx
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+*.nav
+*.snm
+
+# Heavy raw media (kept locally, not pushed)
+src/data/rawData/**/*.mp4
+src/data/rawData/**/*.mov
+src/data/rawData/**/*.avi
+src/data/rawData/**/*.wav
+change.zip
+change 2.zip
+elevator_export.zip
+
+# External public dataset (USC-HAD, ~44 MB, kept locally, not pushed)
+src/data/USC-HAD/
+
+# Heavy sensor data moved to iCloud Drive (data research/ElevatorVerticalDist/).
+# See src/data/CLAUDE.md. Kept out of the repo; restore locally as needed.
+src/data/rawData/
+src/data/structuredData/
+src/data/(archive)/
+src/data/gramushka/
+
+# Local evaluator runs (figures + per-run CSVs + metrics dumps)
+elevator_reports/
+
+# Date-stamped uncommitted-file snapshots
+change_*/
+changed_*/
+
+# Auto-generated figure dirs from this branch's scripts
+# (gravity-change comparison figures + parallel |a|-g pipeline eval)
+docs/latex/figures/gravity_change/
+docs/latex/figures/pipeline_amg/
+/changes_2026-05-12
+*.png
+/changes_2026-06-08
+/changes_2026-06-08
+/changes_2026-06-08
+/moveToOtherPC
+move to other pc/
+/changes_2026-09-07_134300
+
+# From main (ac6778f): local datasets, scratch output, old figure dirs
+**/desktop.ini
 ADVIO/
 ADVIO_repo/
 datasets/
 tmp/
-__pycache__/
-.pytest_cache/
-venv/
-.env
 example/
 metadata/
 evaluation_output/
-
-# Documentation Figures
 docs/figures_v4/
 docs/figures/
 docs/four_comparisons*
-~$*.docx

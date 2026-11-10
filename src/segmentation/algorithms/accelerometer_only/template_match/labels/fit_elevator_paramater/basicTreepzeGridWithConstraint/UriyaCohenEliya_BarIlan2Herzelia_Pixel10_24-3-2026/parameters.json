@@ -1,0 +1,882 @@
+[
+  {
+    "index": 0,
+    "ride_type": "up",
+    "duration_s": 19.441999999999993,
+    "lobe1": {
+      "t_c": 13.184999999999988,
+      "a_peak": 0.2701667488843316,
+      "half_width_s": 0.4,
+      "frac_flat": 0.8,
+      "r2_local": 0.8366016379445831
+    },
+    "lobe2": {
+      "t_c": 18.438999999999993,
+      "a_peak": -0.2701667488843316,
+      "half_width_s": 0.4,
+      "frac_flat": 0.8,
+      "r2_local": 0.7217884752432917
+    },
+    "lobe_centroid_spacing_s": 5.254000000000005
+  },
+  {
+    "index": 1,
+    "ride_type": "up",
+    "duration_s": 17.251000000000005,
+    "lobe1": {
+      "t_c": 6.006,
+      "a_peak": 0.27566128254143063,
+      "half_width_s": 0.4,
+      "frac_flat": 0.0,
+      "r2_local": 0.9171182902825648
+    },
+    "lobe2": {
+      "t_c": 18.93100000000001,
+      "a_peak": -0.27566128254143063,
+      "half_width_s": 0.4,
+      "frac_flat": 0.0,
+      "r2_local": 0.3853490534648888
+    },
+    "lobe_centroid_spacing_s": 12.925000000000011
+  },
+  {
+    "index": 2,
+    "ride_type": "up",
+    "duration_s": 10.841000000000008,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 3,
+    "ride_type": "up",
+    "duration_s": 13.22999999999999,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 4,
+    "ride_type": "up",
+    "duration_s": 10.762,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 5,
+    "ride_type": "up",
+    "duration_s": 10.800999999999988,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 6,
+    "ride_type": "up",
+    "duration_s": 13.230000000000018,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 7,
+    "ride_type": "up",
+    "duration_s": 10.760999999999967,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 8,
+    "ride_type": "up",
+    "duration_s": 13.189999999999998,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 9,
+    "ride_type": "down",
+    "duration_s": 10.68100000000004,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 10,
+    "ride_type": "down",
+    "duration_s": 10.721000000000004,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 11,
+    "ride_type": "down",
+    "duration_s": 13.468999999999937,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 12,
+    "ride_type": "down",
+    "duration_s": 10.841000000000008,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 13,
+    "ride_type": "down",
+    "duration_s": 13.70900000000006,
+    "lobe1": {
+      "t_c": 7.7409999999999854,
+      "a_peak": -0.4608816926185267,
+      "half_width_s": 0.4,
+      "frac_flat": 0.0,
+      "r2_local": 0.7549422660921409
+    },
+    "lobe2": {
+      "t_c": 8.322999999999979,
+      "a_peak": 0.4608816926185267,
+      "half_width_s": 0.4,
+      "frac_flat": 0.0,
+      "r2_local": 0.7870266817978238
+    },
+    "lobe_centroid_spacing_s": 0.5819999999999936
+  },
+  {
+    "index": 14,
+    "ride_type": "down",
+    "duration_s": 13.468999999999937,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 15,
+    "ride_type": "down",
+    "duration_s": 10.80099999999993,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 16,
+    "ride_type": "down",
+    "duration_s": 10.841000000000008,
+    "lobe1": {
+      "t_c": 5.625999999999976,
+      "a_peak": -0.408321939983633,
+      "half_width_s": 0.4,
+      "frac_flat": 0.0,
+      "r2_local": -0.26973428109128794
+    },
+    "lobe2": {
+      "t_c": 7.038999999999987,
+      "a_peak": 0.408321939983633,
+      "half_width_s": 0.4,
+      "frac_flat": 0.0,
+      "r2_local": 0.7515849029369538
+    },
+    "lobe_centroid_spacing_s": 1.413000000000011
+  },
+  {
+    "index": 17,
+    "ride_type": "down",
+    "duration_s": 15.81899999999996,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 18,
+    "ride_type": "down",
+    "duration_s": 19.125,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 19,
+    "ride_type": "up",
+    "duration_s": 18.686000000000035,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 20,
+    "ride_type": "up",
+    "duration_s": 13.469000000000051,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 21,
+    "ride_type": "up",
+    "duration_s": 11.755999999999972,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 22,
+    "ride_type": "up",
+    "duration_s": 14.305999999999926,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 23,
+    "ride_type": "up",
+    "duration_s": 11.039000000000101,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 24,
+    "ride_type": "up",
+    "duration_s": 10.680999999999926,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 25,
+    "ride_type": "up",
+    "duration_s": 10.99899999999991,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 26,
+    "ride_type": "up",
+    "duration_s": 13.98599999999999,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 27,
+    "ride_type": "up",
+    "duration_s": 10.600999999999999,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 28,
+    "ride_type": "up",
+    "duration_s": 13.389999999999986,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 29,
+    "ride_type": "up",
+    "duration_s": 13.507999999999925,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 30,
+    "ride_type": "down",
+    "duration_s": 10.522000000000048,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 31,
+    "ride_type": "down",
+    "duration_s": 12.07400000000007,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 32,
+    "ride_type": "down",
+    "duration_s": 10.68100000000004,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 33,
+    "ride_type": "down",
+    "duration_s": 10.323000000000093,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 34,
+    "ride_type": "down",
+    "duration_s": 19.442000000000007,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 35,
+    "ride_type": "down",
+    "duration_s": 13.787000000000035,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 36,
+    "ride_type": "down",
+    "duration_s": 11.07899999999995,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 37,
+    "ride_type": "down",
+    "duration_s": 22.625999999999976,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 38,
+    "ride_type": "up",
+    "duration_s": 47.75200000000018,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 39,
+    "ride_type": "down",
+    "duration_s": 26.567999999999984,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 40,
+    "ride_type": "down",
+    "duration_s": 29.19699999999989,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 41,
+    "ride_type": "up",
+    "duration_s": 30.588999999999942,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 42,
+    "ride_type": "up",
+    "duration_s": 26.649000000000115,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  },
+  {
+    "index": 43,
+    "ride_type": "down",
+    "duration_s": 47.03600000000006,
+    "lobe1": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe2": {
+      "t_c": null,
+      "a_peak": null,
+      "half_width_s": null,
+      "frac_flat": null,
+      "r2_local": null
+    },
+    "lobe_centroid_spacing_s": null
+  }
+]

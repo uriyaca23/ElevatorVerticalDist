@@ -1,0 +1,594 @@
+% =====================================================================
+% Boutique Pipeline — User Guide (image-first rewrite)
+%
+% Audience: an operator who launches the Streamlit wizard exposed by
+% src/pipelines/boutique_pipeline.py and wants to turn a phone recording
+% into a per-ride PDF report. The body of this section is the
+% \emph{quick-start basics}: a 2-minute walkthrough plus a one-page
+% visual cheat-sheet for "is this segment good or bad". Everything that
+% does not affect the operator's day-to-day workflow has been moved into
+% the \emph{Advanced} subsection at the end of this section, which the
+% casual user can ignore.
+% =====================================================================
+
+\section{Boutique Pipeline: A User's Guide}
+\label{sec:boutique-pipeline-guide}
+
+This section is the ready-set-go manual for the Streamlit app at
+\texttt{src/pipelines/boutique\_pipeline.py}. It is intentionally
+image-first: each step shows you what the screen actually looks like,
+and each "what to look for" check has a side-by-side good vs.\ bad
+example so you can decide in seconds. If you only want to ship a
+report, read \S\ref{sec:boutique-quickstart} and then
+\S\ref{sec:boutique-good-vs-bad}; everything after that is optional.
+
+\subsection{Quick-start: five clicks to a report}
+\label{sec:boutique-quickstart}
+
+\paragraph{Launch.} From the project root, with the venv activated:
+
+\begin{verbatim}
+venv/bin/python -m streamlit run src/pipelines/boutique_pipeline.py
+\end{verbatim}
+
+\noindent Streamlit prints a localhost URL (default
+\texttt{http://localhost:8501}). The wizard advances with the primary
+button at the bottom-right of each page. Below is the entire happy-path
+workflow.
+
+% ---------- Step 1 ----------
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{boutique/ui_step1_landing.png}
+\caption{\textbf{Step~1 --- Landing.} One paragraph of orientation;
+click \emph{Start \textrightarrow} to begin.}
+\label{fig:bq-step1}
+\end{figure}
+
+% ---------- Step 2 ----------
+\begin{figure}[H]
+\centering
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{boutique/ui_step2_picker.png}
+\par\textbf{2a.} Pick \emph{Use phone DB} (in-house) or
+\emph{Upload a file} (everyone else).
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{boutique/ui_step2_upload_form.png}
+\par\textbf{2b.} For uploads: a CSV/XLSX with a \emph{time} column
+(seconds or ms; auto-detected) and a \emph{vertical-acceleration}
+column (m/s$^2$). The first row must be a header.
+\end{minipage}
+\caption{\textbf{Step~2 --- Data.} Two input modes. Switch back and
+forth at any time using \emph{change input source} in the upper-right
+corner.}
+\label{fig:bq-step2}
+\end{figure}
+
+% ---------- Step 3 ----------
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.97\linewidth]{boutique/panels/clean_step3_overview__signal.png}
+\caption{\textbf{Step~3 --- Segmentation.} The detector runs
+automatically. Each detected ride is shaded
+(\textcolor{blue!70!black}{blue $=$ up},
+\textcolor{purple!60!red}{magenta $=$ down}); the currently selected
+segment is \textcolor{orange!90!black}{orange}. If the segments look
+right, click \emph{Predict \textrightarrow}. If something is off, see
+\S\ref{sec:boutique-good-vs-bad} for what to look for and
+\S\ref{sec:boutique-fixing} for how to fix it.}
+\label{fig:bq-step3}
+\end{figure}
+
+% ---------- Step 4 ----------
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{boutique/crops/clean_step4_metrics.png}
+\caption{\textbf{Step~4 --- Prediction.} Both algorithms (Trapezoid
+pulse-pair, in blue; ZUPT, in green) run automatically and one bar per
+algorithm per segment is plotted. Positive bars mean the cabin went
+\emph{up}. The two bars should be similar height; large disagreement
+flags a noisy segment (\S\ref{sec:boutique-advanced}). When you are
+happy, click \emph{Generate report \textrightarrow}.}
+\label{fig:bq-step4}
+\end{figure}
+
+% ---------- Step 5 ----------
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\linewidth]{boutique/crops/clean_step5_top.png}
+\caption{\textbf{Step~5 --- Report.} An inline PDF preview is rendered
+in the page. Click \emph{Download Summary PDF} to save the Hebrew
+multi-page report (one page per ride; cover page with the per-ride
+table). That's the entire pipeline.}
+\label{fig:bq-step5}
+\end{figure}
+
+\paragraph{One sentence per step.}
+\begin{enumerate}
+  \item Read the orientation, click \emph{Start}.
+  \item Pick a source, click \emph{Next}.
+  \item \emph{Glance} at the segments (next subsection); if good,
+    click \emph{Predict}.
+  \item Glance at the bar chart; if both algorithms agree, click
+    \emph{Generate report}.
+  \item Click \emph{Download}. Done.
+\end{enumerate}
+
+The \emph{only} step that needs your attention is step~3. The next
+subsection is the visual cheat-sheet for it.
+
+\subsection{Step 3 cheat-sheet: is this segment good or bad?}
+\label{sec:boutique-good-vs-bad}
+
+The segmentation page has four diagnostic panels, stacked from top to
+bottom. Click any segment in the sidebar (or any shaded band on the
+top plot) and the lower three panels redraw for it. Each panel
+answers a single yes/no question; together they take seconds to
+read.
+
+\subsubsection{Panel A --- Signal $+$ segments: are the rides covered?}
+
+This is the full-recording overview. Every detected ride is a shaded
+band; the orange one is the segment currently selected.
+
+\begin{figure}[H]
+\centering
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{boutique/panels/clean_step3_overview__signal.png}
+\par\smallskip
+\textbf{\textcolor{green!50!black}{GOOD.}} Twelve clean rides (clean
+S23 recording). Each shaded band sits over an obvious two-lobe shape;
+the bare-signal stretches between bands are stationary and contain no
+ride. Nothing to fix.
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{boutique/panels/fp_step3_overview__signal.png}
+\par\smallskip
+\textbf{\textcolor{red!70!black}{BAD --- over-segmentation.}} Many
+narrow segments; segment \#0 is a single tall spike (phone tap),
+not a ride. Late segments tile over noisy hand-motion. Most should
+be deleted (\S\ref{sec:boutique-fixing}, Pattern~B).
+\end{minipage}
+\caption{\textbf{Signal $+$ segments overview.} A clean session looks
+like distinct lobe-pairs separated by quiet stretches; a bad session
+either has too many bands (false positives) or stretches that
+\emph{should} be shaded but aren't (missed rides, see
+Figure~\ref{fig:bq-overview-damped}).}
+\label{fig:bq-overview-cleanvsfp}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.97\linewidth]{boutique/panels/damped_step3_overview__signal.png}
+\caption{\textbf{\textcolor{red!70!black}{BAD --- damped recording.}}
+Phone-in-bag scenario. The detector found ten segments but the
+recording contains many more rides --- each big black spike that is
+\emph{not} shaded is a ride the detector missed because the
+amplitude was below threshold. Treat this as "the detector knows it
+is unsure"; verify visually and add segments by hand
+(\S\ref{sec:boutique-fixing}, Pattern~A).}
+\label{fig:bq-overview-damped}
+\end{figure}
+
+\subsubsection{Panel B --- Fitted trapezoid: does the template
+match the ride?}
+
+The bottom panel zooms into the selected segment and overlays the
+two fitted trapezoid templates (red lobe~1, purple lobe~2) on the
+raw signal. \emph{This is the single most informative panel for
+deciding whether a segment is trustworthy.}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.97\linewidth]{boutique/panels/clean_step3_overview__trap.png}
+
+\smallskip
+\textbf{\textcolor{green!50!black}{GOOD.}} The red and purple
+templates sit on the smoothed envelope like a French curve on a
+hand-drawn arc. Plateaus at $\pm 0.5\,$m/s$^2$ are typical of a
+mid-speed elevator. Lobe~1 is positive then lobe~2 is negative
+$\Rightarrow$ \emph{down} ride (the cabin decelerates after a
+descent).
+\caption{\textbf{Good trapezoid fit} (clean S23 recording, segment
+\#5). The plateau height is in the right range
+($\sim$0.5--1\,m/s$^2$); both lobes have similar magnitude;
+the orange band marks the segment endpoints, which sit just outside
+the lobes themselves.}
+\label{fig:bq-trap-good}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.97\linewidth]{boutique/panels/fp_step3_seg0_FP__trap.png}
+
+\smallskip
+\textbf{\textcolor{red!70!black}{BAD --- amplitude wildly too high
+(false positive).}} The lobes' fitted plateau is $\sim$5\,m/s$^2$
+and the surrounding signal has $\pm 50\,$m/s$^2$ spikes (note the
+y-axis goes to 50). This is a phone slam/drop, not a ride. The
+fit \emph{looks} reasonable in shape but the magnitude is off by
+$5\times$. Always cross-check the y-axis range of this panel
+against the typical $\pm 1\,$m/s$^2$ for real elevators.
+\caption{\textbf{Bad trapezoid fit --- spike artefact.} The pair
+filter accepted a high-amplitude lobe pair around a phone-handling
+event. Delete this segment.}
+\label{fig:bq-trap-bad-spike}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.97\linewidth]{boutique/panels/damped_step3_seg0_full__trap.png}
+
+\smallskip
+\textbf{\textcolor{red!70!black}{BAD --- amplitude tiny (damped).}}
+Lobes' plateau is $\pm 0.4\,$m/s$^2$; the lobe shapes are visible
+but barely above the noise floor. The predictor will still report
+a number, but its CI will be wide. Acceptable for a phone-in-pocket
+recording that is your only data; otherwise prefer the barometer.
+\caption{\textbf{Bad trapezoid fit --- damped.} A real ride
+under-amplified by clothing/bag. Read $\Delta h$ but expect a wide
+CI on this segment.}
+\label{fig:bq-trap-bad-damped}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.97\linewidth]{boutique/panels/haari_step3_seg20_full__trap.png}
+
+\smallskip
+\textbf{\textcolor{red!70!black}{BAD --- segment too long (merged).}}
+The orange band spans 22 seconds. Lobe~1 hits a real \emph{down}
+takeoff at $t \approx 538$\,s, but the matched landing lobe is at
+$t\approx 558$\,s --- with a 17-second quiet stretch in between.
+That is two events labelled as one. Trim the segment to just the
+first event and add a separate segment for the second
+(\S\ref{sec:boutique-fixing}, Pattern~C).
+\caption{\textbf{Bad trapezoid fit --- merged.} Two distinct events
+inside a single segment; the trapezoid pair is forced across both.}
+\label{fig:bq-trap-bad-merged}
+\end{figure}
+
+\subsubsection{Panel C --- Correlation panel: did the algorithm
+find every lobe?}
+
+Two lines: best $R^2$ for positive-going trapezoids (blue) and
+negative-going ones (red). \emph{Two green dots} around the
+selected segment $=$ one pair-confirmed ride. Other colours hint at
+issues; the legend at the top of the panel maps each colour to a
+verdict.
+
+\begin{figure}[H]
+\centering
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{boutique/panels/clean_step3_overview__corr.png}
+\par\smallskip
+\textbf{\textcolor{green!50!black}{GOOD.}} A green dot on the blue
+peak ($t \approx 48$\,s, positive lobe) and a green dot on the red
+peak ($t \approx 56$\,s, negative lobe), separated by the cruise
+duration. Surrounding grey dots are sub-threshold peaks from
+adjacent rides --- they are \emph{not} a problem.
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{boutique/panels/damped_step3_seg0_full__corr.png}
+\par\smallskip
+\textbf{\textcolor{red!70!black}{BORDERLINE.}} Two green dots are
+present but they are flanked by orange ("unpaired") and grey
+("$|A|<$thr") dots. The segment is detected, but the surrounding
+context says other lobes nearby almost paired and didn't quite ---
+classic damped-recording symptom.
+\end{minipage}
+\caption{\textbf{Correlation panel.} Look for two green dots on
+the selected segment. Many grey dots in between rides are normal;
+many orange/purple dots inside or right next to a segment is a
+hint to investigate.}
+\label{fig:bq-corr-cleanvsbad}
+\end{figure}
+
+\subsubsection{Panel D --- Heatmaps: is the trapezoid shape
+well-localised?}
+
+The two heatmaps show how good $R^2$ is over the
+\emph{template grid}: half-width $W$ on the y-axis, plateau
+fraction $f$ on the x-axis. The white/red \textbf{X} marks the
+best fit. A clean ride $=$ bright compact basin around the
+\textbf{X}, with the \textbf{X} comfortably interior to the grid.
+
+\begin{figure}[H]
+\centering
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{boutique/panels/clean_step3_overview__heatmaps.png}
+\par\smallskip
+\textbf{\textcolor{green!50!black}{GOOD.}} Both lobes peak at the
+same $(W^\star, f^\star) \approx (1.3\,\text{s}, 0.4)$ ---
+interior to the grid. The bright basin is compact $\Rightarrow$
+the optimum is well-localised.
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{boutique/panels/damped_step3_seg0_full__heatmaps.png}
+\par\smallskip
+\textbf{\textcolor{red!70!black}{BAD --- argmax at the boundary.}}
+The \textbf{X} is pinned at $f \approx 0.83$, $W$ small. This means
+the true ride lies \emph{outside} the template grid --- usually
+because the segment is too short, too damped, or both. Treat the
+fit as approximate.
+\end{minipage}
+\caption{\textbf{Heatmaps.} A bright compact interior basin is
+"good"; an \textbf{X} pinned to any edge of the grid is the warning
+sign.}
+\label{fig:bq-heatmap-cleanvsbad}
+\end{figure}
+
+\subsection{Step 3 fixes: when something is off, what to click}
+\label{sec:boutique-fixing}
+
+When a segment is bad in one of the ways above, the sidebar (left
+column on step~3) gives you four primary controls:
+\emph{Edit selected} (popover with start/end/type),
+\emph{Delete} (trash icon),
+\emph{$+$~Add segment} (insert a new 5-second \texttt{up}-typed
+segment, then edit its bounds),
+and \emph{Reset to detector output} (throw away every manual edit
+and start over). The four common patterns:
+
+\paragraph{Pattern A --- Missed ride.}
+\textit{Symptom:} an obvious two-lobe shape on the top plot has no
+shaded band over it; the correlation panel shows orange or grey
+dots in that neighbourhood.\\
+\textit{Fix:} \emph{$+$~Add segment} from the sidebar, then
+\emph{Edit selected} and set start/end a couple of seconds outside
+the visible lobes. Adjust \texttt{type} (up/down) to match.
+
+\paragraph{Pattern B --- False positive.}
+\textit{Symptom:} a shaded band over a stretch where the trapezoid
+overlay (\S\ref{sec:boutique-good-vs-bad}, panel~B) is wildly
+mis-scaled, or the heatmap argmax is pinned to the boundary, or
+the signal in the band is just a single tall spike.\\
+\textit{Fix:} select the row and click the trash icon.
+Common at the very start and very end of recordings.
+
+\paragraph{Pattern C --- Two rides merged.}
+\textit{Symptom:} a single shaded band is much longer than a normal
+ride, with a quiet stretch in the middle and the trapezoid lobes
+fitted across the whole window
+(Figure~\ref{fig:bq-trap-bad-merged}).\\
+\textit{Fix:} \emph{Edit selected}, clip the end down to just past
+the first lobe pair. Then \emph{$+$~Add segment} for the second
+event and edit its bounds.
+
+\paragraph{Pattern D --- Endpoints off by 1--2\,s.}
+\textit{Symptom:} the orange band sits across the right ride but
+the start or end is a second too early/late.\\
+\textit{Fix:} \emph{Edit selected} and shift the bound. The
+trapezoid overlay updates instantly, so you can see the effect.
+This is harmless for predictions but worth fixing if you intend
+to use the segment list downstream.
+
+\paragraph{When in doubt, leave it alone.} The detector is
+calibrated to be conservative on false positives at the cost of
+occasional misses. Over-editing on borderline segments is the
+most common mistake. If you cannot \emph{clearly} see a missed
+ride or a false positive, accept the detector's output as-is and
+move on.
+
+\subsection{Step 4 cheat-sheet: do the two algorithms agree?}
+\label{sec:boutique-step4-cheat}
+
+The prediction step runs the Trapezoid pulse-pair algorithm
+(blue bars) and ZUPT (green bars) over your final segment list.
+Both should give similar $\Delta h$ on a clean recording.
+
+\begin{figure}[H]
+\centering
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{boutique/crops/clean_step4_metrics.png}
+\par\smallskip
+\textbf{\textcolor{green!50!black}{GOOD.}} Bars at every segment
+have nearly identical heights for the two algorithms. The largest
+ride (\#8, $\Delta h \approx +22$\,m) lines up. Confidence in the
+report is high.
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{boutique/haari_step4_overview.png}
+\par\smallskip
+\textbf{\textcolor{red!70!black}{INVESTIGATE.}} Several segments
+show large blue/green disagreement. Each disagreement $>1.5$\,m
+is a hint that the segment is noisy or has wrong endpoints
+(\S\ref{sec:boutique-fixing}). Go back to step~3, fix that
+segment, predict again.
+\end{minipage}
+\caption{\textbf{Step~4 bar chart.} Trapezoid (blue) and ZUPT
+(green) side by side. Agreement is the eyeball check; the
+detailed numbers (CI, quality, accept/reject) live below the
+chart and in the wide table.}
+\label{fig:bq-step4-cleanvshaari}
+\end{figure}
+
+\paragraph{Per-segment details.} Click any segment to see four
+numbers per algorithm:
+
+\begin{itemize}
+  \item $\Delta h$ --- signed height (m).
+  \item $\pm$CI 90\,\% --- half-width of the 90\,\% confidence
+    interval. Smaller is better; below 1.5\,m is the design
+    target on short rides.
+  \item Quality --- a unitless score; higher is better.
+  \item Accepted --- yes/no. A "no" is paired with a
+    \texttt{reject\_reason} caption.
+\end{itemize}
+
+If a segment is rejected (Accepted: no), the report still includes
+it but flags the row. \texttt{r2\_below\_thr} means the joint $R^2$
+of the trapezoid fit was too low; \texttt{score\_above\_quantile}
+means the per-segment $\sigma$ score was in the calibration
+distribution's top tail. In both cases the headline number is
+shown, but treat it as low-confidence.
+
+\subsection{What you ship: the Hebrew PDF report}
+\label{sec:boutique-report}
+
+Step~5 produces a multi-page A4 PDF in Hebrew. One cover page
+(metadata, summary, overview plot, per-segment table) and one page
+per ride (header with $\Delta h$ / CI / quality / accept-flag,
+trapezoid-overlay plot, $\pm 30$\,s correlation window). The very
+last page is a Hebrew explainer of the metrics so the recipient
+can read it without reading this guide. Filename:
+\texttt{boutique\_report\_YYYYMMDDTHHMMSSZ.pdf}.
+
+% =====================================================================
+% Advanced section --- everything below this line is optional.
+% =====================================================================
+
+\subsection{Advanced --- only if you need to dig deeper}
+\label{sec:boutique-advanced}
+
+This subsection collects diagnostics, parameter readings, and
+edge-case advice that the casual user can safely skip. It is here
+for the operator who wants to sanity-check a borderline segment
+before keeping or deleting it.
+
+\subsubsection{The trapezoid parameter card}
+\label{sec:boutique-paramcard}
+
+Below the trapezoid overlay, three side-by-side cards report the
+fit numerically.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{boutique/panels/clean_step3_overview__params.png}
+\caption{\textbf{Parameter card.} Lobe~1 (take-off) and lobe~2
+(landing) fields ($t_c$ centre time, $A$ signed peak, $W$ half-width,
+$f$ flat fraction, $R^2$ local fit), plus a joint-fit row with the
+shared-shape $W^\star, f^\star$ and the joint $R^2$ / heatmap
+energy. Useful sanity checks: lobe~1 $A > 0$ for an
+\texttt{up} ride (sign-flipped for \texttt{down}); $|A_1|$ and
+$|A_2|$ within $\sim$30\,\%; joint $R^2 > 0.85$ is the regime in
+which the predictor was validated.}
+\label{fig:bq-param-card}
+\end{figure}
+
+\subsubsection{The wide comparison table}
+
+Below the bar chart, the table shows every segment with both
+algorithms' $\Delta h$, CI, quality, and accept/reject side by
+side. The most useful diagnostic is the column-wise difference:
+$\Delta h_{\text{trap}} - \Delta h_{\text{ZUPT}}$. A
+disagreement $>1.5$\,m is almost always a noisy segment or wrong
+endpoints --- exactly the same patterns flagged on step~3.
+
+\subsubsection{Choosing between Trapezoid and ZUPT}
+
+\begin{itemize}
+  \item \textbf{Trapezoid pulse-pair} (the report headline). Fits
+    the seven-segment S-curve velocity profile to the joint
+    two-lobe accelerometer trace. Robust on clean rides; recommended
+    for the PDF report.
+  \item \textbf{ZUPT.} Double-integrates the accelerometer after
+    pinning the start and end velocities to zero. Robust on
+    \emph{very short} rides where the trapezoid model has too few
+    samples to fit; less robust on long rides where integration
+    drift dominates.
+\end{itemize}
+
+The PDF uses the Trapezoid result as the headline number per ride.
+The ZUPT number is shown only on step~4 as a sanity check.
+
+\subsubsection{Noisy recordings: three regimes}
+
+\begin{description}
+  \item[Damped (phone in pocket / bag).] Symptom: signed-$R^2$
+    panel mostly grey; trapezoid amplitude $<0.5$\,m/s$^2$
+    (Figure~\ref{fig:bq-trap-bad-damped}); heatmap argmax pinned
+    to the boundary. Add missed segments by hand if you have an
+    independent ground truth (barometer, video, stopwatch); the
+    predictor's $\sigma$ model widens the CI automatically.
+  \item[Hand-shaky.] Symptom: many orange (unpaired) and purple
+    (NMS-suppressed) dots interleaved with the green ones; bar
+    chart shows one or two suspiciously short ($<$1\,m) "rides"
+    around the real ones. Delete the spurious segments.
+  \item[HVAC / door-slam.] Symptom: the accelerometer trace under
+    a pure HVAC event is flat, but a barometer-induced
+    \texttt{outside} interval can occasionally land near elevator
+    landings. Spot-check segment endpoints.
+\end{description}
+
+\subsubsection{Bulk edits and reset}
+
+The \emph{Spreadsheet editor (advanced)} expander at the bottom of
+the segmentation page lets you edit the segment list as a table,
+useful for ten-plus edits. The \emph{Reset to detector output}
+button below the panels throws away every manual edit and re-runs
+the (deterministic) detector --- the safety net if a hand-edit
+goes wrong.
+
+\subsubsection{Quick checklist before shipping a report}
+
+A six-point eye-check that takes well under a minute and is
+sufficient to clear the report for sending:
+
+\begin{enumerate}
+  \item Every shaded segment on the top plot covers a visible
+    two-lobe shape, with no obvious missed lobes between segments.
+  \item Every selected segment's correlation panel shows a
+    \emph{two-green-dots} pattern.
+  \item Every selected segment's heatmap argmax is interior to
+    the grid (not pinned to a boundary).
+  \item Every selected segment's trapezoid overlay sits visibly
+    on the smoothed signal envelope.
+  \item Both algorithms agree on $\Delta h$ within $\sim$1\,m on
+    each segment, and the trapezoid algorithm marks the segment
+    \emph{accepted}.
+  \item CI half-width below $\sim$1.5\,m on rides shorter than
+    $\sim$10\,s and below $\sim$3\,m on the longest rides.
+\end{enumerate}
+
+When all six pass, the PDF is shippable as-is. When two or more
+fail on a single segment, that segment is the one to investigate
+first; the rest of the report is usually unaffected.
+
+\subsubsection{FAQ}
+
+\paragraph{The detector returned no segments.} Either the recording
+contains no rides, the rides are too short to clear the duration
+floor, or the signal is damped below the amplitude threshold.
+\emph{$+$~Add segment} from the sidebar to insert a manual segment
+and edit its bounds.
+
+\paragraph{Far too many segments.} Hand-shaky / walking recording.
+Sort the bar chart in step~4 by quality score and delete the
+low-scoring candidates.
+
+\paragraph{Algorithms disagree by $>1.5$\,m on a segment.}
+Re-clip the segment endpoints (\S\ref{sec:boutique-fixing},
+Pattern~D) and predict again.
+
+\paragraph{Quality says ``Accepted: no''.} Read the
+\texttt{reject\_reason} caption. Both common reasons
+(\texttt{r2\_below\_thr}, \texttt{score\_above\_quantile}) are
+honest signals --- the value is reported but should be treated as
+low-confidence.
+
+\paragraph{The Download button is greyed out.} You haven't
+finished step~4 yet. Go back, click \emph{Generate report},
+try again.
+
+\paragraph{Can I run the pipeline programmatically?} Yes; the
+underlying \texttt{Segmenter} and \texttt{Predictor} classes
+(\S\ref{sec:segmentation-detection},
+\S\ref{sec:height-prediction}) are imported directly. The
+Streamlit app is a thin presentation layer.

@@ -1,0 +1,364 @@
+"""Public segmentation API.
+
+Three functions:
+
+* :func:`findSegments` — detect every elevator ride in an accelerometer
+  trace and return the rich per-ride trapezoid fits.
+* :func:`findSegmentParameters` — for a single user-marked interval, return
+  a :class:`SegmentParametersResult`: the fitted trapezoid pulse-pair, its
+  parameters, the per-lobe R² heatmaps and the correlation map under
+  ``detail``, plus the detector ``state``.
+* :func:`findSegmentsDetailed` — :func:`findSegments` plus the per-ride
+  detail and the detector's raw ``state``, all from a single pass, wrapped
+  in one :class:`DetailedSegmentsResult`.
+
+All load their (local, fixed) detector configuration internally; the caller
+never passes hyperparameters. Input is always a pandas ``DataFrame`` with
+columns ``timestamp_ms`` (Unix-epoch ms), ``x``, ``y``, ``z`` (raw
+accelerometer, m/s²) — validated on entry against
+:data:`pyramidElevatorDist.schemas.ACC_SCHEMA`; malformed input raises a
+:mod:`pyramidElevatorDist.exceptions` subclass. Results are typed pydantic
+models (:class:`RideSegment`, :class:`SegmentDetail`,
+:class:`DetailedRideSegment`, :class:`DetailedSegmentsResult`,
+:class:`SegmentParametersResult`), never plain dicts.
+"""
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+from pyramidElevatorDist.segmentation.algorithms.accelerometer_only.template_match.check_grid_across_signal import (  # noqa: E501
+    detect as _detect,
+    pair_filter as _pair_filter,
+)
+
+# The API is a thin façade: it only picks the cadence policy (external data →
+# normalize to 50 Hz) and forwards. The Segmenter dispatcher does the detection
+# *and* the input-cadence normalization; the shared core is pure orchestration.
+from pyramidElevatorDist._orchestration import (
+    RESAMPLE_TARGET_HZ,
+    segment as _segment,
+    find_matching_prediction as _find_matching_prediction,
+)
+from pyramidElevatorDist._validation import (
+    check_reconstruct,
+    validate_acc,
+    validate_gyro,
+)
+from pyramidElevatorDist.types.segmentation import (
+    DetailedRideSegment,
+    DetailedSegmentsResult,
+    RideSegment,
+    SegmentDetail,
+    SegmentParametersResult,
+)
+
+__all__ = ["findSegments", "findSegmentParameters", "findSegmentsDetailed"]
+
+
+def findSegments(acc: pd.DataFrame, phone_model: str = "",
+                 resample: bool = True, gyro: pd.DataFrame | None = None,
+                 reconstruct: str = "none") -> list[RideSegment]:
+    """Detect all elevator ride segments in an accelerometer trace.
+
+    Parameters
+    ----------
+    acc:
+        Raw accelerometer samples — columns ``timestamp_ms``, ``x``, ``y``,
+        ``z``. May be at any (even variable) sample rate.
+    phone_model:
+        Optional phone identifier. When given, the detector tightens its
+        amplitude floors using the phone's accelerometer noise σ.
+    resample:
+        When ``True`` (default), the trace is first normalized onto a uniform
+        50 Hz grid (gap-aware, time-correct) before detection — the detector
+        is tuned for that cadence and external data may arrive at any rate.
+        Returned ride coordinates are relative seconds on this grid; pass the
+        same ``acc`` (and the default ``resample``) to ``predictSegment`` so
+        the coordinates line up. Set ``False`` only when ``acc`` is already at
+        the canonical cadence.
+
+    Returns
+    -------
+    list[RideSegment]
+        One typed :class:`RideSegment` per detected ride. Empty list when
+        the trace is too short or no ride is found.
+    """
+    acc = validate_acc(acc, func="findSegments")
+    gyro = validate_gyro(gyro, func="findSegments")
+    reconstruct = check_reconstruct(reconstruct, func="findSegments")
+    predictions, _state, _t0 = _segment(
+        acc, phone_model=phone_model,
+        resample_hz=(RESAMPLE_TARGET_HZ if resample else None),
+        gyro=gyro, reconstruct=reconstruct,
+    )
+    return [RideSegment.model_validate(p) for p in predictions]
+
+
+def _lobe_dict(t_c: float, a_peak: float, W: float, f: float,
+               r2_local: float) -> dict:
+    return {
+        "t_c": float(t_c),
+        "a_peak": float(a_peak),
+        "half_width_s": float(W),
+        "frac_flat": float(f),
+        "r2_local": float(r2_local),
+    }
+
+
+def _fit_fresh(state: dict, t_lo: float, t_hi: float,
+               ride_type: str | None):
+    """Fit the trapezoid pulse-pair inside ``[t_lo, t_hi]`` from scratch.
+
+    Mirrors the editor's manual-fit recipe: find the best +/- peak in the
+    window, then run the shared-shape joint fit. Returns
+    ``(lobe1, lobe2, joint_r2_mean, heatmap_energy, i1, i2)`` or ``None`` if
+    the window lacks a usable +peak and -peak.
+    """
+    t = state["t"]
+    a_smooth = state["a_smooth"]
+    grid_w_s = state["grid_w_s"]
+    grid_f = state["grid_f"]
+
+    pos, neg = _detect._find_extrema_in_window(state, t_lo, t_hi)
+    if ride_type == "up":
+        first, second, s1 = pos, neg, +1.0
+    elif ride_type == "down":
+        first, second, s1 = neg, pos, -1.0
+    else:
+        if pos and neg and pos[0] < neg[0]:
+            first, second, s1 = pos, neg, +1.0
+        else:
+            first, second, s1 = neg, pos, -1.0
+    if first is None or second is None:
+        return None
+    i1, i2 = first[0], second[0]
+    if i1 > i2:                       # enforce chronological order
+        i1, i2, s1 = i2, i1, -s1
+    s2 = -s1
+
+    res = _pair_filter.joint_pair_score(
+        a_smooth, t, i1, i2, s1, s2, grid_w_s, grid_f,
+    )
+    if res is None:
+        return None
+    score, W, f, A_abs, r2_1, r2_2, heatmap_energy = res
+    lobe1 = _lobe_dict(t[i1], s1 * A_abs, W, f, r2_1)
+    lobe2 = _lobe_dict(t[i2], s2 * A_abs, W, f, r2_2)
+    return lobe1, lobe2, float(score), float(heatmap_energy), i1, i2
+
+
+def _detail_from_state(
+    state: dict, t_lo: float, t_hi: float, ride_type: str | None,
+    predictions: list[dict] | None = None,
+    force_fresh_fit: bool = False,
+) -> dict | None:
+    """Build one segment's detail (lobes, heatmaps, correlation) from an
+    already-computed detector ``state`` + a ``[t_lo, t_hi]`` window.
+
+    Split out of :func:`findSegmentParameters` so a single detector pass can
+    serve many windows (see :func:`findSegmentsDetailed`). Pass ``predictions``
+    precomputed to avoid re-running ``predict_pairs`` on every call.
+    Internal — returns the raw dict; the public wrappers convert it to
+    :class:`SegmentDetail` at the boundary.
+
+    ``force_fresh_fit`` treats ``[t_lo, t_hi]`` as caller-stated ground truth:
+    ``predict_pairs`` is skipped entirely (so no detected ride can be snapped
+    to) and the returned ``t_start_s`` / ``t_end_s`` are the window verbatim.
+    """
+    t_arr = np.asarray(state["t"])
+    if t_arr.size == 0:
+        return None
+    grid_w_s = state["grid_w_s"]
+    grid_f = state["grid_f"]
+    a_smooth = state["a_smooth"]
+
+    if force_fresh_fit:
+        # Caller stated the exact ride bounds. Skip pairing outright rather
+        # than fitting and discarding: nothing downstream of predict_pairs may
+        # influence a window the caller already knows the answer for.
+        matching = None
+    else:
+        if predictions is None:
+            predictions = _pair_filter.predict_pairs(state, state["config"])
+        matching = _find_matching_prediction(predictions, t_lo, t_hi)
+
+    if matching is not None:
+        lobe1 = dict(matching["lobe1"])
+        lobe2 = dict(matching["lobe2"])
+        joint_r2_mean = float(matching.get("joint_r2_mean", float("nan")))
+        heatmap_energy = float(matching.get("heatmap_energy", float("nan")))
+        rt = str(matching.get("ride_type", ride_type or "up"))
+        # Reuse the detector's own emitted interval verbatim rather than
+        # re-deriving it, so a ride and its detail can never drift apart.
+        t_start = float(matching["t_start_s"])
+        t_end = float(matching["t_end_s"])
+    else:
+        fit = _fit_fresh(state, t_lo, t_hi, ride_type)
+        if fit is None:
+            return None
+        lobe1, lobe2, joint_r2_mean, heatmap_energy, _i1, _i2 = fit
+        if ride_type is not None:
+            rt = ride_type
+        else:
+            rt = "up" if lobe1["a_peak"] > 0 else "down"
+        if force_fresh_fit:
+            # Ground-truth bounds: hand them back untouched. This deliberately
+            # forgoes the ε padding below — widening a stated interval is
+            # exactly the override this flag exists to prevent, at the cost of
+            # the tail room the downstream Δh estimators would otherwise get.
+            t_start, t_end = float(t_lo), float(t_hi)
+        else:
+            # Fresh fit: apply the same ε segment-padding
+            # pair_filter.predict_pairs does, so a hand-marked window is
+            # described on the detector's terms — the downstream Δh estimators
+            # re-fit / double-integrate inside the interval they are handed and
+            # clip the pulse tails without it.
+            eps = float(getattr(state.get("config"), "segment_pad_eps_s", 0.0))
+            t_start = float(lobe1["t_c"]) - float(lobe1["half_width_s"]) - eps
+            t_end = float(lobe2["t_c"]) + float(lobe2["half_width_s"]) + eps
+
+    i1 = int(np.clip(np.argmin(np.abs(t_arr - lobe1["t_c"])), 0, t_arr.size - 1))
+    i2 = int(np.clip(np.argmin(np.abs(t_arr - lobe2["t_c"])), 0, t_arr.size - 1))
+    heat1 = _detect.heatmap_at(a_smooth, state["t"], i1, grid_w_s, grid_f)
+    heat2 = _detect.heatmap_at(a_smooth, state["t"], i2, grid_w_s, grid_f)
+
+    return {
+        "ride_type": rt,
+        "t_start_s": t_start,
+        "t_end_s": t_end,
+        "lobe1": lobe1,
+        "lobe2": lobe2,
+        "joint_r2_mean": joint_r2_mean,
+        "heatmap_energy": heatmap_energy,
+        "heatmaps": {
+            "lobe1": heat1,
+            "lobe2": heat2,
+            "grid_w_s": np.asarray(grid_w_s),
+            "grid_f": np.asarray(grid_f),
+        },
+        "correlation": {
+            "t": t_arr,
+            "best_pos_r2": np.asarray(state["best_pos_r2"]),
+            "best_neg_r2": np.asarray(state["best_neg_r2"]),
+        },
+    }
+
+
+def findSegmentParameters(
+    acc: pd.DataFrame,
+    start_s: float,
+    end_s: float,
+    ride_type: str | None = None,
+    phone_model: str = "",
+    resample: bool = True,
+    gyro: pd.DataFrame | None = None,
+    reconstruct: str = "none",
+    force_fresh_fit: bool = False,
+) -> SegmentParametersResult | None:
+    """Fit the trapezoid pulse-pair + heatmaps for a marked interval.
+
+    Use this for manual segment editing: the user marks ``[start_s, end_s]``
+    (relative seconds on ``acc``'s own time axis) and gets back the trapezoid
+    found inside, its parameters, and the visual diagnostics.
+
+    ``resample`` (default ``True``) first normalizes ``acc`` onto the uniform
+    50 Hz grid, matching ``findSegments``; ``start_s`` / ``end_s`` are
+    interpreted on that grid. Set ``False`` only when ``acc`` is already at the
+    canonical cadence.
+
+    If the detector already proposed a ride overlapping the interval, that
+    ride's lobe parameters are returned (identical to what the editor shows).
+    Otherwise the trapezoid is fitted fresh inside the window.
+
+    ``force_fresh_fit`` (default ``False``) suppresses that reuse: the pairing
+    stage is skipped and the trapezoid is always fitted fresh inside
+    ``[start_s, end_s]``. Use it when the caller already knows the ride's exact
+    times — ``t_start_s`` / ``t_end_s`` then come back as the values passed in,
+    rather than the detector's interval or the lobe-derived bounds. Note this
+    forgoes the ε tail padding the default path applies, so a window marked
+    tight to the ride body may clip the pulse tails the downstream Δh
+    estimators integrate over. The lobes, R², heatmaps and correlation curves
+    are computed exactly as on the default path. The whole-trace template sweep
+    still runs — it is what the heatmaps and correlation curves are built from.
+
+    Returns ``None`` when the trace itself is unusable (the detector could
+    not build a state at all). Otherwise a :class:`SegmentParametersResult`
+    carrying ``detail`` — the typed :class:`SegmentDetail`, or ``None`` when
+    the window held no usable +peak / -peak pair — plus the detector
+    ``state``.
+    """
+    acc = validate_acc(acc, func="findSegmentParameters")
+    gyro = validate_gyro(gyro, func="findSegmentParameters")
+    reconstruct = check_reconstruct(reconstruct, func="findSegmentParameters")
+    # Detection (with its state) runs through the shared core / Segmenter
+    # dispatcher, which also owns the optional resample + reconstruction.
+    _preds, state, _t0 = _segment(
+        acc, phone_model=phone_model, include_state=True,
+        resample_hz=(RESAMPLE_TARGET_HZ if resample else None),
+        gyro=gyro, reconstruct=reconstruct,
+    )
+    if not state:
+        return None
+    detail = _detail_from_state(
+        state, float(start_s), float(end_s), ride_type,
+        force_fresh_fit=bool(force_fresh_fit),
+    )
+    return SegmentParametersResult.model_validate({
+        "detail": (SegmentDetail.model_validate(detail)
+                   if detail is not None else None),
+        "state": state,
+    })
+
+
+def findSegmentsDetailed(
+    acc: pd.DataFrame,
+    phone_model: str = "",
+    resample: bool = True,
+    gyro: pd.DataFrame | None = None,
+    reconstruct: str = "none",
+) -> DetailedSegmentsResult:
+    """Like :func:`findSegments`, but every ride also carries its ``detail``
+    — the full :func:`findSegmentParameters` result (lobes, heatmaps,
+    correlation) — and the result also hands back the detector's raw
+    ``state``, all from a SINGLE detector pass.
+
+    This lets an interactive UI precompute every ride's detail once at load
+    instead of re-running the detector on each click (the stateless
+    per-segment call repeats the whole matched-filter pass every time).
+    ``detail`` is ``None`` for the rare ride whose window yields no usable
+    +/- pair.
+
+    ``result.state`` is the detector's working dict (``t``, ``a_smooth``, the
+    ``best_pos_r2`` / ``best_neg_r2`` correlation curves, the ``(W, f)``
+    grids, the live ``DetectConfig``, ``t0_ms``). It holds numpy arrays and a
+    config object, so the result is not JSON-serializable — consume it
+    in-process.
+    """
+    acc = validate_acc(acc, func="findSegmentsDetailed")
+    gyro = validate_gyro(gyro, func="findSegmentsDetailed")
+    reconstruct = check_reconstruct(reconstruct, func="findSegmentsDetailed")
+    preds, state, _t0 = _segment(
+        acc, phone_model=phone_model, include_state=True,
+        resample_hz=(RESAMPLE_TARGET_HZ if resample else None),
+        gyro=gyro, reconstruct=reconstruct,
+    )
+    predictions = (
+        _pair_filter.predict_pairs(state, state["config"]) if state else []
+    )
+    segments: list[DetailedRideSegment] = []
+    for p in preds:
+        detail = (
+            _detail_from_state(
+                state, float(p["t_start_s"]), float(p["t_end_s"]),
+                str(p.get("ride_type")), predictions=predictions,
+            )
+            if state else None
+        )
+        segments.append(
+            DetailedRideSegment.model_validate({**p, "detail": detail}),
+        )
+    return DetailedSegmentsResult.model_validate({
+        "segments": segments,
+        "state": state or {},
+    })

@@ -1,0 +1,422 @@
+"""Typed segmentation results on synthetic rides: detection, parameter
+recovery, behavior pins, and model structure."""
+from __future__ import annotations
+
+import json
+
+import numpy as np
+import pydantic
+import pytest
+
+import pyramidElevatorDist as P
+
+from .conftest import RIDE, make_ride_acc, nan_equal
+
+
+def _matching_segment(segs, t_lo, t_hi):
+    """The detected segment overlapping [t_lo, t_hi]."""
+    for s in segs:
+        if s.t_start_s <= t_hi and s.t_end_s >= t_lo:
+            return s
+    raise AssertionError(
+        f"no segment overlaps [{t_lo}, {t_hi}]; got "
+        f"{[(s.t_start_s, s.t_end_s) for s in segs]}"
+    )
+
+
+def test_finds_synthetic_up_ride(ride_acc):
+    segs = P.findSegments(ride_acc)
+    assert len(segs) >= 1
+    assert all(isinstance(s, P.RideSegment) for s in segs)
+    s = _matching_segment(segs, RIDE["t_c1"] - RIDE["W"],
+                          RIDE["t_c2"] + RIDE["W"])
+    assert s.ride_type == "up"
+    assert abs(s.t_start_s - (RIDE["t_c1"] - RIDE["W"])) < 1.0
+    assert abs(s.t_end_s - (RIDE["t_c2"] + RIDE["W"])) < 1.0
+    assert s.duration_s == pytest.approx(s.t_end_s - s.t_start_s)
+    assert s.lobe1.a_peak > 0 > s.lobe2.a_peak
+    assert s.lobe1.half_width_s == s.lobe2.half_width_s
+    assert 0.9 <= s.joint_r2_mean <= 1.0
+
+
+def test_finds_down_ride_mirrored():
+    acc = make_ride_acc(direction="down")
+    segs = P.findSegments(acc)
+    s = _matching_segment(segs, RIDE["t_c1"] - RIDE["W"],
+                          RIDE["t_c2"] + RIDE["W"])
+    assert s.ride_type == "down"
+    assert s.lobe1.a_peak < 0 < s.lobe2.a_peak
+
+
+def test_short_trace_returns_empty_list(quiet_acc):
+    """No ride → empty list, no exception (behavior pin)."""
+    assert P.findSegments(quiet_acc) == []
+
+
+def test_segment_parameters_happy_path(ride_acc):
+    res = P.findSegmentParameters(
+        ride_acc, RIDE["t_c1"] - 2.0, RIDE["t_c2"] + 2.0)
+    assert isinstance(res, P.SegmentParametersResult)
+    det = res.detail
+    assert isinstance(det, P.SegmentDetail)
+    assert det.heatmaps.lobe1.shape == (det.heatmaps.grid_w_s.size,
+                                        det.heatmaps.grid_f.size)
+    assert det.correlation.t.size == det.correlation.best_pos_r2.size
+    # Parameter recovery ≈ synthesis (within a grid step / noise).
+    assert det.lobe1.half_width_s == pytest.approx(RIDE["W"], abs=0.4)
+    assert abs(det.lobe1.a_peak) == pytest.approx(RIDE["A"], abs=0.3)
+
+
+def test_segment_parameters_quiet_window_none_or_detail(quiet_acc):
+    """A quiet window either fits fresh or yields detail=None — never raises
+    (behavior pin)."""
+    res = P.findSegmentParameters(quiet_acc, 5.0, 10.0)
+    assert res is None or isinstance(res, P.SegmentParametersResult)
+    if res is not None:
+        assert res.detail is None or isinstance(res.detail, P.SegmentDetail)
+
+
+def test_detailed_matches_parameters(ride_acc):
+    """Each ride's precomputed ``detail`` equals the single-window fit."""
+    detailed = P.findSegmentsDetailed(ride_acc)
+    assert len(detailed.segments) >= 1
+    for d in detailed.segments:
+        assert isinstance(d, P.DetailedRideSegment)
+        if d.detail is None:
+            continue
+        res = P.findSegmentParameters(
+            ride_acc, d.t_start_s, d.t_end_s, ride_type=d.ride_type)
+        assert res is not None and res.detail is not None
+        assert nan_equal(d.detail.model_dump(), res.detail.model_dump())
+
+
+def test_model_roundtrip_and_json(ride_acc):
+    segs = P.findSegments(ride_acc)
+    s = segs[0]
+    assert P.RideSegment.model_validate(s.model_dump()).model_dump() \
+        == s.model_dump()
+
+    detail = P.findSegmentParameters(
+        ride_acc, RIDE["t_c1"] - 2.0, RIDE["t_c2"] + 2.0).detail
+    payload = detail.model_dump(mode="json")
+    json.dumps(payload)  # ndarrays serialized to lists
+
+    with pytest.raises(pydantic.ValidationError):
+        P.RideSegment.model_validate({**s.model_dump(), "unknown_key": 1})
+
+
+# --------------------------------------------------------------------------
+# ε segment-padding — every segmentation entry point must describe a ride
+# the same way. The pad exists so the Δh estimators (which re-fit / double-
+# integrate inside the window they are given) see the full acceleration
+# tails; an entry point that drops it silently hands callers a shorter ride.
+# --------------------------------------------------------------------------
+
+def _segment_pad_eps_s() -> float:
+    """The live ε from the packaged detector config (not a hard-coded 0.25,
+    so the invariant survives a retune)."""
+    from pyramidElevatorDist.segmentation.algorithms.configTypes import (
+        SEGMENT_ALGORITHM_CONFIG, SegmentAlgorithm, TemplateMatchConfig,
+    )
+    params = SEGMENT_ALGORITHM_CONFIG(
+        algorithm=SegmentAlgorithm.ACC_TEMPLATE_MATCH,
+    ).load_params()
+    return float(TemplateMatchConfig(**params).segment_pad_eps_s)
+
+
+def _assert_eps_padded(view, eps: float) -> None:
+    """``[t_c1 - W - ε, t_c2 + W + ε]`` — the detector's emitted interval."""
+    assert view.t_start_s == pytest.approx(
+        view.lobe1.t_c - view.lobe1.half_width_s - eps)
+    assert view.t_end_s == pytest.approx(
+        view.lobe2.t_c + view.lobe2.half_width_s + eps)
+
+
+def test_find_segments_bounds_carry_the_eps_pad(ride_acc):
+    """Reference behavior pin: findSegments is the padded one."""
+    eps = _segment_pad_eps_s()
+    assert eps > 0.0, "fixture assumes a non-zero pad"
+    for s in P.findSegments(ride_acc):
+        _assert_eps_padded(s, eps)
+
+
+def test_detail_bounds_match_their_own_ride(ride_acc):
+    """``DetailedRideSegment.detail`` must not disagree with its own ride."""
+    for d in P.findSegmentsDetailed(ride_acc).segments:
+        assert d.detail is not None
+        assert d.detail.t_start_s == pytest.approx(d.t_start_s)
+        assert d.detail.t_end_s == pytest.approx(d.t_end_s)
+
+
+def test_segment_parameters_returns_the_detected_ride_bounds(ride_acc):
+    """Asking for a detected ride's own window returns that ride's bounds."""
+    seg = P.findSegments(ride_acc)[0]
+    det = P.findSegmentParameters(
+        ride_acc, seg.t_start_s, seg.t_end_s, ride_type=seg.ride_type).detail
+    assert det is not None
+    assert det.t_start_s == pytest.approx(seg.t_start_s)
+    assert det.t_end_s == pytest.approx(seg.t_end_s)
+
+
+def test_every_entry_point_describes_the_ride_identically(ride_acc):
+    """findSegments / .segments / .segments[i].detail / findSegmentParameters
+    are four views of one ride — they must agree on all of it."""
+    plain = P.findSegments(ride_acc)
+    detailed = P.findSegmentsDetailed(ride_acc).segments
+    assert len(plain) == len(detailed) >= 1
+    for p, d in zip(plain, detailed):
+        params = P.findSegmentParameters(
+            ride_acc, p.t_start_s, p.t_end_s, ride_type=p.ride_type).detail
+        assert params is not None
+        assert d.detail is not None
+        for view in (d, d.detail, params):
+            assert view.ride_type == p.ride_type
+            assert view.t_start_s == pytest.approx(p.t_start_s)
+            assert view.t_end_s == pytest.approx(p.t_end_s)
+            assert nan_equal(view.lobe1.model_dump(), p.lobe1.model_dump())
+            assert nan_equal(view.lobe2.model_dump(), p.lobe2.model_dump())
+            assert view.joint_r2_mean == pytest.approx(p.joint_r2_mean)
+            assert view.heatmap_energy == pytest.approx(p.heatmap_energy)
+
+
+def test_fresh_fit_window_is_eps_padded_too(subthreshold_ride_acc):
+    """The ``_fit_fresh`` branch — a window the detector proposed no ride for
+    — pads the same way, so a hand-marked interval and a detected one are
+    described on the same terms."""
+    eps = _segment_pad_eps_s()
+    segs = P.findSegments(subthreshold_ride_acc)
+    assert not any(s.t_start_s <= 70.0 and s.t_end_s >= 50.0 for s in segs), \
+        "fixture must leave [50, 70] s undetected to reach the fresh-fit branch"
+    det = P.findSegmentParameters(
+        subthreshold_ride_acc, 50.0, 70.0, "up").detail
+    assert det is not None
+    _assert_eps_padded(det, eps)
+
+
+# --------------------------------------------------------------------------
+# Result wrappers — findSegmentsDetailed / findSegmentParameters return a
+# single result object carrying the detector ``state`` alongside the rides.
+# --------------------------------------------------------------------------
+
+_STATE_KEYS = {"t", "a_smooth", "best_pos_r2", "best_neg_r2",
+               "grid_w_s", "grid_f", "config", "t0_ms"}
+
+
+def test_detailed_ride_segment_is_exported():
+    """The per-ride detail model is the element type of the wrapper."""
+    assert "DetailedRideSegment" in P.__all__
+    assert issubclass(P.DetailedRideSegment, P.RideSegment)
+    assert "detail" in P.DetailedRideSegment.model_fields
+
+
+def test_find_segments_detailed_returns_result_wrapper(ride_acc):
+    res = P.findSegmentsDetailed(ride_acc)
+    assert isinstance(res, P.DetailedSegmentsResult)
+    assert isinstance(res.segments, list)
+    assert len(res.segments) >= 1
+    assert all(isinstance(s, P.DetailedRideSegment) for s in res.segments)
+    assert isinstance(res.state, dict)
+    assert _STATE_KEYS <= set(res.state)
+
+
+def test_detailed_segments_match_find_segments(ride_acc):
+    """The wrapper's rides carry exactly the findSegments fields, plus
+    ``detail``."""
+    plain = P.findSegments(ride_acc)
+    wrapped = P.findSegmentsDetailed(ride_acc).segments
+    assert len(plain) == len(wrapped)
+    for a, b in zip(plain, wrapped):
+        shared = {k: v for k, v in b.model_dump().items() if k != "detail"}
+        assert nan_equal(a.model_dump(), shared)
+
+
+def test_find_segment_parameters_returns_result_wrapper(ride_acc):
+    """findSegmentParameters returns the wrapper: .detail + .state."""
+    seg = P.findSegments(ride_acc)[0]
+    res = P.findSegmentParameters(
+        ride_acc, seg.t_start_s, seg.t_end_s, ride_type=seg.ride_type)
+    assert isinstance(res, P.SegmentParametersResult)
+    assert isinstance(res.detail, P.SegmentDetail)
+    assert isinstance(res.state, dict)
+    assert _STATE_KEYS <= set(res.state)
+
+
+def test_segment_parameters_result_field_names():
+    """Singular ``detail``, not ``details``."""
+    assert "SegmentParametersResult" in P.__all__
+    assert set(P.SegmentParametersResult.model_fields) == {"detail", "state"}
+
+
+def test_result_wrappers_forbid_extra_keys():
+    with pytest.raises(pydantic.ValidationError):
+        P.DetailedSegmentsResult.model_validate(
+            {"segments": [], "state": {}, "nope": 1})
+    with pytest.raises(pydantic.ValidationError):
+        P.SegmentParametersResult.model_validate(
+            {"details": None, "state": {}, "nope": 1})
+
+
+# --------------------------------------------------------------------------
+# force_fresh_fit — the caller states the ride's exact times, so the pairing
+# stage is skipped and the bounds come back verbatim. Opt-in: the default
+# stays byte-identical to the historical behaviour pinned above.
+# --------------------------------------------------------------------------
+
+def test_force_fresh_fit_defaults_to_false_and_is_appended_last():
+    """Existing positional callers must keep working — the new parameter goes
+    after every parameter that shipped before it."""
+    import inspect
+    params = list(inspect.signature(P.findSegmentParameters).parameters)
+    assert params == [
+        "acc", "start_s", "end_s", "ride_type", "phone_model",
+        "resample", "gyro", "reconstruct", "force_fresh_fit",
+    ]
+    assert inspect.signature(
+        P.findSegmentParameters).parameters["force_fresh_fit"].default is False
+
+
+def test_force_fresh_fit_off_is_identical_to_omitting_it(ride_acc):
+    """The default path is untouched (behavior pin for existing users)."""
+    seg = P.findSegments(ride_acc)[0]
+    a = P.findSegmentParameters(ride_acc, seg.t_start_s, seg.t_end_s)
+    b = P.findSegmentParameters(ride_acc, seg.t_start_s, seg.t_end_s,
+                                force_fresh_fit=False)
+    assert nan_equal(a.detail.model_dump(), b.detail.model_dump())
+
+
+def test_force_fresh_fit_returns_the_caller_bounds_verbatim(ride_acc):
+    t_lo, t_hi = RIDE["t_c1"] - 2.0, RIDE["t_c2"] + 2.0
+    det = P.findSegmentParameters(
+        ride_acc, t_lo, t_hi, force_fresh_fit=True).detail
+    assert det is not None
+    assert det.t_start_s == pytest.approx(t_lo)
+    assert det.t_end_s == pytest.approx(t_hi)
+
+
+def test_force_fresh_fit_ignores_an_overlapping_detected_ride(ride_acc):
+    """The window overlaps a detected ride, so the default path snaps to that
+    ride's bounds; forcing keeps the caller's."""
+    seg = P.findSegments(ride_acc)[0]
+    t_lo, t_hi = seg.t_start_s + 0.5, seg.t_end_s - 0.5
+
+    snapped = P.findSegmentParameters(ride_acc, t_lo, t_hi).detail
+    assert snapped.t_start_s == pytest.approx(seg.t_start_s)
+    assert snapped.t_end_s == pytest.approx(seg.t_end_s)
+
+    forced = P.findSegmentParameters(
+        ride_acc, t_lo, t_hi, force_fresh_fit=True).detail
+    assert forced.t_start_s == pytest.approx(t_lo)
+    assert forced.t_end_s == pytest.approx(t_hi)
+
+
+def test_force_fresh_fit_drops_the_eps_pad(subthreshold_ride_acc):
+    """Same undetected window as the fresh-fit pad pin: padded by default,
+    verbatim when forced."""
+    eps = _segment_pad_eps_s()
+    padded = P.findSegmentParameters(
+        subthreshold_ride_acc, 50.0, 70.0, "up").detail
+    _assert_eps_padded(padded, eps)
+
+    forced = P.findSegmentParameters(
+        subthreshold_ride_acc, 50.0, 70.0, "up", force_fresh_fit=True).detail
+    assert forced is not None
+    assert forced.t_start_s == pytest.approx(50.0)
+    assert forced.t_end_s == pytest.approx(70.0)
+
+
+def test_force_fresh_fit_still_fits_real_lobes_and_heatmaps(ride_acc):
+    """Only the bounds are the caller's — the diagnostics are genuine fits."""
+    det = P.findSegmentParameters(
+        ride_acc, RIDE["t_c1"] - 2.0, RIDE["t_c2"] + 2.0,
+        force_fresh_fit=True).detail
+    assert det is not None
+    assert det.lobe1.t_c == pytest.approx(RIDE["t_c1"], abs=0.5)
+    assert det.lobe2.t_c == pytest.approx(RIDE["t_c2"], abs=0.5)
+    assert det.lobe1.a_peak > 0 > det.lobe2.a_peak
+    assert 0.9 <= det.joint_r2_mean <= 1.0
+    assert det.heatmaps.lobe1.shape == (det.heatmaps.grid_w_s.size,
+                                        det.heatmaps.grid_f.size)
+    assert det.correlation.t.size == det.correlation.best_pos_r2.size
+
+
+def test_force_fresh_fit_output_structure_is_unchanged(ride_acc):
+    """Same wrapper, same fields — no schema change for existing consumers."""
+    res = P.findSegmentParameters(
+        ride_acc, RIDE["t_c1"] - 2.0, RIDE["t_c2"] + 2.0,
+        force_fresh_fit=True)
+    assert isinstance(res, P.SegmentParametersResult)
+    assert set(res.model_dump()) == {"detail", "state"}
+    assert isinstance(res.detail, P.SegmentDetail)
+    assert _STATE_KEYS <= set(res.state)
+
+
+def test_force_fresh_fit_unfittable_window_returns_detail_none(quiet_acc):
+    """No usable +/- pair → detail is None, never an exception; when a fit
+    does happen the bounds are still the caller's (behavior pin)."""
+    res = P.findSegmentParameters(quiet_acc, 5.0, 10.0, force_fresh_fit=True)
+    assert res is None or isinstance(res, P.SegmentParametersResult)
+    if res is not None and res.detail is not None:
+        assert res.detail.t_start_s == pytest.approx(5.0)
+        assert res.detail.t_end_s == pytest.approx(10.0)
+
+
+# The window is not just echoed back as the bounds — it is the search region
+# the lobes are fitted in. subthreshold_ride_acc carries a STRONG ride
+# (A=1.0 at 20/32 s) and a WEAK pair (A=0.25 at 55/65 s), so a fit that
+# ignored the window would always return the strong one; asking for the weak
+# window and getting the weak pair is what proves the constraint.
+
+def test_force_fresh_fit_fits_inside_the_given_window(subthreshold_ride_acc):
+    det = P.findSegmentParameters(
+        subthreshold_ride_acc, 50.0, 70.0, force_fresh_fit=True).detail
+    assert det is not None
+    assert det.lobe1.t_c == pytest.approx(55.0, abs=0.6)
+    assert det.lobe2.t_c == pytest.approx(65.0, abs=0.6)
+    # The weak pair's amplitude, not the strong ride's — the window, not the
+    # trace, decided which peaks were eligible.
+    assert abs(det.lobe1.a_peak) < 0.4
+    for t_c in (det.lobe1.t_c, det.lobe2.t_c):
+        assert not (18.0 <= t_c <= 34.0), \
+            "fitted the strong ride: the window did not constrain the search"
+
+
+def test_force_fresh_fit_different_windows_give_different_fits(
+        subthreshold_ride_acc):
+    """Same trace, same flag, two windows — the fit follows the window."""
+    strong = P.findSegmentParameters(
+        subthreshold_ride_acc, 10.0, 40.0, force_fresh_fit=True).detail
+    weak = P.findSegmentParameters(
+        subthreshold_ride_acc, 50.0, 70.0, force_fresh_fit=True).detail
+    assert strong.lobe1.t_c == pytest.approx(20.0, abs=0.6)
+    assert weak.lobe1.t_c == pytest.approx(55.0, abs=0.6)
+    assert abs(strong.lobe1.a_peak) > abs(weak.lobe1.a_peak)
+
+
+@pytest.mark.parametrize("t_lo,t_hi", [
+    (10.0, 40.0),   # the strong ride alone
+    (50.0, 70.0),   # the weak pair alone
+    (15.0, 75.0),   # both — the strong one wins on amplitude
+    (30.0, 70.0),   # straddles the strong ride's second lobe
+])
+def test_force_fresh_fit_lobes_never_leave_the_window(
+        subthreshold_ride_acc, t_lo, t_hi):
+    """Structural invariant: both lobe centres lie inside the caller's window,
+    so the reported bounds can never contradict the fit they describe."""
+    det = P.findSegmentParameters(
+        subthreshold_ride_acc, t_lo, t_hi, force_fresh_fit=True).detail
+    assert det is not None
+    assert t_lo <= det.lobe1.t_c <= t_hi
+    assert t_lo <= det.lobe2.t_c <= t_hi
+    assert det.t_start_s == pytest.approx(t_lo)
+    assert det.t_end_s == pytest.approx(t_hi)
+
+
+def test_force_fresh_fit_bad_window_is_flagged_by_r2_not_an_exception(
+        subthreshold_ride_acc):
+    """A window that slices a ride in half still returns a fit — the flag
+    trusts the caller's times. joint_r2_mean is the only signal that the
+    window was wrong, so callers must check it."""
+    det = P.findSegmentParameters(
+        subthreshold_ride_acc, 30.0, 70.0, force_fresh_fit=True).detail
+    assert det is not None
+    assert det.joint_r2_mean < 0.5

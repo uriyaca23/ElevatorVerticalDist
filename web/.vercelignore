@@ -1,0 +1,9 @@
+# Never upload local secrets or build output.
+.env*
+!.env.example
+node_modules
+.next
+# Not needed to build the site.
+tests
+scripts
+supabase
